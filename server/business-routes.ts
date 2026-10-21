@@ -1,5 +1,5 @@
 import express from 'express'
-import type { Request, Express } from 'express'
+import type { Request, Express, RequestHandler } from 'express'
 import multer from 'multer'
 import path from 'node:path'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
@@ -9,7 +9,8 @@ import { DoveService, compareReports } from './dove.js'
 import { createBackup, restoreBackup } from './backup.js'
 import { LocalStore } from './store.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
-import type { Actor, BusinessRecord, Controller, Fields, RecordKind, ReportData } from '../shared/business.js'
+import { DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
+import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData } from '../shared/business.js'
 
 type Config = { sharedPath: string; teamId: string }
 type Context = { actor: Actor; identity: Identity; configuration: Config; online: boolean }
@@ -84,7 +85,13 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     if (typeof req.body.token !== 'string' || !req.body.choices || typeof req.body.choices !== 'object') throw new AppError('INVALID_INPUT')
     res.json(await synchronization.resolve(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id), req.body.token, req.body.choices, reason(req.body.reason)))
   })
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 4 } })
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: DOVE_MAX_FILE_BYTES, files: 1, fields: 4 } })
+  const batchUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: DOVE_MAX_FILE_BYTES, files: DOVE_BATCH_LIMIT, fields: 4 } }).array('files', DOVE_BATCH_LIMIT)
+  const batchFiles: RequestHandler = (req, res, next) => batchUpload(req, res, error => {
+    if (error instanceof multer.MulterError && (error.code === 'LIMIT_FILE_COUNT' || (error.code === 'LIMIT_UNEXPECTED_FILE' && error.field === 'files'))) return next(new AppError('DOVE_BATCH_LIMIT'))
+    if (error instanceof multer.MulterError && error.code !== 'LIMIT_FILE_SIZE') return next(new AppError('INVALID_INPUT'))
+    next(error)
+  })
   const filename = (file: Express.Multer.File) => {
     const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8')
     return path.basename(decoded.includes('\ufffd') ? file.originalname : decoded).slice(0, 240)
@@ -114,6 +121,29 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   router.post('/dove/save', async (req: BusinessRequest, res) => {
     await sync(req.businessContext!)
     res.status(201).json(await dove.save(String(req.body?.draftId || ''), req.localUser!.id, req.businessContext!.actor))
+  })
+  router.post('/dove/preview-batch', batchFiles, async (req: BusinessRequest, res) => {
+    const files = req.files as Express.Multer.File[] | undefined
+    if (!files?.length) throw new AppError('FILE_REQUIRED')
+    await sync(req.businessContext!)
+    const results: DoveBatchPreviewResult[] = []
+    for (const [index, file] of files.entries()) {
+      const name = filename(file)
+      try { results.push({ index, filename: name, preview: await dove.preview(file.buffer, name, req.localUser!.id) }) }
+      catch (error) { results.push({ index, filename: name, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
+    }
+    res.json(results)
+  })
+  router.post('/dove/save-batch', async (req: BusinessRequest, res) => {
+    const draftIds: unknown = req.body?.draftIds
+    if (!Array.isArray(draftIds) || !draftIds.length || draftIds.length > DOVE_BATCH_LIMIT || draftIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(draftIds).size !== draftIds.length) throw new AppError('INVALID_INPUT')
+    await sync(req.businessContext!)
+    const results: DoveBatchSaveResult[] = []
+    for (const draftId of draftIds as string[]) {
+      try { results.push({ draftId, record: await dove.save(draftId, req.localUser!.id, req.businessContext!.actor) }) }
+      catch (error) { results.push({ draftId, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
+    }
+    res.status(201).json(results)
   })
   router.get('/reports/compare', (req, res) => res.json(compareReports(business.get(String(req.query.left || '')), business.get(String(req.query.right || '')))))
   router.post('/reports/:id/configuration', (req: BusinessRequest, res) => {

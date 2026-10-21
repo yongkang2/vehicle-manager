@@ -24,7 +24,7 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
     if (typeof value !== 'string' || value.length > 4000) throw new AppError('INVALID_INPUT')
     data[field] = value.trim()
   }
-  if (!data.name || String(data.name).length > 120) throw new AppError('INVALID_INPUT')
+  if ((kind !== 'vehicle' && !data.name) || String(data.name).length > 120) throw new AppError('INVALID_INPUT')
   for (const field of ['plateExpiry', 'installedAt', 'removedAt']) {
     const value = data[field]
     if (value && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)) throw new AppError('INVALID_DATE')

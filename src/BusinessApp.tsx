@@ -6,8 +6,9 @@ import { errorText } from './i18n'
 import type { Language } from './i18n'
 import { translateBusiness } from './business-i18n'
 import { vehicleFields } from '../shared/business'
-import type { BusinessRecord, Change, DoveData, Fields, RecordKind, ReportData, SyncConflict, SyncStatus } from '../shared/business'
+import type { BusinessRecord, Change, Fields, RecordKind, ReportData, SyncConflict, SyncStatus } from '../shared/business'
 import RecordEditor from './RecordEditor'
+import DoveImport from './DoveImport'
 import './BusinessApp.css'
 
 const ReportViewer = lazy(() => import('./ReportViewer'))
@@ -15,7 +16,6 @@ export type BusinessView = 'vehicles' | 'dove' | 'reports' | 'history' | 'sync' 
 type AuditEntry = { id: string; actor: string; created: string; action: string; detail: Fields }
 type Editor = { kind: RecordKind; record: BusinessRecord | null; vehicleId: string | null }
 type Action = { record: BusinessRecord; type: 'archive' | 'remove'; archived?: boolean }
-type Preview = { id: string; filename: string; checksum: string; size: number; parsed: DoveData; expires: number; vehicle: BusinessRecord | null; match: 'matched' | 'unmatched' | 'ambiguous'; existingId: string | null }
 type Difference = { key: string; status: string; before: unknown; after: unknown; fields: string[] }
 type Comparison = { left: BusinessRecord; right: BusinessRecord; controllers: Difference[]; faults: Difference[] }
 type Configuration = { report: BusinessRecord; controllerIndex: number | null; part: BusinessRecord | null; fields: string[]; reason: string }
@@ -52,7 +52,7 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
   const [records, setRecords] = useState<BusinessRecord[]>([]), [changes, setChanges] = useState<Change[]>([]), [sync, setSync] = useState<SyncStatus>(emptySync)
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [query, setQuery] = useState(''), [filter, setFilter] = useState<string | undefined>(), [archived, setArchived] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [action, setAction] = useState<Action | null>(null), [actionReason, setActionReason] = useState('')
-  const [file, setFile] = useState<File | null>(null), [preview, setPreview] = useState<Preview | null>(null), [reportId, setReportId] = useState<string | null>(null)
+  const [reportId, setReportId] = useState<string | null>(null)
   const [reportSelection, setReportSelection] = useState<string[]>([]), [comparison, setComparison] = useState<Comparison | null>(null), [configuration, setConfiguration] = useState<Configuration | null>(null)
   const [restoreOpen, setRestoreOpen] = useState(false), [restoreFile, setRestoreFile] = useState<File | null>(null), [confirmation, setConfirmation] = useState(''), [restoreReason, setRestoreReason] = useState(''), [historyPage, setHistoryPage] = useState(1)
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
@@ -72,7 +72,7 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
     return () => { active = false }
   }, [view])
   const periodicLoad = useEffectEvent(async () => {
-    if (!editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !preview && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load()
+    if (!editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load()
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   const selected = records.find(record => record.id === selectedId) || null
@@ -105,19 +105,6 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
     const form = new FormData(); form.append('file', attachmentFile)
     setBusy(true)
     try { await api(`/api/business/vehicles/${vehicleId}/attachments`, { method: 'POST', body: form }); setAttachmentFile(null); await load(); void message.success(text('saved')) }
-    catch (error) { onError(error) } finally { setBusy(false) }
-  }
-  async function parse() {
-    if (!file) return
-    if (file.size > 10 * 1024 * 1024) { onError(new ApiError('FILE_TOO_LARGE')); return }
-    const form = new FormData(); form.append('file', file); setBusy(true)
-    try { setPreview(await api<Preview>('/api/business/dove/preview', { method: 'POST', body: form })) }
-    catch (error) { onError(error) } finally { setBusy(false) }
-  }
-  async function retain() {
-    if (!preview) return
-    setBusy(true)
-    try { const saved = await api<BusinessRecord>('/api/business/dove/save', { method: 'POST', body: { draftId: preview.id } }); setPreview(null); setFile(null); await load(); setReportId(saved.id); void message.success(text('saved')) }
     catch (error) { onError(error) } finally { setBusy(false) }
   }
   async function compare() {
@@ -178,14 +165,14 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
       { title: text('latestDove'), width: 150, render: (_, record) => { const report = reports.find(item => item.vehicleId === record.id && !item.archived); return report ? <button className="inline-link" onClick={() => setReportId(report.id)}>{display(report.data.recordedAt)}</button> : '—' } },
       { title: text('updated'), width: 160, render: (_, record) => <div className="record-title">{date(record.updated)}<small>v{record.version}</small></div> }, { title: text('actions'), width: 100, render: (_, record) => <Button type="text" icon={<ArrowUpRight size={17} />} aria-label={`${text('details')} ${record.data.name}`} onClick={() => { setSelectedId(record.id); setHistoryPage(1) }} /> },
     ]} /></>}
-    {view === 'dove' && <><div className="dove-upload"><Upload accept=".xlsx" maxCount={1} beforeUpload={value => { setFile(value); setPreview(null); return false }} onRemove={() => { setFile(null); setPreview(null) }}><Button icon={<UploadIcon size={16} />}>{text('chooseFile')} · .xlsx</Button></Upload><Button type="primary" icon={<FileSpreadsheet size={16} />} loading={busy} disabled={!file} onClick={() => void parse()}>{text('upload')}</Button><span className="muted">{text('maxFile')}</span></div>{preview ? <><div className="report-match"><Tag color={preview.match === 'matched' ? 'success' : 'warning'}>{text(preview.match)}</Tag><strong>{preview.vehicle ? display(preview.vehicle.data.name) : preview.parsed.vin}</strong><span className="muted">{preview.filename}</span><div>{preview.existingId ? <Button onClick={async () => { await load(); setReportId(preview.existingId) }}>{text('existingReport')}</Button> : <Button type="primary" icon={<Check size={16} />} disabled={preview.match !== 'matched'} loading={busy} onClick={() => void retain()}>{text('retain')}</Button>}</div></div><Suspense fallback={<Spin />}><ReportViewer report={preview.parsed} language={language} /></Suspense></> : <Empty description={text('draft')} />}</>}
+    <DoveImport active={view === 'dove'} language={language} disabled={busy} onBusyChange={setBusy} onRetained={load} onOpenReport={async id => { await load(); setReportId(id) }} onError={onError} />
     {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${(record.data as unknown as ReportData).parsed.vin}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
     {view === 'history' && history(changes)}
     {view === 'audit' && <><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} value={query} onChange={event => setQuery(event.target.value)} /></div><Table<AuditEntry> rowKey="id" size="small" dataSource={audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase()))} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
     {view === 'sync' && <><Alert type={sync.error ? 'warning' : sync.conflicts.length ? 'warning' : 'success'} showIcon icon={sync.error ? <CloudOff size={18} /> : undefined} title={sync.error ? errorText(sync.error, language) : text(sync.phase)} /><Descriptions className="sync-summary" column={{ xs: 1, sm: 2 }} items={[{ key: 'pending', label: text('pending'), children: sync.pending }, { key: 'conflicts', label: text('conflicts'), children: sync.conflicts.length }, { key: 'lastSync', label: text('lastSync'), children: sync.lastSync ? date(sync.lastSync) : '—' }, { key: 'revision', label: text('revision'), children: <span className="mono">{sync.revision || '—'}</span> }]} /><h3 className="sync-title">{text('conflicts')}</h3>{sync.conflicts.length ? sync.conflicts.map(conflict => <ConflictForm key={conflict.token} conflict={conflict} language={language} admin={admin} onResolve={async (item, choices, reason) => { try { setSync(await api<SyncStatus>(`/api/business/sync/${item.recordId}/resolve`, { method: 'POST', body: { token: item.token, choices, reason } })); await load() } catch (error) { onError(error) } }} />) : <Empty description={text('noRecords')} />}</>}
 
     <Drawer open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && recordActions(selected)}><Tabs items={selected ? [
-      { key: 'overview', label: text('overview'), children: <><Descriptions column={{ xs: 1, sm: 2 }} items={vehicleFields.map(key => ({ key, label: text(key), children: <span className="preserve-text">{key === 'status' ? text(String(selected.data[key])) : display(selected.data[key])}</span> }))} /><div className="drawer-version">v{selected.version} · {date(selected.updated)}</div></> },
+      { key: 'overview', label: text('overview'), children: <><Descriptions column={{ xs: 1, sm: 2 }} items={vehicleFields.map(key => ({ key, label: text(key === 'name' ? 'nickName' : key), children: <span className="preserve-text">{key === 'status' ? text(String(selected.data[key])) : display(selected.data[key])}</span> }))} /><div className="drawer-version">v{selected.version} · {date(selected.updated)}</div></> },
       { key: 'parts', label: text('parts'), children: entryTable('part', selected) }, { key: 'modifications', label: text('modifications'), children: entryTable('modification', selected) }, { key: 'equipment', label: text('equipment'), children: entryTable('equipment', selected) },
       { key: 'reports', label: text('reports'), children: reportTable(reports.filter(record => record.vehicleId === selected.id && (!record.archived || archived))) },
       { key: 'attachments', label: text('attachments'), children: <><div className="dove-upload"><Upload accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" maxCount={1} beforeUpload={value => { setAttachmentFile(value); return false }} onRemove={() => setAttachmentFile(null)}><Button icon={<Plus size={15} />}>{text('chooseFile')}</Button></Upload><Button type="primary" disabled={!attachmentFile || selected.archived} loading={busy} onClick={() => void saveFile(selected.id)}>{text('upload')}</Button></div><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
