@@ -42,8 +42,9 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     assert.equal((await request(member, '/business/records')).status, 403)
     const team = (await request(admin, '/team')).data
     assert.equal((await request(admin, `/team/requests/${team.requests[0].id}/approve`, 'POST', { role: 'member', memberId: null, reason: 'Verified' })).status, 200)
-    let response = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { name: 'Workflow car', vin: 'TEST0000000000001', status: 'available', project: 'eP64' }, reason: 'Register' })
+    let response = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', project: 'eP64' }, reason: 'Register without a nickname' })
     assert.equal(response.status, 201); const car = response.data as BusinessRecord
+    assert.equal(car.data.name, '')
     const firstSync = await request(admin, '/business/sync', 'POST')
     assert.equal(firstSync.data.phase, 'ready', JSON.stringify(firstSync.data))
     assert.equal((await request(member, '/business/records')).data.length, 1)
@@ -90,6 +91,7 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     await request(admin, '/business/sync', 'POST')
     const restored = (await request(member, '/business/records')).data as BusinessRecord[]
     assert.equal(restored.find(record => record.id === car.id)!.data.owner, '')
+    assert.equal(restored.find(record => record.id === car.id)!.data.name, '')
     assert.deepEqual((await request(member, `/business/files/${report.id}`)).data, bytes)
     assert.ok((await request(member, `/business/history?vehicleId=${car.id}`)).data.some((change: { sourceId: string }) => change.sourceId === report.id))
     const currentReport = (await request(admin, '/business/records')).data.find((record: BusinessRecord) => record.id === report.id) as BusinessRecord

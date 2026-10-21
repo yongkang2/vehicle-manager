@@ -4,10 +4,11 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './team.js'
 import { Business, checksum, now } from './business.js'
-import type { Actor, BusinessRecord, DoveData, ReportData } from '../shared/business.js'
+import { DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
+import type { Actor, BusinessRecord, DoveData, DovePreview, ReportData } from '../shared/business.js'
 
 type Draft = { id: string; owner: string; filename: string; bytes: Buffer; parsed: DoveData; checksum: string; expires: number }
-export type Preview = { id: string; filename: string; checksum: string; size: number; parsed: DoveData; expires: number; vehicle: BusinessRecord | null; match: 'matched' | 'unmatched' | 'ambiguous'; existingId: string | null }
+export type Preview = DovePreview
 function parseIsolated(bytes: Buffer): Promise<DoveData> {
   return new Promise((resolve, reject) => {
     const compiled = fileURLToPath(new URL('./dove-worker.js', import.meta.url))
@@ -40,12 +41,12 @@ export class DoveService {
   async preview(bytes: Buffer, filename: string, owner: string): Promise<Preview> {
     if (!/\.xlsx$/i.test(filename)) throw new AppError('XLSX_REQUIRED', 422)
     if (this.active >= 2) throw new AppError('DOVE_BUSY', 429)
-    if (bytes.length > 10 * 1024 * 1024) throw new AppError('FILE_TOO_LARGE', 413)
+    if (bytes.length > DOVE_MAX_FILE_BYTES) throw new AppError('FILE_TOO_LARGE', 413)
     this.active++
     let parsed: DoveData
     try { parsed = await parseIsolated(bytes) } finally { this.active-- }
     for (const [id, draft] of this.drafts) if (draft.expires < Date.now()) this.drafts.delete(id)
-    while (this.drafts.size >= 8) this.drafts.delete(this.drafts.keys().next().value!)
+    while (this.drafts.size >= DOVE_BATCH_LIMIT) this.drafts.delete(this.drafts.keys().next().value!)
     const draft: Draft = { id: randomUUID(), owner, filename, bytes, parsed, checksum: checksum(bytes), expires: Date.now() + 30 * 60 * 1000 }
     this.drafts.set(draft.id, draft)
     return this.view(draft)
@@ -55,11 +56,19 @@ export class DoveService {
     if (!draft || draft.owner !== owner || draft.expires < Date.now()) throw new AppError('DRAFT_EXPIRED', 409)
     const preview = this.view(draft)
     if (!preview.vehicle) throw new AppError('VIN_NOT_MATCHED', 409)
-    if (preview.existingId) return this.business.get(preview.existingId)
+    if (preview.existingId) {
+      const existing = this.business.get(preview.existingId)
+      this.drafts.delete(id)
+      return existing
+    }
     await this.business.blob(draft.bytes)
     const current = this.view(draft)
     if (!current.vehicle) throw new AppError('VIN_NOT_MATCHED', 409)
-    if (current.existingId) return this.business.get(current.existingId)
+    if (current.existingId) {
+      const existing = this.business.get(current.existingId)
+      this.drafts.delete(id)
+      return existing
+    }
     const data: ReportData = { name: draft.filename, checksum: draft.checksum, size: draft.bytes.length, recordedAt: draft.parsed.recordedAt, savedAt: now(), parserVersion: 'dove-current-1', parsed: draft.parsed, vehicleSnapshot: current.vehicle.data }
     const report = this.business.write({ id: `report-${draft.checksum}`, kind: 'report', vehicleId: current.vehicle.id, data: { ...data }, actor, reason: 'DOVE retained after VIN verification', internal: true })
     this.drafts.delete(id)
