@@ -1,0 +1,54 @@
+export type Language = 'en' | 'zh'
+const en = {
+  product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
+  username: 'Username', displayName: 'Full name', password: 'Password', account: 'Local account', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
+  local: 'Local device', online: 'Connected', offline: 'Offline', refresh: 'Refresh', setupTitle: 'Connect your workspace', path: 'Shared folder path', test: 'Test connection', later: 'Set up later',
+  notConfigured: 'Shared folder not configured', emptyFolder: 'Empty folder verified', existingTeam: 'Existing team found', checks: 'Read, write and rename checks passed',
+  teamName: 'Team name', create: 'Create team', join: 'Request to join', confirmCreate: 'Create a new team in this empty folder and make this account its first administrator.',
+  pending: 'Awaiting approval', pendingTitle: 'Your account and device are awaiting approval', approved: 'Approved', disabled: 'Access disabled', unbound: 'This local account is not linked to the team', rejected: 'Request not approved',
+  firstAdmin: 'Administrator', member: 'Member', status: 'Status', device: 'Device', deviceId: 'Device ID', identity: 'Team identity', lastChecked: 'Last checked', accessTitle: 'Workspace access',
+  configure: 'Configure shared folder', requests: 'Join requests', members: 'Team members', devices: 'Approved devices', events: 'Management history', name: 'Name', role: 'Role', enabled: 'Enabled',
+  actions: 'Actions', approve: 'Approve', edit: 'Change access', revoke: 'Revoke device', reason: 'Reason', cancel: 'Cancel', save: 'Confirm', newIdentity: 'Create a separate team identity', bindIdentity: 'Team identity',
+  noRequests: 'No pending requests', created: 'Created', actor: 'Actor', operation: 'Operation', teamCreated: 'Team created', joinRequested: 'Join requested', joinApproved: 'Join approved', memberUpdated: 'Member access changed', deviceRevoked: 'Device revoked', reject: 'Reject', joinRejected: 'Join request rejected',
+}
+const zh: Record<keyof typeof en, string> = {
+  product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', displayName: '姓名', password: '密码',
+  account: '本地账号', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
+  path: '共享文件夹路径', test: '测试连接', later: '稍后配置', notConfigured: '尚未配置共享目录', emptyFolder: '已验证为空目录', existingTeam: '发现已有团队', checks: '读取、写入和重命名检查通过',
+  teamName: '团队名称', create: '创建团队', join: '申请加入', confirmCreate: '确认在此空目录创建新团队，并将当前账号设为首位管理员。', pending: '待审批', pendingTitle: '账号和设备正在等待管理员审批',
+  approved: '已批准', disabled: '权限已停用', unbound: '此本地账号尚未绑定团队身份', rejected: '申请未批准', firstAdmin: '管理员', member: '成员', status: '状态', device: '设备', deviceId: '设备标识',
+  identity: '团队身份', lastChecked: '上次检查', accessTitle: '工作空间权限', configure: '配置共享目录', requests: '加入申请', members: '团队成员', devices: '已批准设备', events: '管理历史', name: '姓名',
+  role: '角色', enabled: '启用', actions: '操作', approve: '批准', edit: '调整权限', revoke: '撤销设备', reason: '操作原因', cancel: '取消', save: '确认', newIdentity: '创建独立的团队身份', bindIdentity: '团队身份',
+  noRequests: '暂无待审批申请', created: '创建时间', actor: '操作者', operation: '操作', teamCreated: '创建团队', joinRequested: '申请加入', joinApproved: '批准加入', memberUpdated: '调整成员权限', deviceRevoked: '撤销设备', reject: '拒绝', joinRejected: '拒绝加入申请',
+}
+const errorPairs: Record<string, [string, string]> = {
+  INVALID_VIN: ['Enter a valid 17-character VIN.', '请输入有效的 17 位 VIN。'], VIN_EXISTS: ['This VIN already exists. Review the existing vehicle or correct the local VIN.', 'VIN 已存在，请查看已有车辆或修正本地 VIN。'], INVALID_DATE: ['Check the date and installation/removal order.', '请检查日期及安装、拆除顺序。'],
+  REASON_REQUIRED: ['Enter a reason of up to 500 characters.', '请填写变更原因，最多 500 字。'], RECORD_NOT_FOUND: ['The record was not found.', '未找到记录。'], RECORD_ARCHIVED: ['Restore the record before editing.', '请先恢复记录再编辑。'], PARENT_ARCHIVED: ['The vehicle is archived or unavailable.', '车辆已归档或不可用。'],
+  VERSION_CONFLICT: ['This record changed. Reload it and review your changes.', '记录已变化，请重新加载后核对修改。'], ACCESS_DISABLED: ['Your account or device is not approved or has been disabled.', '账号或设备未批准或已停用。'],
+  SHARE_CORRUPTED: ['The shared business snapshot is invalid. Keep local data and ask the administrator to review.', '共享业务快照无效，请保留本地数据并联系管理员。'], BUSINESS_ROLLBACK: ['The shared business snapshot rolled back or diverged. Synchronization has stopped.', '共享业务快照回退或分叉，已暂停同步。'],
+  FILE_REQUIRED: ['Select a file.', '请选择文件。'], FILE_TOO_LARGE: ['The selected file exceeds its upload limit.', '文件超过上传大小限制。'], FILE_TYPE_NOT_ALLOWED: ['The file content or extension is not supported.', '文件内容或扩展名不受支持。'], FILE_CORRUPTED: ['File integrity verification failed.', '文件完整性校验失败。'], FILE_MISSING: ['The original file is unavailable.', '原始文件不可用。'],
+  XLSX_REQUIRED: ['DOVE reports must use .xlsx format.', 'DOVE 报告必须为 .xlsx 格式。'], INVALID_COMPONENT_MATCH: ['Select an active controller part and valid fields.', '请选择有效的在用控制器部件和更新字段。'],
+  DOVE_PARSE_FAILED: ['The workbook is damaged, encrypted or unsupported.', '工作簿损坏、加密或不受支持。'], UNSUPPORTED_REPORT: ['Required DOVE sheets or controller headers were not found.', '未找到必要 DOVE 工作表或控制器表头。'], VIN_MISMATCH: ['VIN values in the workbook disagree.', '工作簿不同工作表的 VIN 不一致。'], VIN_NOT_MATCHED: ['A unique active vehicle must match the workbook VIN before retention.', '必须唯一匹配工作簿 VIN 对应的有效车辆才能留存。'],
+  DRAFT_EXPIRED: ['The preview expired. Upload the report again.', '预览已过期，请重新上传。'], DOVE_BUSY: ['Two reports are already being parsed. Retry shortly.', '已有两份报告正在解析，请稍后重试。'], PARSE_TIMEOUT: ['Report parsing timed out.', '报告解析超时。'], EXCEL_RESOURCE_LIMIT: ['The workbook exceeds safe parsing resource limits.', '工作簿超出安全解析资源限制。'],
+  REPORT_VIN_MISMATCH: ['The reports or target configuration do not belong to the same VIN.', '报告或目标配置不属于同一 VIN。'], IMMUTABLE_REPORT: ['Retained originals and parsed snapshots cannot be edited.', '已留存原件和解析快照不能编辑。'], CONFLICT_CHANGED: ['The conflict changed. Refresh and choose again.', '冲突已变化，请刷新后重新选择。'],
+  INVALID_BACKUP: ['The backup is invalid or belongs to a different team.', '备份无效或属于其他团队。'], BACKUP_TOO_LARGE: ['The backup exceeds this version’s safe size limit.', '备份超过此版本的安全大小限制。'], RESTORE_CONFIRMATION_REQUIRED: ['Select a backup and type RESTORE to confirm.', '请选择备份并输入 RESTORE 确认。'], PENDING_BEFORE_RESTORE: ['Synchronize all pending operations before restoring.', '恢复前请先同步所有待提交操作。'],
+  INVALID_PATH: ['Enter an absolute folder path or a Windows network path.', '请输入完整文件夹路径或 Windows 网络路径。'],
+  SHARE_UNAVAILABLE: ['The folder does not exist or cannot be reached. You can configure it later; no folder has been created.', '目录不存在或无法连接。可稍后配置，程序未创建该目录。'],
+  SHARE_ACCESS_DENIED: ['Read/write access was denied. Ask your administrator to grant access.', '目录读写权限不足，请联系管理员授权。'],
+  SHARE_NOT_DIRECTORY: ['The path is not a folder.', '该路径不是文件夹。'], SHARE_NOT_EMPTY: ['This folder is not empty and will not be overwritten.', '目录已有其他内容，程序不会覆盖。'],
+  UNSUPPORTED_TEAM: ['The team file is damaged or uses an unsupported format.', '团队文件损坏或格式不受支持。'], WRONG_TEAM: ['This is a different team. Existing configuration was not replaced.', '该目录属于其他团队，现有配置未被替换。'],
+  SHARE_BUSY: ['Another client holds the team lock. Retry later; do not delete an active lock.', '其他客户端正持有团队锁，请稍后重试；不要删除仍在使用的锁。'], SHARE_IO_ERROR: ['The shared folder operation failed. Check network and permissions.', '共享目录操作失败，请检查网络和权限。'],
+  ADMIN_REQUIRED: ['An enabled administrator on an approved device is required.', '需要已批准设备上的有效管理员。'], LAST_ADMIN: ['The last effective administrator cannot be disabled, demoted or lose their only approved device.', '不能停用、降级最后一名有效管理员，或撤销其唯一获批设备。'],
+  REQUEST_CHANGED: ['This request changed. Refresh and retry.', '申请已变化，请刷新后重试。'], MEMBER_UNAVAILABLE: ['The selected team member is unavailable.', '所选团队成员不可用。'],
+  INVALID_INPUT: ['Check required fields and input limits.', '请检查必填项和输入长度。'], INVALID_TEAM_NAME: ['Enter a team name of up to 80 characters.', '请输入团队名称，最多 80 字。'],
+  INVALID_USERNAME: ['Use 2–24 letters, numbers, underscores or hyphens.', '用户名需为 2–24 位文字、数字、下划线或连字符。'], INVALID_PASSWORD: ['Use a password of 10–128 characters.', '密码需为 10–128 位。'],
+  USERNAME_EXISTS: ['This username exists on this computer.', '这台电脑已有相同用户名。'], INVALID_CREDENTIALS: ['Incorrect username or password.', '用户名或密码错误。'], LOGIN_REQUIRED: ['Sign in again.', '请重新登录。'],
+  CONFIRM_TEAM_CREATION: ['Explicitly confirm creation of a new team.', '请明确确认创建新团队。'], TEAM_CHANGED: ['The folder changed. Test it again.', '共享目录已变化，请重新测试。'], NOT_CONFIGURED: ['Configure a shared folder first.', '请先配置共享目录。'],
+  TEAM_ROLLBACK: ['The team file was rolled back or diverged. Ask the team owner to review it.', '团队文件出现回退或分叉，请联系负责人检查。'],
+  COPIED_LOCAL_DATA: ['Local data belongs to another computer. Use a fresh data directory.', '本地数据属于另一台电脑，请使用新的数据目录。'], LOCAL_VERSION_TOO_NEW: ['A newer application is required.', '需要更高版本的程序。'],
+  TOO_MANY_ATTEMPTS: ['Too many attempts. Try later.', '尝试过于频繁，请稍后重试。'], HOST_NOT_ALLOWED: ['Only a local application address is allowed.', '仅允许本机应用地址。'], INVALID_REQUEST: ['Request verification failed.', '请求校验失败。'],
+  NOT_FOUND: ['The operation is unavailable.', '该操作不可用。'], NETWORK_ERROR: ['The local service cannot be reached.', '无法连接本地服务。'], SERVER_ERROR: ['The operation failed. Please try again.', '操作失败，请重试。'],
+}
+export const dictionaries = { en, zh }
+export type Dictionary = typeof en
+export const errorText = (code: string, language: Language) => (errorPairs[code] || errorPairs.SERVER_ERROR)[language === 'zh' ? 1 : 0]

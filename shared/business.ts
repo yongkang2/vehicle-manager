@@ -1,0 +1,15 @@
+export type RecordKind = 'vehicle' | 'part' | 'modification' | 'equipment' | 'report' | 'attachment'
+export type Fields = Record<string, unknown>
+export type BusinessRecord = { id: string; kind: RecordKind; vehicleId: string | null; data: Fields; archived: boolean; version: number; updated: string }
+export type Actor = { id: string; name: string; deviceId: string; role: 'admin' | 'member' }
+export type Change = { id: string; recordId: string; vehicleId: string; kind: RecordKind; before: Fields | null; after: Fields; archivedBefore: boolean | null; archivedAfter: boolean; actor: Actor; reason: string; action: string; sourceId: string | null; created: string }
+export type Operation = { id: string; recordId: string; kind: RecordKind; vehicleId: string | null; base: { data: Fields; archived: boolean } | null; desired: { data: Fields; archived: boolean }; changes: Change[]; actor: Actor; files: string[]; created: string; decision?: boolean; maintenance?: 'restore' }
+export type SyncConflict = { recordId: string; kind: RecordKind; name: string; fields: string[]; local: Operation['desired']; remote: Operation['desired'] | null; base: Operation['base']; operationIds: string[]; token: string }
+export type SyncStatus = { phase: 'idle' | 'syncing' | 'ready' | 'offline' | 'busy' | 'conflict'; error: string | null; pending: number; conflicts: SyncConflict[]; lastSync: string | null; revision: string | null }
+export const vehicleFields = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'owner', 'coolingArchitecture', 'thermal', 'notes'] as const
+export const partFields = ['name', 'category', 'position', 'supplier', 'serial', 'type', 'hardware', 'software', 'functionalPart', 'productPart', 'calibrationPart', 'calibrationVersion', 'maturity', 'batteryStatus', 'installedAt', 'removedAt', 'notes'] as const
+export const entryFields = ['name', 'description', 'installedAt', 'removedAt', 'notes'] as const
+export type Controller = { name: string; description: string; network: string; supplier: string; functionalPart: string; productPart: string; software: string; calibrationPart: string; calibrationVersion: string; flashingDate: string; productionDate: string; serial: string }
+export type Fault = { controller: string; code: string; status: string; statusByte: string; description: string; context: string }
+export type DoveData = { vin: string; rawVin: string; vehicleId: string; recordedAt: string; software: string; mileage: number | null; soc: number | null; vehicleMode: string; controllers: Controller[]; faults: Fault[]; warnings: string[]; sheets: string[] }
+export type ReportData = { name: string; checksum: string; size: number; recordedAt: string; savedAt: string; parserVersion: string; parsed: DoveData; vehicleSnapshot: Fields }
