@@ -10,6 +10,10 @@ const en = {
   configure: 'Configure shared folder', requests: 'Join requests', members: 'Team members', devices: 'Approved devices', events: 'Management history', name: 'Name', role: 'Role', enabled: 'Enabled',
   actions: 'Actions', approve: 'Approve', edit: 'Change access', revoke: 'Revoke device', reason: 'Reason', cancel: 'Cancel', save: 'Confirm', newIdentity: 'Create a separate team identity', bindIdentity: 'Team identity',
   noRequests: 'No pending requests', created: 'Created', actor: 'Actor', operation: 'Operation', teamCreated: 'Team created', joinRequested: 'Join requested', joinApproved: 'Join approved', memberUpdated: 'Member access changed', deviceRevoked: 'Device revoked', reject: 'Reject', joinRejected: 'Join request rejected',
+  personal: 'Personal workspace', myTeams: 'My teams', connectTeam: 'Connect another team', selectTeam: 'Enter team', disconnect: 'Disconnect this session', cancelRequest: 'Withdraw join request', joinCancelled: 'Join request withdrawn',
+  switchTitle: 'Change workspace?', switchWarning: 'Unsaved forms will close. Records and original files stay in their own team. This does not revoke membership or withdraw pending requests.', retainPending: 'Keep pending changes and conflicts in the original team without submitting them to another team.',
+  pendingChanges: 'Pending changes', conflictCount: 'Conflicts', currentTeam: 'Current team', noTeams: 'No connected teams', syncPaused: 'Synchronization is paused. Review retained changes before resuming.', resumeSync: 'Resume team synchronization', resumeWarning: 'This enables synchronization of this team’s pending changes using current permissions. Other active sessions may also synchronize this workspace.',
+  withdrawWarning: 'Withdraw this account’s pending request from the original team? This requires a reachable shared folder. If unavailable, you can disconnect this session, but the remote request remains.', reloadPage: 'Reload page',
 }
 const zh: Record<keyof typeof en, string> = {
   product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', displayName: '姓名', password: '密码',
@@ -20,6 +24,10 @@ const zh: Record<keyof typeof en, string> = {
   identity: '团队身份', lastChecked: '上次检查', accessTitle: '工作空间权限', configure: '配置共享目录', requests: '加入申请', members: '团队成员', devices: '已批准设备', events: '管理历史', name: '姓名',
   role: '角色', enabled: '启用', actions: '操作', approve: '批准', edit: '调整权限', revoke: '撤销设备', reason: '操作原因', cancel: '取消', save: '确认', newIdentity: '创建独立的团队身份', bindIdentity: '团队身份',
   noRequests: '暂无待审批申请', created: '创建时间', actor: '操作者', operation: '操作', teamCreated: '创建团队', joinRequested: '申请加入', joinApproved: '批准加入', memberUpdated: '调整成员权限', deviceRevoked: '撤销设备', reject: '拒绝', joinRejected: '拒绝加入申请',
+  personal: '个人工作空间', myTeams: '我的团队', connectTeam: '连接其他团队', selectTeam: '进入团队', disconnect: '断开当前会话连接', cancelRequest: '撤回加入申请', joinCancelled: '撤回加入申请',
+  switchTitle: '确认更换工作空间？', switchWarning: '未保存的表单将关闭。记录与原件保留在各自团队中，不会撤销成员资格，也不会自动撤回待审批申请。', retainPending: '将待同步修改和冲突保留在原团队，不提交到其他团队。',
+  pendingChanges: '待同步修改', conflictCount: '冲突', currentTeam: '当前团队', noTeams: '尚未连接团队', syncPaused: '同步已暂停，请核对保留的修改后再恢复。', resumeSync: '恢复团队同步', resumeWarning: '确认后将按当前有效权限同步本团队的待提交修改。其他仍在使用此工作空间的会话也可能执行同步。',
+  withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
   VEHICLE_NOT_ARCHIVED: ['Archive the vehicle before permanently deleting it.', '请先归档车辆，再执行永久删除。'],
@@ -33,6 +41,11 @@ const errorPairs: Record<string, [string, string]> = {
   LOCAL_REFRESH_REQUIRED: ['The deletion is already committed to the shared folder. Synchronize again to finish refreshing this device.', '删除已提交至共享目录，请再次同步以完成本机刷新。'],
   BACKUP_DELETION_CONFLICT: ['This backup contains deletion information that conflicts with current live records. Restore was not applied.', '备份中的删除信息与当前有效记录冲突，未执行恢复。'],
   DELETE_REQUEST_MISMATCH: ['This deletion request differs from the recorded request. Refresh the preview and confirm again.', '删除请求与已记录的请求不一致，请刷新预览并重新确认。'],
+  WORKSPACE_CHANGED: ['The account or workspace changed. Reload before continuing; no stale operation was applied.', '账号或工作空间已变化，请重新加载后继续；旧页面的操作未执行。'],
+  WORKSPACE_BUSY: ['This session has another operation in progress. Wait for it to finish and retry.', '当前会话有操作正在进行，请完成后重试。'],
+  WORKSPACE_NOT_FOUND: ['This account has not connected to that team.', '当前账号尚未连接该团队。'],
+  PENDING_BEFORE_SWITCH: ['Confirm keeping pending changes and conflicts in the original team before switching.', '切换前请确认将待同步修改和冲突保留在原团队。'],
+  CONFIRM_DISCONNECT: ['Confirm this operation.', '请明确确认此操作。'], CONFIRM_RESUME: ['Review retained changes and resume synchronization from your personal workspace.', '请在个人工作空间中核对保留的修改并确认恢复同步。'],
   INVALID_VIN: ['Enter a valid 17-character VIN.', '请输入有效的 17 位 VIN。'], VIN_EXISTS: ['This VIN already exists. Review the existing vehicle or correct the local VIN.', 'VIN 已存在，请查看已有车辆或修正本地 VIN。'], INVALID_DATE: ['Check the date and installation/removal order.', '请检查日期及安装、拆除顺序。'],
   REASON_REQUIRED: ['Enter a reason of up to 500 characters.', '请填写变更原因，最多 500 字。'], RECORD_NOT_FOUND: ['The record was not found.', '未找到记录。'], RECORD_ARCHIVED: ['Restore the record before editing.', '请先恢复记录再编辑。'], PARENT_ARCHIVED: ['The vehicle is archived or unavailable.', '车辆已归档或不可用。'],
   VERSION_CONFLICT: ['This record changed. Reload it and review your changes.', '记录已变化，请重新加载后核对修改。'], ACCESS_DISABLED: ['Your account or device is not approved or has been disabled.', '账号或设备未批准或已停用。'],

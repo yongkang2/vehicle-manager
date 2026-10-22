@@ -52,7 +52,7 @@ function ConflictForm({ conflict, language, admin, onResolve }: { conflict: Sync
   })}</div></fieldset>)}<label className="standalone-label">{text('reason')}<textarea name="reason" required maxLength={500} rows={2} /></label><div className="conflict-submit"><Button htmlType="submit" type="primary" icon={<Check size={16} />} loading={busy}>{text('resolve')}</Button></div></form>
 }
 
-function VehicleDeleteDialog({ vehicle, language, allowed, onCancel, onBusyChange, onDeleted, onError }: { vehicle: BusinessRecord; language: Language; allowed: boolean; onCancel: () => void; onBusyChange: (busy: boolean) => void; onDeleted: (receipt: VehicleDeleteReceipt) => Promise<void>; onError: (error: unknown) => void }) {
+function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel, onBusyChange, onDeleted, onError }: { vehicle: BusinessRecord; language: Language; allowed: boolean; syncPaused: boolean; onCancel: () => void; onBusyChange: (busy: boolean) => void; onDeleted: (receipt: VehicleDeleteReceipt) => Promise<void>; onError: (error: unknown) => void }) {
   const text = translateBusiness(language)
   const [preview, setPreview] = useState<VehicleDeletePreview | null>(null), [loading, setLoading] = useState(true), [saving, setSaving] = useState(false)
   const [vin, setVin] = useState(''), [confirmation, setConfirmation] = useState(''), [reason, setReason] = useState(''), [error, setError] = useState<string | null>(null)
@@ -60,15 +60,22 @@ function VehicleDeleteDialog({ vehicle, language, allowed, onCancel, onBusyChang
   const [now, setNow] = useState(Date.now)
   const reportError = useEffectEvent(onError)
   useEffect(() => {
+    if (!allowed || syncPaused) return
     let active = true
-    void api<VehicleDeletePreview>(`/api/business/vehicles/${encodeURIComponent(vehicle.id)}/delete-preview`).then(value => { if (active) setPreview(value) }).catch(cause => { if (active) { setError(cause instanceof ApiError ? cause.message : 'SERVER_ERROR'); reportError(cause) } }).finally(() => { if (active) setLoading(false) })
+    void Promise.resolve().then(async () => {
+      if (!active) return
+      setLoading(true); setVin(''); setConfirmation('')
+      try { const value = await api<VehicleDeletePreview>(`/api/business/vehicles/${encodeURIComponent(vehicle.id)}/delete-preview`); if (active) setPreview(value) }
+      catch (cause) { if (active) { setError(cause instanceof ApiError ? cause.message : 'SERVER_ERROR'); reportError(cause) } }
+      finally { if (active) setLoading(false) }
+    })
     return () => { active = false }
-  }, [vehicle.id])
+  }, [vehicle.id, allowed, syncPaused])
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [])
   const expired = !preview || preview.expires <= now
-  const ready = Boolean(allowed && preview && !loading && (submitted || (!expired && vin === preview.vin && confirmation === 'DELETE' && reason.trim())))
+  const ready = Boolean(allowed && !syncPaused && preview && !loading && (submitted || (!expired && vin === preview.vin && confirmation === 'DELETE' && reason.trim())))
   async function refreshPreview() {
-    if (saving || submitted) return
+    if (saving || submitted || !allowed || syncPaused) return
     setLoading(true); setPreview(null); setError(null); setVin(''); setConfirmation(''); setRequestId(crypto.randomUUID())
     try { setPreview(await api<VehicleDeletePreview>(`/api/business/vehicles/${encodeURIComponent(vehicle.id)}/delete-preview`)); setNow(Date.now()) }
     catch (cause) { setError(cause instanceof ApiError ? cause.message : 'SERVER_ERROR'); onError(cause) } finally { setLoading(false) }
@@ -81,7 +88,7 @@ function VehicleDeleteDialog({ vehicle, language, allowed, onCancel, onBusyChang
     catch (cause) {
       const code = cause instanceof ApiError ? cause.message : 'SERVER_ERROR'
       setError(code)
-      if (!['NETWORK_ERROR', 'SERVER_ERROR'].includes(code)) {
+      if (!['NETWORK_ERROR', 'SERVER_ERROR', 'SHARE_IO_ERROR', 'SHARE_UNAVAILABLE', 'SHARE_BUSY'].includes(code)) {
         setSubmitted(null)
         if (['DELETE_PREVIEW_CHANGED', 'DELETE_PREVIEW_EXPIRED', 'VERSION_CONFLICT', 'DELETE_REQUEST_MISMATCH'].includes(code)) { setPreview(null); setVin(''); setConfirmation('') }
       }
@@ -92,22 +99,23 @@ function VehicleDeleteDialog({ vehicle, language, allowed, onCancel, onBusyChang
     <div className="configuration-form"><Alert type="error" showIcon title={text('deleteVehicleWarning')} />
       <p className="operation-name">{display(vehicle.data.name)} · <span className="mono">{display(preview?.vin || vehicle.data.vin)}</span></p>
       {error && <Alert type="warning" showIcon title={submitted ? text('deleteRetryNotice') : errorText(error, language)} />}
-      {loading ? <Spin /> : preview && <>
+      {loading && allowed && !syncPaused ? <Spin /> : preview && <>
         {preview.protocolUpgrade && <Alert type="warning" showIcon title={text('deleteProtocolUpgrade')} />}
         <Descriptions size="small" column={2} title={text('deleteAffectedRecords')} items={Object.entries(preview.counts).map(([kind, count]) => ({ key: kind, label: text(kind), children: count }))} />
         <p className="muted">{text('deletePreviewExpires')}: {new Date(preview.expires).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-GB')}</p>
         {expired && !submitted && <Alert type="warning" showIcon title={text('deletePreviewExpired')} />}
-        <label>{text('deleteVinConfirmation')}<Input value={vin} maxLength={30} disabled={saving || Boolean(submitted)} autoComplete="off" onChange={event => setVin(event.target.value)} /></label>
-        <label>{text('deleteWordConfirmation')}<Input value={confirmation} maxLength={20} disabled={saving || Boolean(submitted)} autoComplete="off" onChange={event => setConfirmation(event.target.value)} /></label>
-        <label>{text('reason')}<Input.TextArea value={reason} maxLength={500} rows={3} disabled={saving || Boolean(submitted)} onChange={event => setReason(event.target.value)} /></label>
+        <label>{text('deleteVinConfirmation')}<Input value={submitted?.vin ?? vin} maxLength={30} disabled={saving || Boolean(submitted)} autoComplete="off" onChange={event => setVin(event.target.value)} /></label>
+        <label>{text('deleteWordConfirmation')}<Input value={submitted?.confirmation ?? confirmation} maxLength={20} disabled={saving || Boolean(submitted)} autoComplete="off" onChange={event => setConfirmation(event.target.value)} /></label>
+        <label>{text('reason')}<Input.TextArea value={submitted?.reason ?? reason} maxLength={500} rows={3} disabled={saving || Boolean(submitted)} onChange={event => setReason(event.target.value)} /></label>
       </>}
-      <Button icon={<RefreshCw size={15} />} loading={loading} disabled={saving || Boolean(submitted) || !allowed} onClick={() => void refreshPreview()}>{text('refreshDeletePreview')}</Button>
+      <Button icon={<RefreshCw size={15} />} loading={loading} disabled={saving || Boolean(submitted) || !allowed || syncPaused} onClick={() => void refreshPreview()}>{text('refreshDeletePreview')}</Button>
+      {syncPaused && <Alert type="warning" showIcon title={errorText('CONFIRM_RESUME', language)} />}
       {!allowed && <Alert type="warning" showIcon title={text('deleteRequiresOnlineAdmin')} />}
     </div>
   </Modal>
 }
 
-export default function BusinessApp({ view, language, admin, online, onError }: { view: BusinessView; language: Language; admin: boolean; online: boolean; onError: (error: unknown) => void }) {
+export default function BusinessApp({ view, language, admin, online, syncPaused, onError }: { view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void }) {
   const text = translateBusiness(language), { message } = App.useApp()
   const [records, setRecords] = useState<BusinessRecord[]>([]), [changes, setChanges] = useState<Change[]>([]), [sync, setSync] = useState<SyncStatus>(emptySync)
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [query, setQuery] = useState(''), [filter, setFilter] = useState<string | undefined>(), [archived, setArchived] = useState(false)
@@ -223,6 +231,7 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
     catch (error) { onError(error) } finally { setBusy(false) }
   }
   async function restore() {
+    if (syncPaused) { onError(new ApiError('CONFIRM_RESUME')); return }
     if (!restoreFile) return
     const form = new FormData(); form.append('file', restoreFile); form.append('confirmation', confirmation); form.append('reason', restoreReason)
     setBusy(true)
@@ -240,7 +249,7 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
     {!record.archived && !['report', 'attachment'].includes(record.kind) && <Tooltip title={text('edit')}><Button type="text" icon={<Pencil size={15} />} aria-label={`${text('edit')} ${record.data.name}`} onClick={() => setEditor({ kind: record.kind, record, vehicleId: record.vehicleId })} /></Tooltip>}
     {!record.archived && ['part', 'equipment'].includes(record.kind) && !record.data.removedAt && <Tooltip title={text('recordRemoval')}><Button type="text" icon={<Wrench size={15} />} aria-label={text('recordRemoval')} onClick={() => openAction(record, 'remove')} /></Tooltip>}
     {admin && <Tooltip title={text(record.archived ? 'restore' : 'archive')}><Button type="text" disabled={!online} icon={record.archived ? <RotateCcw size={15} /> : <Archive size={15} />} aria-label={`${text(record.archived ? 'restore' : 'archive')} ${record.data.name}`} onClick={() => openAction(record, 'archive')} /></Tooltip>}
-    {admin && record.kind === 'vehicle' && record.archived && <Tooltip title={text('deleteVehicle')}><Button type="text" danger disabled={!online || busy} icon={<Trash2 size={15} />} aria-label={`${text('deleteVehicle')} ${record.data.vin}`} onClick={() => setDeleteVehicle(record)}>{text('delete')}</Button></Tooltip>}
+    {admin && record.kind === 'vehicle' && record.archived && <Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : text('deleteVehicle')}><Button type="text" danger disabled={!online || busy || syncPaused} icon={<Trash2 size={15} />} aria-label={`${text('deleteVehicle')} ${record.data.vin}`} onClick={() => setDeleteVehicle(record)}>{text('delete')}</Button></Tooltip>}
   </Space>
   const reportTable = (items: BusinessRecord[], selectable = false) => <Table<BusinessRecord> rowKey="id" dataSource={items} size="small" loading={loading} scroll={{ x: 800 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} rowSelection={selectable ? { selectedRowKeys: reportSelection, onChange: keys => setReportSelection(keys.map(String).slice(-2)) } : undefined} columns={[
     { title: text('file'), width: 280, render: (_, record) => <button className="record-link" onClick={() => setReportId(record.id)}><FileSpreadsheet size={17} /><span>{display(record.data.name)}{record.archived && <small>{text('archived')}</small>}</span></button> },
@@ -288,7 +297,7 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
   return <section className="business-workspace"><div className="page-heading"><div><span className="eyebrow">{text(view).toUpperCase()}</span><h1>{text(view)}</h1></div><Space wrap><Tooltip title={text('refresh')}><Button icon={<RefreshCw size={16} />} aria-label={text('refresh')} loading={loading} onClick={() => void load()} /></Tooltip>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
-    {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div><div className="section-toolbar"><h3>{text('vehicles')}</h3><Space wrap><Button type="text" icon={<Download size={15} />} onClick={() => void download('/api/business/export', 'vehicle-data.json').catch(onError)}>{text('export')}</Button>{admin && <><Button icon={<Download size={15} />} disabled={!online} onClick={() => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError)}>{text('backup')}</Button><Button icon={<RotateCcw size={15} />} disabled={!online} onClick={() => setRestoreOpen(true)}>{text('restoreBackup')}</Button></>}</Space></div>{filters}<Table<BusinessRecord> rowKey="id" loading={loading} size="middle" scroll={{ x: 1320 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
+    {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div><div className="section-toolbar"><h3>{text('vehicles')}</h3><Space wrap><Button type="text" icon={<Download size={15} />} onClick={() => void download('/api/business/export', 'vehicle-data.json').catch(onError)}>{text('export')}</Button>{admin && <><Button icon={<Download size={15} />} disabled={!online} onClick={() => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError)}>{text('backup')}</Button><Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}><Button icon={<RotateCcw size={15} />} disabled={!online || syncPaused} onClick={() => setRestoreOpen(true)}>{text('restoreBackup')}</Button></Tooltip></>}</Space></div>{filters}<Table<BusinessRecord> rowKey="id" loading={loading} size="middle" scroll={{ x: 1320 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
       { title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => { setSelectedId(record.id); setHistoryPage(1) }}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
       { title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
       { title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
@@ -324,7 +333,7 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
       { key: 'attachments', label: text('attachments'), children: <><div className="dove-upload"><Upload accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" maxCount={1} beforeUpload={value => { setAttachmentFile(value); return false }} onRemove={() => setAttachmentFile(null)}><Button icon={<Plus size={15} />}>{text('chooseFile')}</Button></Upload><Button type="primary" disabled={!attachmentFile || selected.archived} loading={busy} onClick={() => void saveFile(selected.id)}>{text('upload')}</Button></div><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
       { key: 'history', label: text('history'), children: history(changes.filter(change => change.vehicleId === selected.id)) },
     ] : []} /></Drawer>
-    {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
+    {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
     {editor && <RecordEditor record={editor.record} kind={editor.kind} initialName={editor.initialName} language={language} busy={busy} onCancel={() => { if (!busy) setEditor(null) }} onSave={(data, reason) => void saveRecord(data, reason)} />}
     <Modal open={Boolean(action)} title={action ? text(action.type === 'remove' ? 'recordRemoval' : action.archived ? 'archive' : 'restore') : ''} onCancel={() => { if (!busy) setAction(null) }} onOk={() => void applyAction()} confirmLoading={busy} okText={text('save')} cancelText={text('cancel')} okButtonProps={{ disabled: !actionReason.trim() }}><p className="operation-name">{display(action?.record.data.name)}</p><label className="standalone-label">{text('reason')}<Input.TextArea value={actionReason} maxLength={500} rows={3} onChange={event => setActionReason(event.target.value)} /></label></Modal>
     <Modal open={Boolean(activeReport)} onCancel={() => setReportId(null)} title={activeReport ? display(activeReport.data.name) : ''} footer={null} width={1150} destroyOnHidden>{activeReport && <><div className="report-actions"><Button icon={<Download size={16} />} onClick={() => downloadFile(activeReport)}>{text('download')}</Button><Button type="primary" icon={<ClipboardCheck size={16} />} disabled={activeReport.archived || cars.find(car => car.id === activeReport.vehicleId)?.archived} onClick={() => openConfiguration(activeReport)}>{text('updateConfiguration')}</Button>{recordActions(activeReport)}</div><Suspense fallback={<Spin />}><ReportViewer report={(activeReport.data as unknown as ReportData).parsed} language={language} /></Suspense></>}</Modal>
@@ -338,6 +347,6 @@ export default function BusinessApp({ view, language, admin, online, onError }: 
       {olderReport && <Alert type="warning" showIcon title={text('olderReport')} description={<Checkbox checked={configuration.allowOlder} onChange={event => setConfiguration({ ...configuration, allowOlder: event.target.checked })}>{text('confirmOlderReport')}</Checkbox>} />}
       <label>{text('configurationReason')}<Input.TextArea value={configuration.reason} maxLength={500} rows={2} onChange={event => setConfiguration({ ...configuration, reason: event.target.value })} /></label>
     </div>}</Modal>
-    <Modal open={restoreOpen} title={text('restoreBackup')} onCancel={() => { if (!busy) setRestoreOpen(false) }} onOk={() => void restore()} okText={text('restore')} cancelText={text('cancel')} confirmLoading={busy} okButtonProps={{ disabled: !restoreFile || confirmation !== 'RESTORE' || !restoreReason.trim() || sync.pending > 0 }} destroyOnHidden><div className="configuration-form">{sync.pending > 0 && <Alert type="warning" title={text('pendingBeforeRestore')} />}<Upload accept=".zip" maxCount={1} beforeUpload={value => { setRestoreFile(value); return false }} onRemove={() => setRestoreFile(null)}><Button icon={<UploadIcon size={16} />}>{text('chooseFile')} · .zip</Button></Upload><label>{text('restoreConfirmation')}<Input value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label><label>{text('reason')}<Input.TextArea maxLength={500} rows={2} value={restoreReason} onChange={event => setRestoreReason(event.target.value)} /></label></div></Modal>
+    <Modal open={restoreOpen} title={text('restoreBackup')} onCancel={() => { if (!busy) setRestoreOpen(false) }} onOk={() => void restore()} okText={text('restore')} cancelText={text('cancel')} confirmLoading={busy} okButtonProps={{ disabled: syncPaused || !restoreFile || confirmation !== 'RESTORE' || !restoreReason.trim() || sync.pending > 0 }} destroyOnHidden><div className="configuration-form">{syncPaused && <Alert type="warning" showIcon title={errorText('CONFIRM_RESUME', language)} />}{sync.pending > 0 && <Alert type="warning" title={text('pendingBeforeRestore')} />}<Upload accept=".zip" maxCount={1} beforeUpload={value => { setRestoreFile(value); return false }} onRemove={() => setRestoreFile(null)}><Button icon={<UploadIcon size={16} />}>{text('chooseFile')} · .zip</Button></Upload><label>{text('restoreConfirmation')}<Input value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label><label>{text('reason')}<Input.TextArea maxLength={500} rows={2} value={restoreReason} onChange={event => setRestoreReason(event.target.value)} /></label></div></Modal>
   </section>
 }

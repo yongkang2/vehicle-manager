@@ -1,5 +1,5 @@
 import express from 'express'
-import type { Request, Express, RequestHandler } from 'express'
+import type { Request, RequestHandler } from 'express'
 import multer from 'multer'
 import path from 'node:path'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
@@ -13,10 +13,10 @@ import { configurationFields, controllerRecordId, doveRecordedTime, keyControlle
 import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData, VehicleDeleteRequest } from '../shared/business.js'
 
 type Config = { sharedPath: string; teamId: string }
-type Context = { actor: Actor; identity: Identity; configuration: Config; online: boolean }
-type BusinessRequest = Request & { localUser?: LocalUser; businessContext?: Context }
+type Context = { actor: Actor; identity: Identity; configuration: Config; online: boolean; syncEnabled: boolean }
+type BusinessRequest = Request & { localUser?: LocalUser; businessContext?: Context; syncEnabled?: boolean }
 const recordKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment']
-export function installBusinessRoutes(app: Express, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void) {
+export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store) {
   const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business)
   async function access(req: BusinessRequest, admin = false): Promise<Context> {
     const configuration = store.get<Config>('configuration')
@@ -31,9 +31,9 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     const { member, binding } = team ? bindingFor(team, identity) : {}
     if (!member?.enabled || !binding?.enabled) throw new AppError('ACCESS_DISABLED', 403)
     if (admin && member.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
-    return { actor: { id: member.id, name: member.name, role: member.role, deviceId: store.deviceId }, identity, configuration, online }
+    return { actor: { id: member.id, name: member.name, role: member.role, deviceId: store.deviceId }, identity, configuration, online, syncEnabled: req.syncEnabled !== false }
   }
-  const sync = async (context: Context) => synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity)
+  const sync = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity) : synchronization.status()
   const router = express.Router()
   function writeRoute(method: 'post' | 'put' | 'get', route: string, ...handlers: RequestHandler[]) {
     const action = handlers.pop()!
@@ -43,13 +43,20 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   }
   router.use(async (req: BusinessRequest, res, next) => {
     try {
-      req.businessContext = await access(req)
-      if (req.method === 'GET' && req.path !== '/sync' && !/^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)) {
-        const state = await sync(req.businessContext)
-        if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
-        res.set('X-Sync-State', state.phase)
-      }
-      if (['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => { if (res.statusCode < 400 && synchronization.status().pending > 0) void sync(req.businessContext!) })
+      // An aborted connection must not hide access/cache work from switch/close.
+      await store.runWrite(async () => {
+        req.businessContext = await access(req)
+        const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
+        const canonicalMaintenance = deletePreview || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
+        if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview) {
+          const state = await sync(req.businessContext)
+          if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
+          res.set('X-Sync-State', state.phase)
+        }
+        if (['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => { if (res.statusCode < 400 && synchronization.status().pending > 0) void sync(req.businessContext!) })
+      })
+      // Maintenance handlers must start outside the normal-write context.
       next()
     } catch (error) { next(error) }
   })
@@ -80,17 +87,17 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   })
   router.get('/history', (req, res) => res.json(business.history(req.query.vehicleId ? String(req.query.vehicleId) : undefined)))
   router.get('/vehicles/:id/delete-preview', async (req: BusinessRequest, res) => {
-    const context = await access(req, true)
+    const context = await store.runWrite(() => access(req, true))
     res.json(await synchronization.deletePreview(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id)))
   })
   router.delete('/vehicles/:id', async (req: BusinessRequest, res) => {
-    const context = await access(req, true)
+    const context = await store.runWrite(() => access(req, true))
     res.json(await synchronization.deleteVehicle(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id), req.body as VehicleDeleteRequest))
   })
   router.get('/audit', (req: BusinessRequest, res) => {
     if (req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
     const team = store.get<TeamDocument>('cachedTeam')
-    res.json(store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || store.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id })))
+    res.json(store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || accounts.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id })))
   })
   router.get('/sync', (req, res) => res.json(synchronization.status()))
   router.get('/sync/quarantined', (req, res) => res.json(store.quarantineRows()))
@@ -202,7 +209,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024, files: 1, fields: 3 } })
   router.post('/restore', backupUpload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file || req.body?.confirmation !== 'RESTORE') throw new AppError('RESTORE_CONFIRMATION_REQUIRED')
-    const context = await access(req, true), explanation = reason(req.body.reason)
+    const context = await store.runWrite(() => access(req, true)), explanation = reason(req.body.reason)
     const result = await store.withMaintenance(() => teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async (team, member) => {
       const state = await synchronization.refreshLocked(context.configuration.sharedPath, team)
       if (state.error) throw new AppError(state.error, 409)
@@ -222,7 +229,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     if (!configuration) return
     try {
       const team = await teams.read(configuration.sharedPath, configuration.teamId); cache(team)
-      const binding = team.bindings.find(item => item.deviceId === store.deviceId && item.enabled && team.members.some(member => member.id === item.memberId && member.enabled) && store.db.prepare('SELECT id FROM accounts WHERE id=?').get(item.localUserId))
+      const binding = team.bindings.find(item => item.deviceId === store.deviceId && item.enabled && team.members.some(member => member.id === item.memberId && member.enabled) && accounts.db.prepare('SELECT 1 FROM sessions WHERE user_id=? AND workspace_id=? AND sync_enabled=1 AND expires>?').get(item.localUserId, configuration.teamId, Date.now()))
       if (binding) await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' })
     } catch { return }
   }

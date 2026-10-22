@@ -51,7 +51,9 @@ export class BusinessSync {
   constructor(readonly business: Business, readonly teams: TeamDirectory) {}
   status(): SyncStatus {
     const store = this.business.store
-    return { phase: this.phase, error: this.error, pending: store.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total as number, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
+    const pendingOperations = store.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total as number
+    const pendingImports = store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []
+    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
   }
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity): Promise<SyncStatus> {

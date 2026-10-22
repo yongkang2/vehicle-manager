@@ -13,7 +13,7 @@ if (!existsSync(executable) || !existsSync(launcher)) throw new Error('Pass the 
 const root = await fs.mkdtemp(path.join(project, 'test', 'test-data-package-')), data = path.join(root, 'local'), shared = path.join(root, 'shared')
 await fs.mkdir(shared)
 const env = { ...process.env, PORT: '0', VEHICLE_MANAGER_DATA_DIR: data }, execute = promisify(execFile)
-let cookie = '', started = false
+let cookie = '', workspaceToken = '', started = false
 try {
   await execute(executable, [launcher, '--no-browser'], { cwd: release, env, timeout: 30000 }); started = true
   const state = JSON.parse(await fs.readFile(path.join(data, 'service.json'), 'utf8'))
@@ -21,7 +21,8 @@ try {
   assert.equal(JSON.parse(await fs.readFile(path.join(data, 'service.json'), 'utf8')).pid, state.pid)
   async function request(url, method = 'GET', body) {
     const form = body instanceof FormData
-    const response = await fetch(`http://127.0.0.1:${state.port}/api${url}`, { method, headers: { Cookie: cookie, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body ? form ? body : JSON.stringify(body) : undefined })
+    const response = await fetch(`http://127.0.0.1:${state.port}/api${url}`, { method, headers: { Cookie: cookie, 'X-Workspace-Token': workspaceToken, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body ? form ? body : JSON.stringify(body) : undefined })
+    workspaceToken = response.headers.get('x-workspace-token') || workspaceToken
     const issued = response.headers.get('set-cookie'); if (issued) cookie = issued.split(';')[0]
     const result = response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer())
     if (!response.ok) throw new Error(`${url}: ${JSON.stringify(result)}`)

@@ -10,12 +10,13 @@ test('separate local accounts join one team, require approval and never expose c
   const shared = path.join(root, 'shared'); await fs.mkdir(shared)
   const clients = ['alpha', 'beta'].map(name => {
     const client = createApp({ dataDir: path.join(root, name) })
-    return { ...client, server: client.app.listen(0, '127.0.0.1'), cookie: '' }
+    return { ...client, server: client.app.listen(0, '127.0.0.1'), cookie: '', workspaceToken: '' }
   })
   for (const client of clients) if (!client.server.listening) await new Promise(resolve => client.server.once('listening', resolve))
   async function request(client: typeof clients[number], url: string, method = 'GET', body?: unknown) {
     const address = client.server.address() as { port: number }
-    const response = await fetch(`http://127.0.0.1:${address.port}${url}`, { method, headers: { Cookie: client.cookie, 'X-App-Request': 'vehicle-manager', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })
+    const response = await fetch(`http://127.0.0.1:${address.port}${url}`, { method, headers: { Cookie: client.cookie, 'X-Workspace-Token': client.workspaceToken, 'X-App-Request': 'vehicle-manager', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })
+    client.workspaceToken = response.headers.get('x-workspace-token') || client.workspaceToken
     const cookie = response.headers.get('set-cookie')
     if (cookie) client.cookie = cookie.split(';')[0]
     return { status: response.status, data: await response.json() }

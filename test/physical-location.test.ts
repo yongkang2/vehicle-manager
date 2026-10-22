@@ -59,14 +59,15 @@ test('record APIs create, update, clear and export vehicle location with existin
   const server = services.app.listen(0, '127.0.0.1')
   if (!server.listening) await once(server, 'listening')
   const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port
-  let cookie = ''
+  let cookie = '', workspaceToken = ''
   async function request(endpoint: string, method = 'GET', body?: unknown, authenticated = true) {
     const response = await fetch(origin + '/api' + endpoint, {
-      method, headers: { 'X-App-Request': 'vehicle-manager', ...(authenticated && cookie ? { Cookie: cookie } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      method, headers: { 'X-App-Request': 'vehicle-manager', 'X-Workspace-Token': workspaceToken, ...(authenticated && cookie ? { Cookie: cookie } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     })
     const nextCookie = response.headers.get('set-cookie')
     if (nextCookie) cookie = nextCookie.split(';')[0]
+    if (response.ok) workspaceToken = response.headers.get('x-workspace-token') || workspaceToken
     const data = await response.json()
     await services.synchronization.settle()
     return { status: response.status, data }
@@ -97,7 +98,7 @@ test('record APIs create, update, clear and export vehicle location with existin
     assert.equal((await request('/business/records')).data.find((record: BusinessRecord) => record.id === car.id).data.physicalLocation, '')
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()))
-    await services.synchronization.settle(); services.store.db.close()
+    await services.close()
     await fs.rm(root, { recursive: true, force: true })
   }
 })

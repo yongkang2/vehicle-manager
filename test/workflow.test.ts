@@ -12,12 +12,13 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
   await fs.mkdir(shared)
   const clients = ['admin', 'member'].map(name => {
     const client = createApp({ dataDir: path.join(root, name) })
-    return { ...client, server: client.app.listen(0, '127.0.0.1'), cookie: '' }
+    return { ...client, server: client.app.listen(0, '127.0.0.1'), cookie: '', workspaceToken: '' }
   })
   for (const client of clients) if (!client.server.listening) await new Promise(resolve => client.server.once('listening', resolve))
   async function request(client: typeof clients[number], url: string, method = 'GET', body?: unknown) {
     const port = (client.server.address() as { port: number }).port, form = body instanceof FormData
-    const response = await fetch(`http://127.0.0.1:${port}/api${url}`, { method, headers: { Cookie: client.cookie, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body ? form ? body : JSON.stringify(body) : undefined })
+    const response = await fetch(`http://127.0.0.1:${port}/api${url}`, { method, headers: { Cookie: client.cookie, 'X-Workspace-Token': client.workspaceToken, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body ? form ? body : JSON.stringify(body) : undefined })
+    client.workspaceToken = response.headers.get('x-workspace-token') || client.workspaceToken
     const cookie = response.headers.get('set-cookie'); if (cookie) client.cookie = cookie.split(';')[0]
     const binary = !response.headers.get('content-type')?.includes('json')
     return { status: response.status, data: binary ? Buffer.from(await response.arrayBuffer()) : await response.json() }

@@ -167,6 +167,18 @@ export class TeamDirectory {
     })
   }
 
+  async cancelRequest(directory: string, teamId: string, identity: Identity): Promise<TeamDocument> {
+    return locked(directory, async () => {
+      const team = await this.read(directory, teamId)
+      const request = team.requests.find(item => item.status === 'pending' && item.identity.deviceId === identity.deviceId && item.identity.localUserId === identity.localUserId)
+      if (!request) throw new AppError('REQUEST_CHANGED', 409)
+      request.status = 'cancelled'
+      event(team, identity.localUserId, 'join.cancelled', request.id, 'Withdrawn by applicant')
+      await atomicDocument(directory, team)
+      return team
+    })
+  }
+
   async approve(directory: string, teamId: string, actor: Identity, requestId: string, role: Role, existingMemberId: string | null, reason: string): Promise<TeamDocument> {
     return locked(directory, async () => {
       const team = await this.read(directory, teamId)

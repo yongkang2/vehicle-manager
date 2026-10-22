@@ -7,47 +7,143 @@ import path from 'node:path'
 import { AppError } from './team.js'
 import type { Operation, QuarantinedOperation, VehicleDeletion } from '../shared/business.js'
 
+const schemaError = () => new AppError('LOCAL_SCHEMA_INVALID', 503)
+const coreSql = `CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+  CREATE TABLE accounts(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,salt TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL);
+  CREATE TABLE sessions(token TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES accounts(id),expires INTEGER NOT NULL);
+  CREATE TABLE local_events(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,action TEXT NOT NULL,detail TEXT NOT NULL,created TEXT NOT NULL);`
+const businessSql = `CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,vehicle_id TEXT REFERENCES records(id),vin TEXT UNIQUE,data TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,version INTEGER NOT NULL,updated TEXT NOT NULL);
+  CREATE INDEX records_vehicle ON records(vehicle_id,kind);
+  CREATE TABLE changes(id TEXT PRIMARY KEY,record_id TEXT NOT NULL,vehicle_id TEXT NOT NULL,payload TEXT NOT NULL,created TEXT NOT NULL);
+  CREATE TABLE outbox(seq INTEGER PRIMARY KEY,id TEXT UNIQUE NOT NULL,record_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending');
+  CREATE TABLE conflicts(record_id TEXT PRIMARY KEY,payload TEXT NOT NULL);`
+const deletionSql = `CREATE TABLE vehicle_deletions(vehicle_id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL,payload TEXT NOT NULL);
+  CREATE TABLE quarantined_operations(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`
+const workspaceSql = `CREATE TABLE workspaces(id TEXT PRIMARY KEY,name TEXT NOT NULL,shared_path TEXT NOT NULL,directory TEXT NOT NULL);
+  CREATE TABLE account_workspaces(user_id TEXT NOT NULL REFERENCES accounts(id),workspace_id TEXT NOT NULL REFERENCES workspaces(id),PRIMARY KEY(user_id,workspace_id));
+  ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
+  ALTER TABLE sessions ADD COLUMN workspace_epoch INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN sync_enabled INTEGER NOT NULL DEFAULT 0;`
+const columnShapes: Record<string, string[]> = {
+  settings: ['key TEXT PK1', 'value TEXT NN'],
+  accounts: ['id TEXT PK1', 'username TEXT NN', 'display_name TEXT NN', 'salt TEXT NN', 'hash TEXT NN', 'created TEXT NN'],
+  sessions: ['token TEXT PK1', 'user_id TEXT NN', 'expires INTEGER NN'],
+  local_events: ['id TEXT PK1', 'actor_id TEXT NN', 'action TEXT NN', 'detail TEXT NN', 'created TEXT NN'],
+  records: ['id TEXT PK1', 'kind TEXT NN', 'vehicle_id TEXT', 'vin TEXT', 'data TEXT NN', 'archived INTEGER NN DEFAULT=0', 'version INTEGER NN', 'updated TEXT NN'],
+  changes: ['id TEXT PK1', 'record_id TEXT NN', 'vehicle_id TEXT NN', 'payload TEXT NN', 'created TEXT NN'],
+  outbox: ['seq INTEGER PK1', 'id TEXT NN', 'record_id TEXT NN', 'payload TEXT NN', 'state TEXT NN DEFAULT=pending'],
+  conflicts: ['record_id TEXT PK1', 'payload TEXT NN'],
+  vehicle_deletions: ['vehicle_id TEXT PK1', 'request_id TEXT NN', 'payload TEXT NN'],
+  quarantined_operations: ['id TEXT PK1', 'payload TEXT NN'],
+  workspaces: ['id TEXT PK1', 'name TEXT NN', 'shared_path TEXT NN', 'directory TEXT NN'],
+  account_workspaces: ['user_id TEXT NN PK1', 'workspace_id TEXT NN PK2'],
+}
+const workspaceColumns = ['workspace_id TEXT', 'workspace_epoch INTEGER NN DEFAULT=0', 'sync_enabled INTEGER NN DEFAULT=0']
+const uniqueColumns: Record<string, string[][]> = { accounts: [['username']], records: [['vin']], outbox: [['id']], vehicle_deletions: [['request_id']] }
+const foreignKeys: Record<string, string[][]> = { sessions: [['user_id', 'accounts', 'id']], records: [['vehicle_id', 'records', 'id']], account_workspaces: [['user_id', 'accounts', 'id'], ['workspace_id', 'workspaces', 'id']] }
+const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`
+const normalizedDefault = (value: unknown) => value === null ? undefined : String(value).replace(/^\((.*)\)$/, '$1').replace(/^'(.*)'$/, '$1')
+
+/** Both published v3 branches have different shapes; the version number is not a capability flag. */
+function inspectSchema(db: DatabaseSync, version: number): { core: boolean; business: boolean; deletion: boolean; workspace: boolean } {
+  if (!Number.isSafeInteger(version) || version < 0) throw schemaError()
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*'").all().map(row => String(row.name)))
+  if ([...tables].some(name => !Object.hasOwn(columnShapes, name))) throw schemaError()
+  const completeGroup = (names: string[]) => {
+    const count = names.filter(name => tables.has(name)).length
+    if (count !== 0 && count !== names.length) throw schemaError()
+    return count > 0
+  }
+  const core = completeGroup(['settings', 'accounts', 'sessions', 'local_events'])
+  const business = completeGroup(['records', 'changes', 'outbox', 'conflicts'])
+  const deletion = completeGroup(['vehicle_deletions', 'quarantined_operations'])
+  const workspace = completeGroup(['workspaces', 'account_workspaces'])
+  if (version === 0 ? tables.size !== 0 : !core) throw schemaError()
+  if ((version === 1 && (business || deletion || workspace)) || (version >= 2 && !business) || (version === 3 && !deletion && !workspace) || (version === 4 && (!deletion || !workspace))) throw schemaError()
+  const sessionColumns = core ? db.prepare('PRAGMA table_info(sessions)').all().map(row => String(row.name)) : []
+  const addedColumns = workspaceColumns.filter(definition => sessionColumns.includes(definition.split(' ')[0])).length
+  if (addedColumns !== (workspace ? workspaceColumns.length : 0)) throw schemaError()
+  for (const table of tables) {
+    const expected = [...columnShapes[table], ...(table === 'sessions' && workspace ? workspaceColumns : [])]
+    const columns = db.prepare(`PRAGMA table_info(${quoted(table)})`).all()
+    if (columns.length !== expected.length) throw schemaError()
+    for (let index = 0; index < columns.length; index++) {
+      const column = columns[index], [name, type, ...flags] = expected[index].split(' ')
+      const primaryKey = Number(flags.find(flag => flag.startsWith('PK'))?.slice(2) || 0)
+      const defaultValue = flags.find(flag => flag.startsWith('DEFAULT='))?.slice(8)
+      if (column.name !== name || String(column.type).toUpperCase() !== type || Boolean(column.notnull) !== flags.includes('NN') || column.pk !== primaryKey || normalizedDefault(column.dflt_value) !== defaultValue) throw schemaError()
+    }
+    const indexes = db.prepare(`PRAGMA index_list(${quoted(table)})`).all()
+    const unique = indexes.filter(index => index.unique && index.origin !== 'pk').map(index => ({ partial: Boolean(index.partial), columns: db.prepare(`PRAGMA index_info(${quoted(String(index.name))})`).all().map(column => String(column.name)) }))
+    const wantedUnique = uniqueColumns[table] || []
+    if (unique.length !== wantedUnique.length || wantedUnique.some(wanted => !unique.some(index => !index.partial && JSON.stringify(index.columns) === JSON.stringify(wanted)))) throw schemaError()
+    if (table === 'records') {
+      const index = indexes.find(row => row.name === 'records_vehicle' && !row.unique && !row.partial)
+      if (!index || JSON.stringify(db.prepare('PRAGMA index_info(records_vehicle)').all().map(column => column.name)) !== JSON.stringify(['vehicle_id', 'kind'])) throw schemaError()
+    }
+    const references = db.prepare(`PRAGMA foreign_key_list(${quoted(table)})`).all()
+    const wantedReferences = foreignKeys[table] || []
+    if (references.length !== wantedReferences.length || references.some(reference => reference.on_update !== 'NO ACTION' || reference.on_delete !== 'NO ACTION' || !wantedReferences.some(wanted => JSON.stringify([reference.from, reference.table, reference.to]) === JSON.stringify(wanted)))) throw schemaError()
+  }
+  if (db.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || db.prepare('PRAGMA foreign_key_check').all().length) throw schemaError()
+  return { core, business, deletion, workspace }
+}
+
 export class LocalStore {
   private transactionDepth = 0
   readonly db: DatabaseSync
   readonly deviceId: string
   readonly deviceName = hostname()
-  constructor(readonly directory: string) {
+  constructor(readonly directory: string, deviceId?: string) {
     mkdirSync(directory, { recursive: true })
     this.db = new DatabaseSync(path.join(directory, 'local.sqlite'))
-    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
-    const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number
-    if (version > 3) { this.db.close(); throw new AppError('LOCAL_VERSION_TOO_NEW', 503) }
-    if (version === 0) {
-      this.db.exec(`BEGIN IMMEDIATE;
-        CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-        CREATE TABLE accounts(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,salt TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL);
-        CREATE TABLE sessions(token TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES accounts(id),expires INTEGER NOT NULL);
-        CREATE TABLE local_events(id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,action TEXT NOT NULL,detail TEXT NOT NULL,created TEXT NOT NULL);
-        PRAGMA user_version=1;
-        COMMIT;`)
-    }
-    if (version < 2) {
-      this.db.exec(`BEGIN IMMEDIATE;
-        CREATE TABLE records(id TEXT PRIMARY KEY,kind TEXT NOT NULL,vehicle_id TEXT REFERENCES records(id),vin TEXT UNIQUE,data TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,version INTEGER NOT NULL,updated TEXT NOT NULL);
-        CREATE INDEX records_vehicle ON records(vehicle_id,kind);
-        CREATE TABLE changes(id TEXT PRIMARY KEY,record_id TEXT NOT NULL,vehicle_id TEXT NOT NULL,payload TEXT NOT NULL,created TEXT NOT NULL);
-        CREATE TABLE outbox(seq INTEGER PRIMARY KEY,id TEXT UNIQUE NOT NULL,record_id TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending');
-        CREATE TABLE conflicts(record_id TEXT PRIMARY KEY,payload TEXT NOT NULL);
-        PRAGMA user_version=2;
-        COMMIT;`)
-    }
-    if (version < 3) {
-      this.db.exec(`BEGIN IMMEDIATE;
-        CREATE TABLE vehicle_deletions(vehicle_id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL,payload TEXT NOT NULL);
-        CREATE TABLE quarantined_operations(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
-        PRAGMA user_version=3;
-        COMMIT;`)
-    }
-    const machine = this.get<string>('machine')
-    if (machine && machine !== this.deviceName) { this.db.close(); throw new AppError('COPIED_LOCAL_DATA', 409) }
-    this.deviceId = this.get<string>('deviceId') || randomUUID()
-    this.set('deviceId', this.deviceId); this.set('machine', this.deviceName)
+    try {
+      this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
+      const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number
+      if (version > 4) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
+      const shape = inspectSchema(this.db, version)
+      const machine = shape.core ? this.get<string>('machine') : null
+      if (machine && machine !== this.deviceName) throw new AppError('COPIED_LOCAL_DATA', 409)
+      const selectedDevice = deviceId || (shape.core ? this.get<string>('deviceId') : null) || randomUUID()
+      const config = shape.core && !shape.workspace ? this.get<{ teamId: string; sharedPath: string }>('configuration') : null
+      if (config && (typeof config.teamId !== 'string' || !config.teamId || typeof config.sharedPath !== 'string' || !config.sharedPath)) throw schemaError()
+      if (version < 4) {
+        if (version > 0) this.backupBeforeSchema4(version)
+        this.transaction(() => {
+          if (!shape.core) this.db.exec(coreSql)
+          if (!shape.business) this.db.exec(businessSql)
+          if (!shape.deletion) this.db.exec(deletionSql)
+          if (!shape.workspace) {
+            this.db.exec(workspaceSql)
+            if (config) {
+              const team = this.get<{ name?: string }>('cachedTeam')
+              this.db.prepare('INSERT INTO workspaces VALUES(?,?,?,?)').run(config.teamId, typeof team?.name === 'string' && team.name ? team.name : config.teamId, config.sharedPath, '.')
+              this.db.prepare('INSERT INTO account_workspaces SELECT id,? FROM accounts').run(config.teamId)
+              this.db.prepare('UPDATE sessions SET workspace_id=?').run(config.teamId)
+            }
+          }
+          inspectSchema(this.db, 4)
+          this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
+          this.db.exec('PRAGMA user_version=4')
+        })
+      } else {
+        this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
+      }
+      this.deviceId = selectedDevice
+    } catch (error) { this.db.close(); throw error }
+  }
+  private backupBeforeSchema4(version: number): void {
+    try {
+      const backups = path.join(this.directory, 'migration-backups')
+      mkdirSync(backups, { recursive: true })
+      const destination = path.join(backups, `before-schema4-${randomUUID()}.sqlite`)
+      this.db.prepare('VACUUM INTO ?').run(destination)
+      const snapshot = new DatabaseSync(destination, { readOnly: true })
+      try {
+        if (snapshot.prepare('PRAGMA user_version').get()!.user_version !== version) throw schemaError()
+        inspectSchema(snapshot, version)
+      } finally { snapshot.close() }
+    } catch { throw new AppError('LOCAL_BACKUP_FAILED', 503) }
   }
   private readonly writeContext = new AsyncLocalStorage<{ active: boolean; maintenance: boolean }>()
   private readonly writeJobs = new Set<Promise<unknown>>()

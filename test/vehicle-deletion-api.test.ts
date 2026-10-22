@@ -17,16 +17,17 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
   await fs.mkdir(shared)
   const clients = ['admin', 'member'].map(name => {
     const services = createApp({ dataDir: path.join(root, name) })
-    return { ...services, server: services.app.listen(0, '127.0.0.1'), cookie: '' }
+    return { ...services, server: services.app.listen(0, '127.0.0.1'), cookie: '', workspaceToken: '' }
   })
   for (const client of clients) if (!client.server.listening) await once(client.server, 'listening')
   async function request(client: typeof clients[number], route: string, method = 'GET', body?: unknown) {
     const form = body instanceof FormData
     const response = await fetch('http://127.0.0.1:' + (client.server.address() as { port: number }).port + '/api' + route, {
-      method, headers: { Cookie: client.cookie, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) },
+      method, headers: { Cookie: client.cookie, 'X-Workspace-Token': client.workspaceToken, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? form ? body : JSON.stringify(body) : undefined,
     })
     const cookie = response.headers.get('set-cookie'); if (cookie) client.cookie = cookie.split(';')[0]
+    if (response.ok) client.workspaceToken = response.headers.get('x-workspace-token') || client.workspaceToken
     const data = response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer())
     await client.synchronization.settle()
     return { status: response.status, data }
@@ -111,11 +112,11 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     await fs.rename(shared, shared + '-offline')
     try { assert.equal((await request(admin, '/business/vehicles/' + replacement.data.id + '/delete-preview')).status, 503) }
     finally { await fs.rename(shared + '-offline', shared) }
-    assert.equal(admin.store.db.prepare('PRAGMA user_version').get()!.user_version, 3)
+    assert.equal(admin.store.db.prepare('PRAGMA user_version').get()!.user_version, 4)
   } finally {
     for (const client of clients) {
       await new Promise<void>(resolve => client.server.close(() => resolve()))
-      await client.synchronization.settle(); client.store.db.close()
+      await client.close()
     }
     await fs.rm(root, { recursive: true, force: true })
   }
