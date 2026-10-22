@@ -10,7 +10,7 @@ import { createBackup, restoreBackup } from './backup.js'
 import { LocalStore } from './store.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
 import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
-import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData } from '../shared/business.js'
+import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData, VehicleDeleteRequest } from '../shared/business.js'
 
 type Config = { sharedPath: string; teamId: string }
 type Context = { actor: Actor; identity: Identity; configuration: Config; online: boolean }
@@ -35,10 +35,16 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   }
   const sync = async (context: Context) => synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity)
   const router = express.Router()
+  function writeRoute(method: 'post' | 'put' | 'get', route: string, ...handlers: RequestHandler[]) {
+    const action = handlers.pop()!
+    router[method](route, ...handlers, (req, res, next) => {
+      void store.runWrite(() => action(req, res, next)).catch(next)
+    })
+  }
   router.use(async (req: BusinessRequest, res, next) => {
     try {
       req.businessContext = await access(req)
-      if (req.method === 'GET' && req.path !== '/sync') {
+      if (req.method === 'GET' && req.path !== '/sync' && !/^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)) {
         const state = await sync(req.businessContext)
         if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
         res.set('X-Sync-State', state.phase)
@@ -52,16 +58,16 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     if (kind && !recordKinds.includes(kind)) throw new AppError('INVALID_INPUT')
     res.json(business.list(kind as RecordKind | undefined, req.query.vehicleId ? String(req.query.vehicleId) : undefined))
   })
-  router.post('/records', (req: BusinessRequest, res) => {
+  writeRoute('post', '/records', (req: BusinessRequest, res) => {
     if (!['vehicle', 'part', 'modification', 'equipment'].includes(req.body?.kind)) throw new AppError('INVALID_INPUT')
     res.status(201).json(business.write({ kind: req.body.kind, vehicleId: req.body.vehicleId || null, data: req.body.data, actor: req.businessContext!.actor, reason: req.body.reason }))
   })
-  router.put('/records/:id', (req: BusinessRequest, res) => {
+  writeRoute('put', '/records/:id', (req: BusinessRequest, res) => {
     const current = business.get(String(req.params.id))
     if (['report', 'attachment'].includes(current.kind)) throw new AppError('IMMUTABLE_REPORT', 409)
     res.json(business.write({ id: current.id, kind: current.kind, vehicleId: current.vehicleId, data: req.body.data, version: req.body.version, actor: req.businessContext!.actor, reason: req.body.reason }))
   })
-  router.post('/records/:id/archive', async (req: BusinessRequest, res, next) => {
+  writeRoute('post', '/records/:id/archive', async (req: BusinessRequest, res, next) => {
     try {
       if (typeof req.body?.archived !== 'boolean') throw new AppError('INVALID_INPUT')
       const context = await access(req, true)
@@ -73,14 +79,24 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     } catch (error) { next(error) }
   })
   router.get('/history', (req, res) => res.json(business.history(req.query.vehicleId ? String(req.query.vehicleId) : undefined)))
+  router.get('/vehicles/:id/delete-preview', async (req: BusinessRequest, res) => {
+    const context = await access(req, true)
+    res.json(await synchronization.deletePreview(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id)))
+  })
+  router.delete('/vehicles/:id', async (req: BusinessRequest, res) => {
+    const context = await access(req, true)
+    res.json(await synchronization.deleteVehicle(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id), req.body as VehicleDeleteRequest))
+  })
   router.get('/audit', (req: BusinessRequest, res) => {
     if (req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
     const team = store.get<TeamDocument>('cachedTeam')
     res.json(store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || store.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id })))
   })
   router.get('/sync', (req, res) => res.json(synchronization.status()))
-  router.post('/sync', async (req: BusinessRequest, res) => res.json(await sync(req.businessContext!)))
-  router.post('/sync/:id/resolve', async (req: BusinessRequest, res) => {
+  router.get('/sync/quarantined', (req, res) => res.json(store.quarantineRows()))
+  router.get('/sync/quarantined/export', (req, res) => res.attachment('quarantined-operations.json').json({ exportedAt: new Date().toISOString(), operations: store.quarantineRows() }))
+  writeRoute('post', '/sync', async (req: BusinessRequest, res) => res.json(await sync(req.businessContext!)))
+  writeRoute('post', '/sync/:id/resolve', async (req: BusinessRequest, res) => {
     const context = req.businessContext!
     if (typeof req.body.token !== 'string' || !req.body.choices || typeof req.body.choices !== 'object') throw new AppError('INVALID_INPUT')
     res.json(await synchronization.resolve(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id), req.body.token, req.body.choices, reason(req.body.reason)))
@@ -96,7 +112,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8')
     return path.basename(decoded.includes('\ufffd') ? file.originalname : decoded).slice(0, 240)
   }
-  router.post('/vehicles/:id/attachments', upload.single('file'), async (req: BusinessRequest, res) => {
+  writeRoute('post', '/vehicles/:id/attachments', upload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file) throw new AppError('FILE_REQUIRED')
     const car = business.get(String(req.params.id))
     if (car.kind !== 'vehicle' || car.archived) throw new AppError('PARENT_ARCHIVED', 409)
@@ -106,23 +122,23 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     const key = await business.blob(bytes)
     res.status(201).json(business.write({ kind: 'attachment', vehicleId: car.id, data: { name, checksum: key, size: bytes.length, savedAt: new Date().toISOString() }, actor: req.businessContext!.actor, reason: 'Attachment uploaded', internal: true }))
   })
-  router.get('/files/:id', async (req: BusinessRequest, res) => {
+  writeRoute('get', '/files/:id', async (req: BusinessRequest, res) => {
     const record = business.get(String(req.params.id))
     if (!['report', 'attachment'].includes(record.kind)) throw new AppError('INVALID_INPUT')
     const bytes = await business.readBlob(String(record.data.checksum))
     store.event(req.businessContext!.actor.id, 'file.downloaded', { recordId: record.id })
     res.attachment(String(record.data.name)).type('application/octet-stream').send(bytes)
   })
-  router.post('/dove/preview', upload.single('file'), async (req: BusinessRequest, res) => {
+  writeRoute('post', '/dove/preview', upload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file) throw new AppError('FILE_REQUIRED')
     await sync(req.businessContext!)
     res.json(await dove.preview(req.file.buffer, filename(req.file), req.localUser!.id))
   })
-  router.post('/dove/save', async (req: BusinessRequest, res) => {
+  writeRoute('post', '/dove/save', async (req: BusinessRequest, res) => {
     await sync(req.businessContext!)
     res.status(201).json(await dove.save(String(req.body?.draftId || ''), req.localUser!.id, req.businessContext!.actor, req.body?.confirmation))
   })
-  router.post('/dove/preview-batch', batchFiles, async (req: BusinessRequest, res) => {
+  writeRoute('post', '/dove/preview-batch', batchFiles, async (req: BusinessRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined
     if (!files?.length) throw new AppError('FILE_REQUIRED')
     await sync(req.businessContext!)
@@ -134,7 +150,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     }
     res.json(results)
   })
-  router.post('/dove/save-batch', async (req: BusinessRequest, res) => {
+  writeRoute('post', '/dove/save-batch', async (req: BusinessRequest, res) => {
     const draftIds: unknown = req.body?.draftIds
     if (!Array.isArray(draftIds) || !draftIds.length || draftIds.length > DOVE_BATCH_LIMIT || draftIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(draftIds).size !== draftIds.length) throw new AppError('INVALID_INPUT')
     await sync(req.businessContext!)
@@ -146,7 +162,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     res.status(201).json(results)
   })
   router.get('/reports/compare', (req, res) => res.json(compareReports(business.get(String(req.query.left || '')), business.get(String(req.query.right || '')))))
-  router.post('/reports/:id/configuration', (req: BusinessRequest, res) => {
+  writeRoute('post', '/reports/:id/configuration', (req: BusinessRequest, res) => {
     const report = business.get(String(req.params.id)), explanation = reason(req.body?.reason)
     if (report.kind !== 'report' || report.archived || report.version !== req.body.reportVersion) throw new AppError('VERSION_CONFLICT', 409)
     const selections = req.body?.selections as { controllerIndex: number; partId: string | null; version?: number; fields: string[] }[]
@@ -177,7 +193,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     store.event(req.businessContext!.actor.id, 'business.exported', {})
     res.attachment('vehicle-data.json').json({ exportedAt: new Date().toISOString(), records: business.list() })
   })
-  router.get('/backup', async (req: BusinessRequest, res) => {
+  writeRoute('get', '/backup', async (req: BusinessRequest, res) => {
     const context = await access(req, true)
     const bytes = await teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async team => createBackup(business, context.configuration.teamId, team))
     store.event(context.actor.id, 'backup.created', {})
@@ -187,8 +203,18 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   router.post('/restore', backupUpload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file || req.body?.confirmation !== 'RESTORE') throw new AppError('RESTORE_CONFIRMATION_REQUIRED')
     const context = await access(req, true), explanation = reason(req.body.reason)
-    const changed = await teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async () => restoreBackup(business, req.file!.buffer, context.configuration.teamId, context.actor, explanation))
-    res.json({ changed })
+    const result = await store.withMaintenance(() => teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async (team, member) => {
+      const state = await synchronization.refreshLocked(context.configuration.sharedPath, team)
+      if (state.error) throw new AppError(state.error, 409)
+      const restored = await restoreBackup(business, req.file!.buffer, context.configuration.teamId, { ...context.actor, role: member.role }, explanation)
+      // Publish imported deletion markers before releasing the same canonical lock.
+      // If publication fails, the durable import queue and ordinary outbox retry it.
+      try {
+        const current = await synchronization.refreshLocked(context.configuration.sharedPath, team)
+        return { ...restored, ...(current.error ? { syncError: current.error } : {}) }
+      } catch (error) { return { ...restored, syncError: error instanceof AppError ? error.code : 'SHARE_IO_ERROR' } }
+    }))
+    res.json(result)
   })
   app.use('/api/business', router)
   async function tick() {

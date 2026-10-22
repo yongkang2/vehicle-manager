@@ -22,6 +22,17 @@ const zh: Record<keyof typeof en, string> = {
   noRequests: '暂无待审批申请', created: '创建时间', actor: '操作者', operation: '操作', teamCreated: '创建团队', joinRequested: '申请加入', joinApproved: '批准加入', memberUpdated: '调整成员权限', deviceRevoked: '撤销设备', reject: '拒绝', joinRejected: '拒绝加入申请',
 }
 const errorPairs: Record<string, [string, string]> = {
+  VEHICLE_NOT_ARCHIVED: ['Archive the vehicle before permanently deleting it.', '请先归档车辆，再执行永久删除。'],
+  DELETE_CONFIRMATION_REQUIRED: ['Type the exact VIN and DELETE, and enter a deletion reason.', '请输入完全一致的 VIN、DELETE 及删除原因。'],
+  DELETE_PREVIEW_CHANGED: ['The vehicle or related records changed. Refresh the deletion preview and review it again.', '车辆或关联记录已变化，请刷新删除预览并重新核对。'],
+  DELETE_PREVIEW_EXPIRED: ['The deletion preview expired. Refresh it and confirm again.', '删除预览已过期，请刷新并重新确认。'],
+  DELETE_PENDING_CHANGES: ['Synchronize or resolve pending changes before deleting a vehicle.', '删除车辆前请先同步或处理待提交修改。'],
+  VEHICLE_DELETED: ['This vehicle record was permanently deleted. Earlier changes cannot be synchronized or restored.', '该车辆记录已永久删除，较早的修改无法重新同步或恢复。'],
+  MAINTENANCE_IN_PROGRESS: ['Team maintenance is in progress. Retry after it finishes.', '团队维护正在进行，请完成后重试。'],
+  CLIENT_UPGRADE_REQUIRED: ['Upgrade this client before accessing this team’s current data format.', '请升级本客户端后再访问团队当前数据格式。'],
+  LOCAL_REFRESH_REQUIRED: ['The deletion is already committed to the shared folder. Synchronize again to finish refreshing this device.', '删除已提交至共享目录，请再次同步以完成本机刷新。'],
+  BACKUP_DELETION_CONFLICT: ['This backup contains deletion information that conflicts with current live records. Restore was not applied.', '备份中的删除信息与当前有效记录冲突，未执行恢复。'],
+  DELETE_REQUEST_MISMATCH: ['This deletion request differs from the recorded request. Refresh the preview and confirm again.', '删除请求与已记录的请求不一致，请刷新预览并重新确认。'],
   INVALID_VIN: ['Enter a valid 17-character VIN.', '请输入有效的 17 位 VIN。'], VIN_EXISTS: ['This VIN already exists. Review the existing vehicle or correct the local VIN.', 'VIN 已存在，请查看已有车辆或修正本地 VIN。'], INVALID_DATE: ['Check the date and installation/removal order.', '请检查日期及安装、拆除顺序。'],
   REASON_REQUIRED: ['Enter a reason of up to 500 characters.', '请填写变更原因，最多 500 字。'], RECORD_NOT_FOUND: ['The record was not found.', '未找到记录。'], RECORD_ARCHIVED: ['Restore the record before editing.', '请先恢复记录再编辑。'], PARENT_ARCHIVED: ['The vehicle is archived or unavailable.', '车辆已归档或不可用。'],
   VERSION_CONFLICT: ['This record changed. Reload it and review your changes.', '记录已变化，请重新加载后核对修改。'], ACCESS_DISABLED: ['Your account or device is not approved or has been disabled.', '账号或设备未批准或已停用。'],

@@ -45,12 +45,14 @@ export function fromRow(row: RecordRow): BusinessRecord { return { id: row.id, k
 export class Business {
   constructor(readonly store: LocalStore) {}
   get(id: string): BusinessRecord {
+    this.store.assertNotDeleted(id)
     const row = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
     if (!row) throw new AppError('RECORD_NOT_FOUND', 404)
+    this.store.assertNotDeleted(row.id, row.vehicle_id)
     return fromRow(row)
   }
   list(kind?: RecordKind, vehicleId?: string): BusinessRecord[] {
-    return (this.store.db.prepare('SELECT * FROM records ORDER BY updated DESC,id').all() as RecordRow[]).filter(row => (!kind || row.kind === kind) && (!vehicleId || row.vehicle_id === vehicleId)).map(fromRow)
+    return (this.store.db.prepare('SELECT * FROM records ORDER BY updated DESC,id').all() as RecordRow[]).filter(row => (!kind || row.kind === kind) && (!vehicleId || row.vehicle_id === vehicleId) && !this.store.deletionFor(row.id, row.vehicle_id)).map(fromRow)
   }
   history(vehicleId?: string): Change[] {
     return this.store.db.prepare('SELECT payload FROM changes WHERE (? IS NULL OR vehicle_id=?) ORDER BY created DESC,rowid DESC LIMIT 1000').all(vehicleId || null, vehicleId || null).map(row => JSON.parse(row.payload as string) as Change)
@@ -58,9 +60,13 @@ export class Business {
   write({ id = randomUUID(), kind, vehicleId = null, data, actor, reason: explanation, version, archived, sourceId = null, internal = false, maintenance }: {
     id?: string; kind: RecordKind; vehicleId?: string | null; data: Fields; actor: Actor; reason: unknown; version?: number; archived?: boolean; sourceId?: string | null; internal?: boolean; maintenance?: 'restore'
   }): BusinessRecord {
+    this.store.assertWritable()
+    this.store.assertNotDeleted(id, vehicleId)
     const why = reason(explanation)
     const normalized = internal ? data : normalizeFields(kind, data)
     this.store.transaction(() => {
+      this.store.assertWritable()
+      this.store.assertNotDeleted(id, vehicleId)
       const row = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
       const before = row ? fromRow(row) : null
       if (before && (before.kind !== kind || before.vehicleId !== vehicleId || before.version !== version)) throw new AppError('VERSION_CONFLICT', 409)

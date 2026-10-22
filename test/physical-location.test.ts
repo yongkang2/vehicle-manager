@@ -126,7 +126,7 @@ test('backups preserve vehicle location and pre-location backups restore with bl
     assert.equal(manifest.records[0].data.physicalLocation, 'Test centre / Bay 4')
     assert.equal(manifest.changes[0].after.physicalLocation, 'Test centre / Bay 4')
     assert.equal(manifest.pendingOperations[0].desired.data.physicalLocation, 'Test centre / Bay 4')
-    assert.equal(await restoreBackup(current, bytes, teamId, { ...actor, deviceId: stores[1].deviceId }, 'Restore current backup'), 1)
+    assert.equal((await restoreBackup(current, bytes, teamId, { ...actor, deviceId: stores[1].deviceId }, 'Restore current backup')).changed, 1)
     assert.equal(current.get(car.id).data.physicalLocation, 'Test centre / Bay 4')
     assert.ok(current.history(car.id).some(change => change.after.physicalLocation === 'Test centre / Bay 4'))
 
@@ -138,7 +138,7 @@ test('backups preserve vehicle location and pre-location backups restore with bl
       for (const change of operation.changes) { if (change.before) delete change.before.physicalLocation; delete change.after.physicalLocation }
     }
     const legacyBytes = await zipManifest(manifest)
-    assert.equal(await restoreBackup(legacy, legacyBytes, teamId, { ...actor, deviceId: stores[2].deviceId }, 'Restore pre-location backup'), 1)
+    assert.equal((await restoreBackup(legacy, legacyBytes, teamId, { ...actor, deviceId: stores[2].deviceId }, 'Restore pre-location backup')).changed, 1)
     assert.equal(legacy.get(car.id).data.physicalLocation, '')
     assert.equal(legacy.get(car.id).data.vin, car.data.vin)
   } finally { for (const store of stores) store.db.close(); await fs.rm(root, { recursive: true, force: true }) }

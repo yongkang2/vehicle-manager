@@ -1,12 +1,14 @@
 import { DatabaseSync } from 'node:sqlite'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
-import { Business, checksum, now } from './business.js'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { Business, checksum, now, reason } from './business.js'
+import { SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
+import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
 import { AppError, TeamDirectory } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
-import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus } from '../shared/business.js'
+import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 // Legacy vehicles omit this optional field; an empty editor value is not a change.
@@ -22,7 +24,7 @@ function equivalentData(kind: RecordKind, left: Fields, right: Fields): boolean 
 const stateOf = (row: RecordRow | undefined) => row ? { data: JSON.parse(row.data) as Fields, archived: Boolean(row.archived) } : null
 const hashKey = (key: string) => /^[a-f0-9]{64}$/.test(key)
 const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'part' THEN 1 ELSE 2 END"
-type Head = { protocol: 1; teamId: string; revision: string; sequence: number; checksum: string; created: string }
+type PreviewState = { vehicleId: string; actorKey: string; graph: string; version: number; vin: string; expires: number }
 
 export async function atomicFile(destination: string, bytes: Buffer | string): Promise<void> {
   const temporary = `${destination}.${randomUUID()}.tmp`
@@ -43,30 +45,103 @@ async function immutableFile(filename: string, bytes: Buffer): Promise<void> {
 
 export class BusinessSync {
   private running: Promise<SyncStatus> | null = null
+  private previews = new Map<string, PreviewState>()
   private phase: SyncStatus['phase'] = 'idle'
   private error: string | null = null
   constructor(readonly business: Business, readonly teams: TeamDirectory) {}
   status(): SyncStatus {
     const store = this.business.store
-    return { phase: this.phase, error: this.error, pending: store.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total as number, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
+    return { phase: this.phase, error: this.error, pending: store.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total as number, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
   }
-  async settle(): Promise<void> { if (this.running) await this.running }
+  async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity): Promise<SyncStatus> {
     if (this.running) return this.running
     this.phase = 'syncing'
-    this.running = this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team)).catch(error => {
+    this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team))).catch(error => {
       this.error = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
-      this.phase = this.error === 'SHARE_BUSY' ? 'busy' : 'offline'
+      this.phase = ['SHARE_BUSY', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
       return this.status()
     }).finally(() => { this.running = null })
     return this.running
   }
-  private newMaster(filename: string): DatabaseSync {
-    const master = new DatabaseSync(filename)
-    master.exec('PRAGMA journal_mode=DELETE; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;')
-    for (const name of ['records', 'changes']) master.exec(this.business.store.db.prepare("SELECT sql FROM sqlite_master WHERE name=? AND type='table'").get(name)!.sql as string)
-    master.exec('CREATE TABLE applied(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);')
-    return master
+  async refreshLocked(directory: string, team: TeamDocument): Promise<SyncStatus> { return this.cycle(directory, team) }
+  private assertTargetSettled(vehicleId: string, canonicalIds: string[] = []): void {
+    const store = this.business.store
+    const ids = new Set([vehicleId, ...canonicalIds, ...store.db.prepare('SELECT id FROM records WHERE id=? OR vehicle_id=?').all(vehicleId, vehicleId).map(row => String(row.id))])
+    const pending = store.db.prepare("SELECT payload FROM outbox WHERE state='pending'").all().map(row => JSON.parse(String(row.payload)) as Operation)
+    if (pending.some(operation => ids.has(operation.recordId) || operation.vehicleId === vehicleId) || store.db.prepare('SELECT record_id FROM conflicts').all().some(row => ids.has(String(row.record_id)))) throw new AppError('DELETE_PENDING_CHANGES', 409)
+  }
+  private actorKey(identity: Identity, actor: Actor): string { return JSON.stringify([identity.deviceId, identity.localUserId, actor.id]) }
+  async deletePreview(directory: string, teamId: string, identity: Identity, actor: Actor, vehicleId: string): Promise<VehicleDeletePreview> {
+    const store = this.business.store
+    return store.withMaintenance(() => this.teams.withAccess(directory, teamId, identity, true, async (team, member) => {
+      this.assertTargetSettled(vehicleId)
+      await this.refreshLocked(directory, team)
+      store.assertNotDeleted(vehicleId)
+      const snapshot = await SharedBusinessSnapshot.open(this.business, directory, teamId, atomicFile)
+      try {
+        const graph = snapshot.graph(vehicleId), vehicle = graph.find(row => row.id === vehicleId && row.kind === 'vehicle')
+        if (!vehicle) throw new AppError('RECORD_NOT_FOUND', 404)
+        if (!vehicle.archived) throw new AppError('VEHICLE_NOT_ARCHIVED', 409)
+        this.assertTargetSettled(vehicleId, graph.map(row => row.id))
+        for (const [token, previous] of this.previews) if (previous.expires < Date.now()) this.previews.delete(token)
+        if (this.previews.size >= 100) this.previews.delete(this.previews.keys().next().value!)
+        const token = randomBytes(32).toString('hex'), expires = Date.now() + 5 * 60 * 1000
+        const version = this.business.get(vehicleId).version, vin = String(JSON.parse(vehicle.data).vin)
+        this.previews.set(token, { vehicleId, actorKey: this.actorKey(identity, { ...actor, id: member.id }), graph: checksum(JSON.stringify(graph)), version, vin, expires })
+        return { vehicleId, vin, version, counts: snapshot.counts(graph), token, expires, protocolUpgrade: snapshot.head?.protocol !== 2 }
+      } finally { await snapshot.close() }
+    }))
+  }
+  async deleteVehicle(directory: string, teamId: string, identity: Identity, actor: Actor, vehicleId: string, request: VehicleDeleteRequest): Promise<VehicleDeleteReceipt> {
+    const store = this.business.store
+    return store.withMaintenance(() => this.teams.withAccess(directory, teamId, identity, true, async (_, member) => {
+      if (!request || request.confirmation !== 'DELETE') throw new AppError('DELETE_CONFIRMATION_REQUIRED')
+      const explanation = reason(request.reason)
+      if (typeof request.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(request.requestId) || typeof request.vin !== 'string') throw new AppError('INVALID_INPUT')
+      const liveActor: Actor = { id: member.id, name: member.name, deviceId: identity.deviceId, role: member.role }
+      const requestDigest = checksum(JSON.stringify({ vehicleId, actorKey: this.actorKey(identity, liveActor), previewToken: request.previewToken, version: request.version, vin: request.vin, confirmation: request.confirmation, reason: request.reason, requestId: request.requestId }))
+      const snapshot = await SharedBusinessSnapshot.open(this.business, directory, teamId, atomicFile)
+      let committed: VehicleDeletion | null = null
+      try {
+        const existing = snapshot.deletions().find(row => row.requestId === request.requestId)
+        if (existing) {
+          const storedDigest = snapshot.db.prepare('SELECT value FROM metadata WHERE key=?').get(`deleteRequest:${request.requestId}`)?.value
+          if (existing.vehicleId !== vehicleId || existing.vin !== request.vin || existing.reason !== explanation || existing.actor.id !== member.id || existing.actor.deviceId !== identity.deviceId || (storedDigest && storedDigest !== requestDigest)) throw new AppError('DELETE_REQUEST_MISMATCH', 409)
+          committed = existing
+        } else {
+          if (snapshot.deletions().some(row => row.vehicleId === vehicleId)) throw new AppError('VEHICLE_DELETED', 410)
+          const preview = this.previews.get(request.previewToken)
+          if (!preview || preview.expires < Date.now()) throw new AppError('DELETE_PREVIEW_EXPIRED', 409)
+          if (preview.vehicleId !== vehicleId || preview.actorKey !== this.actorKey(identity, liveActor) || preview.vin !== request.vin || preview.version !== request.version) throw new AppError('DELETE_PREVIEW_CHANGED', 409)
+          const graph = snapshot.graph(vehicleId), vehicle = graph.find(row => row.id === vehicleId && row.kind === 'vehicle')
+          if (!vehicle) throw new AppError('RECORD_NOT_FOUND', 404)
+          this.assertTargetSettled(vehicleId, graph.map(row => row.id))
+          if (this.business.get(vehicleId).version !== request.version || checksum(JSON.stringify(graph)) !== preview.graph) throw new AppError('DELETE_PREVIEW_CHANGED', 409)
+          if (!vehicle.archived) throw new AppError('VEHICLE_NOT_ARCHIVED', 409)
+          const revision = randomUUID(), sequence = (snapshot.head?.sequence || 0) + 1, deletedAt = now(), id = randomUUID()
+          const marker: VehicleDeletion = { id, requestId: request.requestId, vehicleId, vin: preview.vin, recordIds: graph.map(row => row.id), fileKeys: [...new Set(graph.filter(row => ['report', 'attachment'].includes(row.kind)).map(row => String(JSON.parse(row.data).checksum)))], actor: liveActor, reason: explanation, deletedAt, revision, sequence }
+          validateVehicleDeletion(marker)
+          const change: Change = { id, recordId: vehicleId, vehicleId, kind: 'vehicle', before: JSON.parse(vehicle.data), after: {}, archivedBefore: true, archivedAfter: true, actor: liveActor, reason: explanation, action: 'vehicle.deleted', sourceId: null, created: deletedAt }
+          snapshot.db.exec('BEGIN IMMEDIATE')
+          try {
+            snapshot.db.prepare('INSERT INTO vehicle_deletions VALUES(?,?,?)').run(vehicleId, request.requestId, JSON.stringify(marker))
+            snapshot.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(id, vehicleId, vehicleId, JSON.stringify(change), deletedAt)
+            snapshot.db.prepare('INSERT INTO metadata VALUES(?,?)').run(`deleteRequest:${request.requestId}`, requestDigest)
+            snapshot.db.prepare('DELETE FROM records WHERE vehicle_id=?').run(vehicleId)
+            snapshot.db.prepare('DELETE FROM records WHERE id=?').run(vehicleId)
+            snapshot.db.exec('COMMIT')
+          } catch (error) { snapshot.db.exec('ROLLBACK'); throw error }
+          try { await snapshot.publish(teamId, 2, revision, sequence) }
+          catch (error) { if (snapshot.head?.revision !== revision) throw error; committed = marker }
+          committed = marker
+          this.previews.delete(request.previewToken)
+        }
+        store.rememberDeletions([committed])
+        try { await this.ingest(snapshot.db, snapshot.directory, snapshot.head!, []); this.error = null; this.phase = 'ready'; return { ...committed, localSynced: true } }
+        catch { this.error = 'LOCAL_REFRESH_REQUIRED'; this.phase = 'offline'; return { ...committed, localSynced: false } }
+      } finally { await snapshot.close() }
+    }))
   }
   private checkConflict(master: DatabaseSync, operations: Operation[], team: TeamDocument): SyncConflict | null {
     const first = operations[0], last = operations.at(-1)!
@@ -121,7 +196,21 @@ export class BusinessSync {
       await immutableFile(path.join(directory, 'blobs', key), bytes)
     }
   }
-  private async ingest(master: DatabaseSync, directory: string, head: Head, conflicts: SyncConflict[]): Promise<void> {
+  private acceptCanonical(master: DatabaseSync): VehicleDeletion[] {
+    const store = this.business.store
+    const markers = master.prepare('SELECT payload FROM vehicle_deletions').all().map(row => validateVehicleDeletion(JSON.parse(String(row.payload))))
+    store.rememberDeletions(markers)
+    store.transaction(() => {
+      for (const operation of store.db.prepare("SELECT id FROM outbox WHERE state='pending'").all()) if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) store.db.prepare("UPDATE outbox SET state='sent' WHERE id=?").run(operation.id)
+      store.applyDeletions(markers)
+      for (const change of master.prepare('SELECT * FROM changes').all()) store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
+      const imports = store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []
+      if (imports.length) store.set('pendingDeletionImports', imports.filter(item => !markers.some(marker => marker.vehicleId === item.deletion.vehicleId && marker.id === item.deletion.id)))
+    })
+    return markers
+  }
+  private async ingest(master: DatabaseSync, directory: string, head: BusinessHead, conflicts: SyncConflict[]): Promise<void> {
+    this.acceptCanonical(master)
     const records = master.prepare(`SELECT * FROM records ORDER BY ${kinds},id`).all() as RecordRow[]
     for (const row of records.filter(item => ['report', 'attachment'].includes(item.kind))) {
       const data = JSON.parse(row.data) as { checksum: string; size: number }
@@ -152,37 +241,32 @@ export class BusinessSync {
       for (const change of master.prepare('SELECT * FROM changes').all()) store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
       store.db.exec('DELETE FROM conflicts')
       for (const conflict of conflicts) store.db.prepare('INSERT INTO conflicts VALUES(?,?)').run(conflict.recordId, JSON.stringify(conflict))
-      store.set('businessRevision', head.revision); store.set('businessSequence', head.sequence); store.set('businessLastSync', now())
+      store.set('businessRevision', head.revision); store.set('businessSequence', head.sequence); store.set('businessProtocol', head.protocol); store.set('businessLastSync', now())
     })
   }
   private async cycle(shared: string, team: TeamDocument): Promise<SyncStatus> {
-    const directory = path.join(shared, 'business'), localDirectory = path.join(this.business.store.directory, 'sync-work')
-    await fs.mkdir(directory, { recursive: true }); await fs.mkdir(localDirectory, { recursive: true })
-    for (const name of ['snapshots', 'operations', 'blobs']) await fs.mkdir(path.join(directory, name), { recursive: true })
-    const work = path.join(localDirectory, `${randomUUID()}.sqlite`)
-    let master: DatabaseSync | null = null
+    const snapshot = await SharedBusinessSnapshot.open(this.business, shared, team.id, atomicFile)
     try {
-      const bytes = await optionalRead(path.join(directory, 'HEAD.json'))
-      let head: Head | null = null
-      if (bytes) {
-        head = JSON.parse(bytes.toString()) as Head
-        const sequence = this.business.store.get<number>('businessSequence') || 0
-        if (head.protocol !== 1 || head.teamId !== team.id || !/^[a-f0-9-]{36}$/.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !hashKey(head.checksum)) throw new AppError('SHARE_CORRUPTED', 409)
-        if (head.sequence < sequence || (head.sequence === sequence && this.business.store.get('businessRevision') !== head.revision)) throw new AppError('BUSINESS_ROLLBACK', 409)
-        const snapshot = await fs.readFile(path.join(directory, 'snapshots', `${head.revision}.sqlite`))
-        if (checksum(snapshot) !== head.checksum) throw new AppError('SHARE_CORRUPTED', 409)
-        await fs.writeFile(work, snapshot, { flag: 'wx' })
-        master = new DatabaseSync(work)
-        master.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE;')
-        if (master.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || master.prepare("SELECT value FROM metadata WHERE key='teamId'").get()?.value !== team.id || Number(master.prepare("SELECT value FROM metadata WHERE key='sequence'").get()?.value) !== head.sequence) throw new AppError('SHARE_CORRUPTED', 409)
-      } else {
-        if (this.business.store.get('businessRevision') || (await fs.readdir(path.join(directory, 'snapshots'))).some(name => name.endsWith('.sqlite'))) throw new AppError('SHARE_CORRUPTED', 409)
-        master = this.newMaster(work)
+      const master = snapshot.db, directory = snapshot.directory, store = this.business.store
+      const markers = snapshot.deletions()
+      this.acceptCanonical(master)
+      let changed = !snapshot.head, protocol: 1 | 2 = snapshot.head?.protocol || 1
+      for (const entry of store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []) {
+        const marker = validateVehicleDeletion(entry.deletion), existing = markers.find(item => item.vehicleId === marker.vehicleId)
+        if (existing) { if (existing.id !== marker.id) throw new AppError('BACKUP_DELETION_CONFLICT', 409); continue }
+        const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
+        const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
+        if (!member || !binding) throw new AppError('ADMIN_REQUIRED', 403)
+        if (master.prepare('SELECT vehicle_id FROM vehicle_deletions WHERE request_id=?').get(marker.requestId) || snapshot.graph(marker.vehicleId).length || marker.recordIds.some(id => master.prepare('SELECT id FROM records WHERE id=?').get(id))) throw new AppError('BACKUP_DELETION_CONFLICT', 409)
+        master.prepare('INSERT INTO vehicle_deletions VALUES(?,?,?)').run(marker.vehicleId, marker.requestId, JSON.stringify(marker))
+        for (const change of store.db.prepare('SELECT * FROM changes WHERE vehicle_id=?').all(marker.vehicleId)) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
+        markers.push(marker); changed = true; protocol = 2
       }
       const pending = this.business.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY seq").all().map(row => JSON.parse(row.payload as string) as Operation)
       const groups = new Map<string, Operation[]>()
-      let changed = !head
       for (const operation of pending) {
+        const deleted = markers.find(marker => marker.recordIds.includes(operation.recordId) || marker.vehicleId === operation.vehicleId || marker.vehicleId === operation.recordId)
+        if (deleted) { store.quarantineOperation(operation, deleted.vehicleId); continue }
         await immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))
         if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) continue
         if (!groups.has(operation.recordId)) groups.set(operation.recordId, [])
@@ -199,26 +283,21 @@ export class BusinessSync {
         try { this.apply(master, operations); master.exec('COMMIT'); changed = true } catch (error) { master.exec('ROLLBACK'); throw error }
       }
       if (changed) {
-        const sequence = (head?.sequence || 0) + 1, revision = randomUUID()
-        master.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('teamId', team.id)
-        master.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('sequence', String(sequence))
-        if (master.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || master.prepare('PRAGMA foreign_key_check').all().length) throw new AppError('SHARE_CORRUPTED', 409)
-        master.close(); master = null
-        const snapshot = await fs.readFile(work)
-        await immutableFile(path.join(directory, 'snapshots', `${revision}.sqlite`), snapshot)
-        head = { protocol: 1, teamId: team.id, revision, sequence, checksum: checksum(snapshot), created: now() }
-        await atomicFile(path.join(directory, 'HEAD.json'), JSON.stringify(head, null, 2))
-        master = new DatabaseSync(work)
+        await snapshot.publish(team.id, protocol)
       }
-      await this.ingest(master, directory, head!, conflicts)
+      await this.ingest(snapshot.db, directory, snapshot.head!, conflicts)
       this.error = null; this.phase = conflicts.length ? 'conflict' : 'ready'
       return this.status()
-    } finally { master?.close(); await fs.rm(work, { force: true }).catch(() => {}) }
+    } finally { await snapshot.close() }
   }
   async resolve(directory: string, teamId: string, identity: Identity, actor: Actor, recordId: string, token: string, choices: Record<string, string>, reason: string): Promise<SyncStatus> {
+    return this.business.store.runWrite(() => this.resolveWithinWrite(directory, teamId, identity, actor, recordId, token, choices, reason))
+  }
+  private async resolveWithinWrite(directory: string, teamId: string, identity: Identity, actor: Actor, recordId: string, token: string, choices: Record<string, string>, reason: string): Promise<SyncStatus> {
     await this.synchronize(directory, teamId, identity)
     if (this.phase === 'offline' || this.phase === 'busy') throw new AppError(this.error || 'SHARE_UNAVAILABLE', 409)
     const store = this.business.store
+    store.assertNotDeleted(recordId)
     const row = store.db.prepare('SELECT payload FROM conflicts WHERE record_id=?').get(recordId)
     const conflict = row ? JSON.parse(row.payload as string) as SyncConflict : null
     if (!conflict || conflict.token !== token || conflict.fields.some(field => !['local', 'shared'].includes(choices[field]))) throw new AppError('CONFLICT_CHANGED', 409)
