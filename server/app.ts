@@ -9,6 +9,7 @@ import { LocalStore } from './store.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
 import type { Access, Identity, LocalUser, Role, Status, TeamDocument } from '../shared/types.js'
 import { installBusinessRoutes } from './business-routes.js'
+import type { BrowserPresence } from './browser-presence.js'
 
 type Config = { sharedPath: string; teamId: string }
 type Account = { id: string; username: string; display_name: string; salt: string; hash: string }
@@ -22,7 +23,7 @@ function role(value: unknown): Role {
   return value
 }
 
-export function createApp({ dataDir, staticDir, controlToken, onShutdown }: { dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void }) {
+export function createApp({ dataDir, staticDir, controlToken, onShutdown, browserPresence, presenceToken }: { dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void; browserPresence?: BrowserPresence; presenceToken?: string }) {
   const store = new LocalStore(dataDir)
   const teams = new TeamDirectory(store.get<TeamDocument>('cachedTeam'))
   const app = express()
@@ -56,6 +57,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown }: { da
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
   app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: '0.2.0', user: req.localUser || null, instanceId, pid: process.pid }))
+  if (browserPresence && presenceToken) app.post('/api/local/browser-presence-token', (req, res) => res.json({ token: presenceToken }))
   app.post('/api/local/shutdown', (req, res) => {
     const supplied = req.get('X-Control-Token') || ''
     if (!controlToken || !/^[a-f0-9]{64}$/.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(controlToken))) throw new AppError('INVALID_REQUEST', 403)
