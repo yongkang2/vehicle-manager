@@ -133,7 +133,7 @@ test('legacy upgrade backs up before schema changes, retries safely and preserve
     await fixtureData.closeServer()
     await client.close(); stopped = true
     const legacy = new DatabaseSync(path.join(directory, 'local.sqlite'))
-    legacy.exec('DROP TABLE account_workspaces; DROP TABLE workspaces; ALTER TABLE sessions DROP COLUMN workspace_id; ALTER TABLE sessions DROP COLUMN workspace_epoch; ALTER TABLE sessions DROP COLUMN sync_enabled; PRAGMA user_version=2;')
+    legacy.exec('DROP TABLE quarantined_operations; DROP TABLE vehicle_deletions; DROP TABLE account_workspaces; DROP TABLE workspaces; ALTER TABLE sessions DROP COLUMN workspace_id; ALTER TABLE sessions DROP COLUMN workspace_epoch; ALTER TABLE sessions DROP COLUMN sync_enabled; PRAGMA user_version=2;')
     legacy.close()
     await fs.writeFile(path.join(directory, 'migration-backups'), 'prevent backup')
     assert.throws(() => new LocalStore(directory))
@@ -143,7 +143,7 @@ test('legacy upgrade backs up before schema changes, retries safely and preserve
     const upgraded = new LocalStore(directory)
     try {
       assert.equal(upgraded.deviceId, deviceId)
-      assert.equal(upgraded.db.prepare('PRAGMA user_version').get()!.user_version, 3)
+      assert.equal(upgraded.db.prepare('PRAGMA user_version').get()!.user_version, 4)
       assert.equal(upgraded.db.prepare('SELECT directory FROM workspaces WHERE id=?').get(first.id)!.directory, '.')
       assert.equal(upgraded.db.prepare('SELECT id FROM records').get()!.id, car.data.id)
       assert.equal(upgraded.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total, 1)

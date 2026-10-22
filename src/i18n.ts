@@ -30,6 +30,17 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  VEHICLE_NOT_ARCHIVED: ['Archive the vehicle before permanently deleting it.', '请先归档车辆，再执行永久删除。'],
+  DELETE_CONFIRMATION_REQUIRED: ['Type the exact VIN and DELETE, and enter a deletion reason.', '请输入完全一致的 VIN、DELETE 及删除原因。'],
+  DELETE_PREVIEW_CHANGED: ['The vehicle or related records changed. Refresh the deletion preview and review it again.', '车辆或关联记录已变化，请刷新删除预览并重新核对。'],
+  DELETE_PREVIEW_EXPIRED: ['The deletion preview expired. Refresh it and confirm again.', '删除预览已过期，请刷新并重新确认。'],
+  DELETE_PENDING_CHANGES: ['Synchronize or resolve pending changes before deleting a vehicle.', '删除车辆前请先同步或处理待提交修改。'],
+  VEHICLE_DELETED: ['This vehicle record was permanently deleted. Earlier changes cannot be synchronized or restored.', '该车辆记录已永久删除，较早的修改无法重新同步或恢复。'],
+  MAINTENANCE_IN_PROGRESS: ['Team maintenance is in progress. Retry after it finishes.', '团队维护正在进行，请完成后重试。'],
+  CLIENT_UPGRADE_REQUIRED: ['Upgrade this client before accessing this team’s current data format.', '请升级本客户端后再访问团队当前数据格式。'],
+  LOCAL_REFRESH_REQUIRED: ['The deletion is already committed to the shared folder. Synchronize again to finish refreshing this device.', '删除已提交至共享目录，请再次同步以完成本机刷新。'],
+  BACKUP_DELETION_CONFLICT: ['This backup contains deletion information that conflicts with current live records. Restore was not applied.', '备份中的删除信息与当前有效记录冲突，未执行恢复。'],
+  DELETE_REQUEST_MISMATCH: ['This deletion request differs from the recorded request. Refresh the preview and confirm again.', '删除请求与已记录的请求不一致，请刷新预览并重新确认。'],
   WORKSPACE_CHANGED: ['The account or workspace changed. Reload before continuing; no stale operation was applied.', '账号或工作空间已变化，请重新加载后继续；旧页面的操作未执行。'],
   WORKSPACE_BUSY: ['This session has another operation in progress. Wait for it to finish and retry.', '当前会话有操作正在进行，请完成后重试。'],
   WORKSPACE_NOT_FOUND: ['This account has not connected to that team.', '当前账号尚未连接该团队。'],

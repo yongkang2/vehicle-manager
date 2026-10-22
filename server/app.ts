@@ -132,16 +132,19 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   }
   async function status(req: AuthRequest): Promise<Status> {
     const session = workspaces.session(req.sessionToken!), workspace = session.workspace_id ? workspaces.get(session.workspace_id) : null
-    const config = workspace?.store.get<Config>('configuration')
-    let team = workspace?.store.get<TeamDocument>('cachedTeam') || null, online = false, error: string | null = null
-    if (config && workspace) {
-      try { team = await workspace.teams.read(config.sharedPath, config.teamId); workspace.cache(team); online = true }
-      catch (failure) { error = failure instanceof AppError ? failure.code : 'SHARE_IO_ERROR'; team = workspace.store.get<TeamDocument>('cachedTeam') }
+    const readStatus = async (): Promise<Status> => {
+      const config = workspace?.store.get<Config>('configuration')
+      let team = workspace?.store.get<TeamDocument>('cachedTeam') || null, online = false, error: string | null = null
+      if (config && workspace) {
+        try { team = await workspace.teams.read(config.sharedPath, config.teamId); workspace.cache(team); online = true }
+        catch (failure) { error = failure instanceof AppError ? failure.code : 'SHARE_IO_ERROR'; team = workspace.store.get<TeamDocument>('cachedTeam') }
+      }
+      const { member, binding } = team ? bindingFor(team, identity(req)) : {}
+      const request = team?.requests.filter(item => item.identity.deviceId === store.deviceId && item.identity.localUserId === req.localUser!.id).at(-1)
+      const access: Access = !config ? 'unconfigured' : binding ? (binding.enabled && member?.enabled ? 'approved' : 'disabled') : request?.status === 'pending' ? 'pending' : request?.status === 'rejected' ? 'rejected' : 'unbound'
+      return { version: '1.0.1', user: req.localUser!, deviceId: store.deviceId, deviceName: store.deviceName, sharedPath: config?.sharedPath || null, teamId: config?.teamId || null, workspaceToken: workspaces.token(session), syncPaused: !session.sync_enabled, teamName: team?.name || null, access, online, error, lastChecked: workspace?.store.get<string>('lastChecked') || null, member: member || null }
     }
-    const { member, binding } = team ? bindingFor(team, identity(req)) : {}
-    const request = team?.requests.filter(item => item.identity.deviceId === store.deviceId && item.identity.localUserId === req.localUser!.id).at(-1)
-    const access: Access = !config ? 'unconfigured' : binding ? (binding.enabled && member?.enabled ? 'approved' : 'disabled') : request?.status === 'pending' ? 'pending' : request?.status === 'rejected' ? 'rejected' : 'unbound'
-    return { version: '1.0.1', user: req.localUser!, deviceId: store.deviceId, deviceName: store.deviceName, sharedPath: config?.sharedPath || null, teamId: config?.teamId || null, workspaceToken: workspaces.token(session), syncPaused: !session.sync_enabled, teamName: team?.name || null, access, online, error, lastChecked: workspace?.store.get<string>('lastChecked') || null, member: member || null }
+    return workspace ? workspace.store.runWrite(readStatus) : readStatus()
   }
   app.get('/api/status', async (req: AuthRequest, res, next) => { try { res.json(await status(req)) } catch (error) { next(error) } })
   app.post('/api/setup/check', async (req, res, next) => { try { res.json(await teams.probe(req.body?.path)) } catch (error) { next(error) } })

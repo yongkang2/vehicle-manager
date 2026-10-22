@@ -7,7 +7,7 @@ import { Business, checksum, now } from './business.js'
 import { configurationFields, controllerRecordId, controllerSources, doveRecordedTime, keyControllerName, keyControllerNames, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
 import type { Actor, BusinessRecord, DoveData, DoveImportConfirmation, DovePreview, ReportData } from '../shared/business.js'
 
-type Draft = { id: string; owner: string; filename: string; bytes: Buffer; parsed: DoveData; checksum: string; expires: number }
+type Draft = { id: string; owner: string; filename: string; bytes: Buffer; parsed: DoveData; checksum: string; expires: number; vehicleId: string | null }
 export type Preview = DovePreview
 function parseIsolated(bytes: Buffer): Promise<DoveData> {
   return new Promise((resolve, reject) => {
@@ -34,11 +34,12 @@ export class DoveService {
   constructor(readonly business: Business) {}
   private view(draft: Draft): Preview {
     const matches = this.business.list('vehicle').filter(record => !record.archived && record.data.vin === draft.parsed.vin)
-    const id = `report-${draft.checksum}`
-    const existing = this.business.store.db.prepare('SELECT id FROM records WHERE id=?').get(id)
-    const vehicle = matches.length === 1 ? matches[0] : null
+    if (!draft.vehicleId && matches.length === 1) draft.vehicleId = matches[0].id
+    const vehicle = matches.length === 1 && matches[0].id === draft.vehicleId ? matches[0] : null
+    // Legacy report IDs remain valid; deduplication belongs to the vehicle UUID.
+    const existing = vehicle ? this.business.list('report', vehicle.id).find(record => record.data.checksum === draft.checksum) : undefined
     const currentControllers = vehicle ? this.business.list('part', vehicle.id).filter(part => !part.archived && part.data.category === 'controller' && keyControllerName(part.data.name)) : []
-    return { id: draft.id, filename: draft.filename, checksum: draft.checksum, size: draft.bytes.length, parsed: draft.parsed, expires: draft.expires, vehicle, currentControllers, match: matches.length === 1 ? 'matched' : matches.length ? 'ambiguous' : 'unmatched', existingId: existing ? id : null }
+    return { id: draft.id, filename: draft.filename, checksum: draft.checksum, size: draft.bytes.length, parsed: draft.parsed, expires: draft.expires, vehicle, currentControllers, match: vehicle ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched', existingId: existing?.id || null }
   }
   async preview(bytes: Buffer, filename: string, owner: string): Promise<Preview> {
     if (!/\.xlsx$/i.test(filename)) throw new AppError('XLSX_REQUIRED', 422)
@@ -49,23 +50,26 @@ export class DoveService {
     try { parsed = await parseIsolated(bytes) } finally { this.active-- }
     for (const [id, draft] of this.drafts) if (draft.expires < Date.now()) this.drafts.delete(id)
     while (this.drafts.size >= DOVE_BATCH_LIMIT) this.drafts.delete(this.drafts.keys().next().value!)
-    const draft: Draft = { id: randomUUID(), owner, filename, bytes, parsed, checksum: checksum(bytes), expires: Date.now() + 30 * 60 * 1000 }
+    const draft: Draft = { id: randomUUID(), owner, filename, bytes, parsed, checksum: checksum(bytes), expires: Date.now() + 30 * 60 * 1000, vehicleId: null }
     this.drafts.set(draft.id, draft)
     return this.view(draft)
   }
   async save(id: string, owner: string, actor: Actor, confirmation?: DoveImportConfirmation): Promise<BusinessRecord> {
     const draft = this.drafts.get(id)
     if (!draft || draft.owner !== owner || draft.expires < Date.now()) throw new AppError('DRAFT_EXPIRED', 409)
+    if (draft.vehicleId) this.business.store.assertNotDeleted(draft.vehicleId)
     const preview = this.view(draft)
     if (!preview.vehicle) throw new AppError('VIN_NOT_MATCHED', 409)
     if (confirmation?.confirmed !== true) throw new AppError('IMPORT_CONFIRMATION_REQUIRED', 409)
     await this.business.blob(draft.bytes)
+    if (draft.vehicleId) this.business.store.assertNotDeleted(draft.vehicleId)
     const current = this.view(draft)
     if (!current.vehicle) throw new AppError('VIN_NOT_MATCHED', 409)
     const data: ReportData = { name: draft.filename, checksum: draft.checksum, size: draft.bytes.length, recordedAt: draft.parsed.recordedAt, savedAt: now(), parserVersion: 'dove-current-1', parsed: draft.parsed, vehicleSnapshot: current.vehicle.data }
     let report!: BusinessRecord
     this.business.store.transaction(() => {
-      report = current.existingId ? this.business.get(current.existingId) : this.business.write({ id: `report-${draft.checksum}`, kind: 'report', vehicleId: current.vehicle!.id, data: { ...data }, actor, reason: 'DOVE retained after VIN verification and manual confirmation', internal: true })
+      this.business.store.assertNotDeleted(current.vehicle!.id)
+      report = current.existingId ? this.business.get(current.existingId) : this.business.write({ id: `report-${current.vehicle!.id}-${draft.checksum}`, kind: 'report', vehicleId: current.vehicle!.id, data: { ...data }, actor, reason: 'DOVE retained after VIN verification and manual confirmation', internal: true })
       if (report.vehicleId !== current.vehicle!.id) throw new AppError('REPORT_VIN_MISMATCH', 409)
       if (confirmation.reportOnly === true) return
       if (report.archived) throw new AppError('RECORD_ARCHIVED', 409)
