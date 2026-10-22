@@ -53,7 +53,7 @@ async function launch() {
         const log = openSync(path.join(dataDir, 'startup.log'), 'a')
         let child
         try {
-          child = fork(entry, [], { cwd: application, execArgv: [], env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir }, detached: true, windowsHide: true, stdio: ['ignore', log, log, 'ipc'] })
+          child = fork(entry, [], { cwd: application, execArgv: [], env: { ...process.env, VEHICLE_MANAGER_AUTO_STOP: process.env.VEHICLE_MANAGER_AUTO_STOP ?? '1', PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir }, detached: true, windowsHide: true, stdio: ['ignore', log, log, 'ipc'] })
           port = await new Promise((resolve, reject) => {
             const timer = setTimeout(() => { child.kill(); reject(new Error('Startup timed out. See data/startup.log.')) }, 20000)
             child.once('message', message => { clearTimeout(timer); if (message.type === 'ready' && message.instanceId === instanceId) resolve(message.port); else reject(new Error('Port busy or startup failed.')) })

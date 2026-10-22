@@ -22,9 +22,14 @@ npm start
 
 Open http://127.0.0.1:4410 . The application listens on the local loopback address only. Change `PORT` if this port is occupied. Local data defaults to this project's `data/`; set `VEHICLE_MANAGER_DATA_DIR` to choose another dedicated local directory. The old Demo's 4310 port is not used.
 
-Double-click `Start.cmd` to start in the background and open the browser. It reuses the service for this data directory, or chooses a free local port. `Stop.cmd` verifies that same instance and requests a clean stop; it does not kill unrelated Node.js processes. Closing the browser alone does not stop the service. The launcher and `npm start` should not be used concurrently for the same data directory. Local `service.json` contains a stop-control secret; do not share it or `data/`.
+Double-click `Start.cmd` to start in the background and open the browser. It reuses the service for this data directory, or chooses a free local port. `Stop.cmd` verifies that same instance and requests a clean stop; it does not kill unrelated Node.js processes. The launcher and `npm start` should not be used concurrently for the same data directory. Local `service.json` contains a stop-control secret; do not share it or `data/`.
+
+The launcher enables automatic shutdown: after the last application page disconnects, the service allows 60 seconds for refresh/reconnect, then stops at a 30-second presence check. Other browser tabs do not count. Hidden/minimized application tabs keep it running; protocol ping/pong does not depend on page JavaScript timers. Unresponsive connections are checked before removal, so detection may take longer. A substantially late check after system sleep retries confirmation instead of immediately assuming pages closed. Startup allows five minutes for the first page to connect. A discarded page or browser/network failure can still disconnect; reopen with `Start.cmd` if the service has stopped.
+
+Shutdown waits for active HTTP requests and synchronization before closing SQLite. Unsynchronized offline changes stay queued on disk; this does not guarantee upload before exit. The existing 30-second business-sync interval is unchanged. Use `Stop.cmd` before moving/upgrading rather than waiting for auto-stop. Set `VEHICLE_MANAGER_AUTO_STOP=0` before launching to keep the service running. `npm start` and development servers default to no auto-stop; set `VEHICLE_MANAGER_AUTO_STOP=1` to opt in. A reused service keeps its original setting. Restart the service and refresh existing pages after upgrading to activate presence tracking.
 
 For development, run `npm run dev:server` and `npm run dev` in separate terminals. Vite uses 4411 and proxies API requests to 4410.
+The same-origin presence token request and WebSocket upgrade also go through this proxy. Presence uses a separate in-memory token, not a login or stop-control token, and grants no business access.
 
 ## First Launch and Shared Path
 
