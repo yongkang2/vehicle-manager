@@ -10,12 +10,12 @@ export class LocalStore {
   readonly db: DatabaseSync
   readonly deviceId: string
   readonly deviceName = hostname()
-  constructor(readonly directory: string) {
+  constructor(readonly directory: string, deviceId?: string) {
     mkdirSync(directory, { recursive: true })
     this.db = new DatabaseSync(path.join(directory, 'local.sqlite'))
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
     const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number
-    if (version > 2) { this.db.close(); throw new AppError('LOCAL_VERSION_TOO_NEW', 503) }
+    if (version > 3) { this.db.close(); throw new AppError('LOCAL_VERSION_TOO_NEW', 503) }
     if (version === 0) {
       this.db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -37,7 +37,35 @@ export class LocalStore {
     }
     const machine = this.get<string>('machine')
     if (machine && machine !== this.deviceName) { this.db.close(); throw new AppError('COPIED_LOCAL_DATA', 409) }
-    this.deviceId = this.get<string>('deviceId') || randomUUID()
+    if (version < 3) {
+      try {
+        if (version > 0) {
+          const backups = path.join(directory, 'migration-backups')
+          mkdirSync(backups, { recursive: true })
+          const destination = path.join(backups, `before-workspaces-${randomUUID()}.sqlite`)
+          this.db.prepare('VACUUM INTO ?').run(destination)
+          const snapshot = new DatabaseSync(destination, { readOnly: true })
+          try { if (snapshot.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok') throw new AppError('LOCAL_BACKUP_FAILED', 503) }
+          finally { snapshot.close() }
+        }
+        this.transaction(() => {
+          this.db.exec(`CREATE TABLE workspaces(id TEXT PRIMARY KEY,name TEXT NOT NULL,shared_path TEXT NOT NULL,directory TEXT NOT NULL);
+            CREATE TABLE account_workspaces(user_id TEXT NOT NULL REFERENCES accounts(id),workspace_id TEXT NOT NULL REFERENCES workspaces(id),PRIMARY KEY(user_id,workspace_id));
+            ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
+            ALTER TABLE sessions ADD COLUMN workspace_epoch INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE sessions ADD COLUMN sync_enabled INTEGER NOT NULL DEFAULT 0;`)
+          const config = this.get<{ teamId: string; sharedPath: string }>('configuration')
+          if (config) {
+            const team = this.get<{ name: string }>('cachedTeam')
+            this.db.prepare('INSERT INTO workspaces VALUES(?,?,?,?)').run(config.teamId, team?.name || config.teamId, config.sharedPath, '.')
+            this.db.prepare('INSERT INTO account_workspaces SELECT id,? FROM accounts').run(config.teamId)
+            this.db.prepare('UPDATE sessions SET workspace_id=?').run(config.teamId)
+          }
+          this.db.exec('PRAGMA user_version=3')
+        })
+      } catch (error) { this.db.close(); throw error }
+    }
+    this.deviceId = deviceId || this.get<string>('deviceId') || randomUUID()
     this.set('deviceId', this.deviceId); this.set('machine', this.deviceName)
   }
   get<T>(key: string): T | null {

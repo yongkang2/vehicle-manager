@@ -8,7 +8,8 @@ import path from 'node:path'
 import { LocalStore } from './store.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
 import type { Access, Identity, LocalUser, Role, Status, TeamDocument } from '../shared/types.js'
-import { installBusinessRoutes } from './business-routes.js'
+import { Workspaces } from './workspaces.js'
+import { Business } from './business.js'
 import type { BrowserPresence } from './browser-presence.js'
 
 type Config = { sharedPath: string; teamId: string }
@@ -26,6 +27,8 @@ function role(value: unknown): Role {
 export function createApp({ dataDir, staticDir, controlToken, onShutdown, browserPresence, presenceToken }: { dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void; browserPresence?: BrowserPresence; presenceToken?: string }) {
   const store = new LocalStore(dataDir)
   const teams = new TeamDirectory(store.get<TeamDocument>('cachedTeam'))
+  const workspaces = new Workspaces(store)
+  const active = new Map<string, number>(), switching = new Set<string>()
   const app = express()
   app.disable('x-powered-by')
   app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null } } }))
@@ -44,7 +47,11 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   function session(res: Response, account: Account): void {
     const token = randomBytes(32).toString('hex')
     store.db.prepare('DELETE FROM sessions WHERE expires<?').run(Date.now())
-    store.db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(token, account.id, Date.now() + 8 * 60 * 60 * 1000)
+    const preferred = store.get<string>(`preferredWorkspace:${account.id}`)
+    const selected = preferred && store.db.prepare('SELECT 1 FROM account_workspaces WHERE user_id=? AND workspace_id=?').get(account.id, preferred) ? preferred : (store.db.prepare('SELECT workspace_id FROM account_workspaces WHERE user_id=? ORDER BY workspace_id LIMIT 1').get(account.id)?.workspace_id as string | undefined) || null
+    const state = selected ? workspaces.get(selected).synchronization.status() : null
+    store.db.prepare('INSERT INTO sessions(token,user_id,expires,workspace_id,sync_enabled) VALUES(?,?,?,?,?)').run(token, account.id, Date.now() + 8 * 60 * 60 * 1000, selected, state && !state.pending && !state.conflicts.length ? 1 : 0)
+    res.set('X-Workspace-Token', workspaces.token(workspaces.session(token)))
     res.cookie('vdm_session', token, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: 8 * 60 * 60 * 1000 })
   }
   app.use('/api', (req: AuthRequest, res, next) => {
@@ -56,7 +63,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     next()
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
-  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: '0.2.0', user: req.localUser || null, instanceId, pid: process.pid }))
+  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: '1.0.1', user: req.localUser || null, instanceId, pid: process.pid }))
   if (browserPresence && presenceToken) app.post('/api/local/browser-presence-token', (req, res) => res.json({ token: presenceToken }))
   app.post('/api/local/shutdown', (req, res) => {
     const supplied = req.get('X-Control-Token') || ''
@@ -97,37 +104,51 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     store.db.prepare('DELETE FROM sessions WHERE token=?').run(req.sessionToken || '')
     res.clearCookie('vdm_session', { path: '/' }); res.json({ ok: true })
   })
+  app.use('/api', (req: AuthRequest, res, next) => {
+    const token = req.sessionToken!, session = workspaces.session(token)
+    res.set('X-Workspace-Token', workspaces.token(session))
+    const protectedPath = /^\/(setup\/configure|workspaces\/(select|disconnect|cancel-request|resume)|team(?:\/|$)|business(?:\/|$))/.test(req.path)
+    if (!protectedPath) return next()
+    if (req.get('X-Workspace-Token') !== workspaces.token(session)) return next(new AppError('WORKSPACE_CHANGED', 409))
+    const exclusive = /^\/(setup\/configure|workspaces\/)/.test(req.path)
+    if (switching.has(token) || (exclusive && active.get(token))) return next(new AppError('WORKSPACE_BUSY', 409))
+    active.set(token, (active.get(token) || 0) + 1)
+    if (exclusive) switching.add(token)
+    let released = false
+    const release = () => { if (!released) { released = true; active.set(token, (active.get(token) || 1) - 1); switching.delete(token) } }
+    res.once('finish', release); res.once('close', release)
+    next()
+  })
   const identity = (req: AuthRequest): Identity => ({ deviceId: store.deviceId, deviceName: store.deviceName, localUserId: req.localUser!.id, displayName: req.localUser!.displayName })
-  const configuration = (): Config => {
-    const config = store.get<Config>('configuration')
+  const current = (req: AuthRequest) => {
+    const id = workspaces.session(req.sessionToken!).workspace_id
+    if (!id) throw new AppError('NOT_CONFIGURED', 409)
+    return workspaces.get(id)
+  }
+  const configuration = (req: AuthRequest): Config => {
+    const config = current(req).store.get<Config>('configuration')
     if (!config) throw new AppError('NOT_CONFIGURED', 409)
     return config
   }
-  function cache(team: TeamDocument): void {
-    const previous = store.get<TeamDocument>('cachedTeam')
-    if (previous?.id === team.id && (team.revision < previous.revision || (team.revision === previous.revision && JSON.stringify(team) !== JSON.stringify(previous)))) throw new AppError('TEAM_ROLLBACK', 409)
-    teams.observe(team)
-    store.transaction(() => { store.set('cachedTeam', team); store.set('lastChecked', new Date().toISOString()) })
-  }
   async function status(req: AuthRequest): Promise<Status> {
-    const config = store.get<Config>('configuration')
-    let team = store.get<TeamDocument>('cachedTeam'), online = false, error: string | null = null
-    if (config) {
-      try { team = await teams.read(config.sharedPath, config.teamId); cache(team); online = true }
-      catch (failure) { error = failure instanceof AppError ? failure.code : 'SHARE_IO_ERROR'; team = store.get<TeamDocument>('cachedTeam') }
+    const session = workspaces.session(req.sessionToken!), workspace = session.workspace_id ? workspaces.get(session.workspace_id) : null
+    const config = workspace?.store.get<Config>('configuration')
+    let team = workspace?.store.get<TeamDocument>('cachedTeam') || null, online = false, error: string | null = null
+    if (config && workspace) {
+      try { team = await workspace.teams.read(config.sharedPath, config.teamId); workspace.cache(team); online = true }
+      catch (failure) { error = failure instanceof AppError ? failure.code : 'SHARE_IO_ERROR'; team = workspace.store.get<TeamDocument>('cachedTeam') }
     }
     const { member, binding } = team ? bindingFor(team, identity(req)) : {}
     const request = team?.requests.filter(item => item.identity.deviceId === store.deviceId && item.identity.localUserId === req.localUser!.id).at(-1)
     const access: Access = !config ? 'unconfigured' : binding ? (binding.enabled && member?.enabled ? 'approved' : 'disabled') : request?.status === 'pending' ? 'pending' : request?.status === 'rejected' ? 'rejected' : 'unbound'
-    return { version: '0.2.0', user: req.localUser!, deviceId: store.deviceId, deviceName: store.deviceName, sharedPath: config?.sharedPath || null, teamName: team?.name || null, access, online, error, lastChecked: store.get<string>('lastChecked'), member: member || null }
+    return { version: '1.0.1', user: req.localUser!, deviceId: store.deviceId, deviceName: store.deviceName, sharedPath: config?.sharedPath || null, teamId: config?.teamId || null, workspaceToken: workspaces.token(session), syncPaused: !session.sync_enabled, teamName: team?.name || null, access, online, error, lastChecked: workspace?.store.get<string>('lastChecked') || null, member: member || null }
   }
   app.get('/api/status', async (req: AuthRequest, res, next) => { try { res.json(await status(req)) } catch (error) { next(error) } })
   app.post('/api/setup/check', async (req, res, next) => { try { res.json(await teams.probe(req.body?.path)) } catch (error) { next(error) } })
   app.post('/api/setup/configure', async (req: AuthRequest, res, next) => {
     try {
       const check = await teams.probe(req.body?.path)
-      const old = store.get<Config>('configuration')
-      if (old && (check.teamId !== old.teamId || req.body?.mode === 'create')) throw new AppError('WRONG_TEAM', 409)
+      await prepareSwitch(req)
       let team: TeamDocument
       if (req.body?.mode === 'create') {
         if (check.kind !== 'empty' || req.body?.confirmed !== true) throw new AppError('CONFIRM_TEAM_CREATION', 409)
@@ -136,17 +157,18 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
         if (check.kind !== 'existing' || req.body?.teamId !== check.teamId) throw new AppError('TEAM_CHANGED', 409)
         team = await teams.join(check.path, check.teamId!, identity(req))
       } else throw new AppError('INVALID_INPUT')
-      store.transaction(() => {
-        store.set('configuration', { sharedPath: check.path, teamId: team.id })
-        store.set('cachedTeam', team); store.set('lastChecked', new Date().toISOString())
-        store.event(req.localUser!.id, 'workspace.configured', { teamId: team.id, mode: req.body.mode })
-      })
+      const workspace = workspaces.connect(team, check.path, req.localUser!.id)
+      const state = workspace.synchronization.status()
+      select(req, team.id, !state.pending && !state.conflicts.length)
+      workspace.store.event(req.localUser!.id, 'workspace.configured', { teamId: team.id, mode: req.body.mode })
+      res.set('X-Workspace-Token', workspaces.token(workspaces.session(req.sessionToken!)))
       res.json(await status(req))
     } catch (error) { next(error) }
   })
   app.get('/api/team', async (req: AuthRequest, res, next) => {
     try {
-      const config = configuration(), team = await teams.read(config.sharedPath, config.teamId)
+      const { teams, cache } = current(req)
+      const config = configuration(req), team = await teams.read(config.sharedPath, config.teamId)
       cache(team)
       const { member, binding } = bindingFor(team, identity(req))
       if (!member?.enabled || member.role !== 'admin' || !binding?.enabled) throw new AppError('ADMIN_REQUIRED', 403)
@@ -155,7 +177,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   })
   app.post('/api/team/requests/:id/approve', async (req: AuthRequest, res, next) => {
     try {
-      const config = configuration()
+      const { teams, cache } = current(req), config = configuration(req)
       const team = await teams.approve(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body?.memberId ? text(req.body.memberId) : null, text(req.body?.reason))
       cache(team); res.json(team)
     } catch (error) { next(error) }
@@ -163,26 +185,92 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   app.post('/api/team/members/:id', async (req: AuthRequest, res, next) => {
     try {
       if (typeof req.body?.enabled !== 'boolean') throw new AppError('INVALID_INPUT')
-      const config = configuration()
+      const { teams, cache } = current(req), config = configuration(req)
       const team = await teams.changeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body.enabled, text(req.body?.reason))
       cache(team); res.json(team)
     } catch (error) { next(error) }
   })
   app.post('/api/team/requests/:id/reject', async (req: AuthRequest, res, next) => {
     try {
-      const config = configuration()
+      const { teams, cache } = current(req), config = configuration(req)
       const team = await teams.reject(config.sharedPath, config.teamId, identity(req), String(req.params.id), text(req.body?.reason))
       cache(team); res.json(team)
     } catch (error) { next(error) }
   })
   app.post('/api/team/devices/:id/revoke', async (req: AuthRequest, res, next) => {
     try {
-      const config = configuration()
+      const { teams, cache } = current(req), config = configuration(req)
       const team = await teams.revokeDevice(config.sharedPath, config.teamId, identity(req), String(req.params.id), text(req.body?.reason))
       cache(team); res.json(team)
     } catch (error) { next(error) }
   })
-  const businessServices = installBusinessRoutes(app, store, teams, cache)
+  async function prepareSwitch(req: AuthRequest): Promise<void> {
+    const session = workspaces.session(req.sessionToken!)
+    if (!session.workspace_id) return
+    const workspace = current(req)
+    await workspace.synchronization.settle()
+    const state = workspace.synchronization.status()
+    if ((state.pending || state.conflicts.length) && req.body?.retainPending !== true) throw new AppError('PENDING_BEFORE_SWITCH', 409)
+  }
+  function select(req: AuthRequest, id: string | null, resume: boolean): void {
+    workspaces.select(req.sessionToken!, req.localUser!.id, id, resume)
+    if (id) store.set(`preferredWorkspace:${req.localUser!.id}`, id)
+  }
+  app.get('/api/workspaces', (req: AuthRequest, res) => {
+    const session = workspaces.session(req.sessionToken!)
+    const rows = store.db.prepare('SELECT workspace_id FROM account_workspaces WHERE user_id=? ORDER BY workspace_id').all(req.localUser!.id)
+    res.json(rows.map(row => {
+      const workspace = workspaces.get(row.workspace_id as string), team = workspace.store.get<TeamDocument>('cachedTeam')
+      const { member, binding } = team ? bindingFor(team, identity(req)) : {}
+      const request = team?.requests.filter(item => item.identity.deviceId === store.deviceId && item.identity.localUserId === req.localUser!.id).at(-1)
+      const access = binding ? member?.enabled && binding.enabled ? 'approved' : 'disabled' : request?.status === 'pending' ? 'pending' : request?.status === 'rejected' ? 'rejected' : 'unbound'
+      const state = workspace.synchronization.status(), config = workspace.store.get<Config>('configuration')!
+      return { id: config.teamId, name: team?.name || workspace.row.name, sharedPath: config.sharedPath, access, pending: state.pending, conflicts: state.conflicts.length, selected: session.workspace_id === config.teamId }
+    }))
+  })
+  app.post('/api/workspaces/select', async (req: AuthRequest, res, next) => {
+    try {
+      const id = text(req.body?.teamId)
+      if (!store.db.prepare('SELECT 1 FROM account_workspaces WHERE user_id=? AND workspace_id=?').get(req.localUser!.id, id)) throw new AppError('WORKSPACE_NOT_FOUND', 404)
+      await prepareSwitch(req)
+      const state = workspaces.get(id).synchronization.status()
+      select(req, id, !state.pending && !state.conflicts.length)
+      res.set('X-Workspace-Token', workspaces.token(workspaces.session(req.sessionToken!)))
+      res.json(await status(req))
+    } catch (error) { next(error) }
+  })
+  app.post('/api/workspaces/disconnect', async (req: AuthRequest, res, next) => {
+    try {
+      if (req.body?.confirmed !== true) throw new AppError('CONFIRM_DISCONNECT', 409)
+      await prepareSwitch(req); select(req, null, false)
+      res.set('X-Workspace-Token', workspaces.token(workspaces.session(req.sessionToken!)))
+      res.json(await status(req))
+    } catch (error) { next(error) }
+  })
+  app.post('/api/workspaces/cancel-request', async (req: AuthRequest, res, next) => {
+    try {
+      if (req.body?.confirmed !== true) throw new AppError('CONFIRM_DISCONNECT', 409)
+      const workspace = current(req), config = configuration(req)
+      workspace.cache(await workspace.teams.cancelRequest(config.sharedPath, config.teamId, identity(req)))
+      res.json(await status(req))
+    } catch (error) { next(error) }
+  })
+  app.post('/api/workspaces/resume', async (req: AuthRequest, res, next) => {
+    try {
+      if (req.body?.confirmed !== true) throw new AppError('CONFIRM_RESUME', 409)
+      const workspace = current(req), config = configuration(req)
+      await workspace.teams.withAccess(config.sharedPath, config.teamId, identity(req), false, async team => workspace.cache(team))
+      store.db.prepare('UPDATE sessions SET sync_enabled=1 WHERE token=?').run(req.sessionToken!)
+      res.json(await status(req))
+    } catch (error) { next(error) }
+  })
+  app.use((req: AuthRequest & { syncEnabled?: boolean }, res, next) => {
+    if (!req.path.startsWith('/api/business/')) return next()
+    try {
+      req.syncEnabled = Boolean(workspaces.session(req.sessionToken!).sync_enabled)
+      current(req).router(req, res, next)
+    } catch (error) { next(error) }
+  })
   app.use('/api', (req, res, next) => next(new AppError('NOT_FOUND', 404)))
   if (staticDir && existsSync(path.join(staticDir, 'index.html'))) {
     app.use(express.static(staticDir))
@@ -197,5 +285,5 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     console.error('Request failed:', error instanceof Error ? error.name : 'Unknown error')
     res.status(500).json({ error: 'SERVER_ERROR' })
   })
-  return { app, store, ...businessServices }
+  return { app, store, business: new Business(store), workspaces, tick: () => workspaces.tick(), synchronization: { settle: () => workspaces.settle() }, close: () => workspaces.close() }
 }
