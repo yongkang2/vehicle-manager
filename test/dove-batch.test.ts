@@ -9,6 +9,7 @@ import { DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
 import type { BusinessRecord, DoveBatchPreviewResult, DoveBatchSaveResult } from '../shared/business.js'
 
 const vin = 'TEST0000000000001', otherVin = 'TEST0000000000002'
+const confirmationsFor = (draftIds: string[]) => Object.fromEntries(draftIds.map(id => [id, { confirmed: true }]))
 
 async function workbook(reportVin = vin, software = '2.0') {
   const book = new ExcelJS.Workbook()
@@ -54,7 +55,7 @@ async function createVehicle(request: Awaited<ReturnType<typeof fixture>>['reque
   return response.data as BusinessRecord
 }
 
-test('DOVE batch preview isolates file errors; retention continues in order and stores original bytes without changing configuration', async () => {
+test('DOVE batch preview isolates file errors; retention stores exact bytes and updates the fixed controller', async () => {
   const client = await fixture(), { request } = client
   try {
     const car = await createVehicle(request)
@@ -82,7 +83,10 @@ test('DOVE batch preview isolates file errors; retention continues in order and 
     assert.deepEqual(client.business.list(), beforeRecords)
     assert.deepEqual(client.business.history(), beforeHistory)
     const draftIds = [0, 3, 4, 5].map(index => previews[index].preview!.id)
-    const saved = await request('/business/dove/save-batch', 'POST', { draftIds })
+    const unconfirmed = (await request('/business/dove/save-batch', 'POST', { draftIds: [draftIds[0]] })).data as DoveBatchSaveResult[]
+    assert.equal(unconfirmed[0].error, 'IMPORT_CONFIRMATION_REQUIRED')
+    assert.deepEqual(client.business.list(), beforeRecords)
+    const saved = await request('/business/dove/save-batch', 'POST', { draftIds, confirmations: confirmationsFor(draftIds) })
     assert.equal(saved.status, 201)
     const results = saved.data as DoveBatchSaveResult[]
     assert.deepEqual(results.map(result => result.draftId), draftIds)
@@ -95,15 +99,19 @@ test('DOVE batch preview isolates file errors; retention continues in order and 
     assert.deepEqual((await request(`/business/files/${results[3].record!.id}`)).data, lastBytes)
     assert.equal(client.business.list('report').length, 2)
     assert.deepEqual(client.business.get(car.id).data, car.data)
-    assert.deepEqual(client.business.get(part.id).data, part.data)
-    assert.equal(client.business.history(car.id).filter(change => change.kind === 'vehicle' || change.kind === 'part').length, 2)
+    assert.equal(client.business.get(part.id).data.software, '3.0')
+    assert.equal(client.business.get(part.id).data.description, 'Control')
+    assert.equal(client.business.list('part', car.id).length, 1)
+    assert.equal(client.business.history(car.id).filter(change => change.kind === 'vehicle' || change.kind === 'part').length, 4)
     const consumedIds = [draftIds[0], draftIds[2], draftIds[3]]
     const consumed = (await request('/business/dove/save-batch', 'POST', { draftIds: consumedIds })).data as DoveBatchSaveResult[]
     assert.deepEqual(consumed.map(result => result.error), ['DRAFT_EXPIRED', 'DRAFT_EXPIRED', 'DRAFT_EXPIRED'])
     const singlePreview = await request('/business/dove/preview', 'POST', upload([{ name: 'single.xlsx', bytes: firstBytes }], 'file'))
     assert.equal(singlePreview.status, 200)
     assert.equal(singlePreview.data.existingId, results[0].record!.id)
-    assert.equal((await request('/business/dove/save', 'POST', { draftId: singlePreview.data.id })).data.id, results[0].record!.id)
+    assert.equal((await request('/business/dove/save', 'POST', { draftId: singlePreview.data.id, confirmation: { confirmed: true } })).data.id, results[0].record!.id)
+    assert.equal(client.business.get(part.id).data.software, '2.0')
+    assert.equal(client.business.list('report').length, 2)
     assert.equal((await request('/business/dove/save', 'POST', { draftId: singlePreview.data.id })).data.error, 'DRAFT_EXPIRED')
   } finally { await client.close() }
 })
@@ -125,7 +133,7 @@ test('DOVE batch retention rechecks vehicle VIN and local draft ownership for ea
     assert.deepEqual(denied.map(result => result.error), ['DRAFT_EXPIRED', 'DRAFT_EXPIRED'])
     assert.equal(client.business.list('report').length, 0)
     assert.equal((await request(`/business/records/${firstCar.id}`, 'PUT', { data: { ...firstCar.data, vin: 'TEST0000000000003' }, version: firstCar.version, reason: 'Correct VIN before retention' })).status, 200)
-    const retained = (await request('/business/dove/save-batch', 'POST', { draftIds })).data as DoveBatchSaveResult[]
+    const retained = (await request('/business/dove/save-batch', 'POST', { draftIds, confirmations: confirmationsFor(draftIds) })).data as DoveBatchSaveResult[]
     assert.equal(retained[0].error, 'VIN_NOT_MATCHED')
     assert.equal(retained[1].record?.kind, 'report')
     assert.equal(retained[1].record?.data.name, 'second.xlsx')
@@ -161,7 +169,7 @@ test('DOVE batch accepts eight live drafts, rejects nine files, and validates re
       assert.equal(invalid.status, 400)
       assert.equal(invalid.data.error, 'INVALID_INPUT')
     }
-    const retained = (await request('/business/dove/save-batch', 'POST', { draftIds })).data as DoveBatchSaveResult[]
+    const retained = (await request('/business/dove/save-batch', 'POST', { draftIds, confirmations: confirmationsFor(draftIds) })).data as DoveBatchSaveResult[]
     assert.equal(retained.length, 8)
     assert.ok(retained.every(result => result.record?.kind === 'report'))
     assert.equal(new Set(retained.map(result => result.record!.id)).size, 1)

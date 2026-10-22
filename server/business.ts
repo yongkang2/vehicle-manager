@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
-import { entryFields, partFields, vehicleFields } from '../shared/business.js'
+import { entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
 
 export const now = () => new Date().toISOString()
@@ -36,6 +36,7 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
     if (!['available', 'testing', 'maintenance', 'inactive'].includes(String(data.status))) throw new AppError('INVALID_INPUT')
   }
   if (kind === 'part' && !['motor', 'battery', 'controller'].includes(String(data.category))) throw new AppError('INVALID_INPUT')
+  if (kind === 'part' && data.category === 'controller') data.name = keyControllerName(data.name) || data.name
   return data
 }
 export type RecordRow = { id: string; kind: RecordKind; vehicle_id: string | null; data: string; archived: number; version: number; updated: string }
@@ -72,6 +73,8 @@ export class Business {
         if (parent.kind !== 'vehicle' || (parent.archived && !targetArchived)) throw new AppError('PARENT_ARCHIVED', 409)
       }
       const vin = kind === 'vehicle' ? String(normalized.vin) : null
+      const controllerName = kind === 'part' && normalized.category === 'controller' ? keyControllerName(normalized.name) : null
+      if (controllerName && !targetArchived && this.list('part', vehicleId!).some(record => record.id !== id && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === controllerName)) throw new AppError('CONTROLLER_EXISTS', 409)
       if (vin && this.store.db.prepare('SELECT id FROM records WHERE vin=? AND id<>?').get(vin, id)) throw new AppError('VIN_EXISTS', 409)
       const timestamp = now()
       if (!before) this.store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(id, kind, vehicleId, vin, JSON.stringify(normalized), targetArchived ? 1 : 0, 1, timestamp)
