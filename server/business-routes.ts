@@ -9,7 +9,7 @@ import { DoveService, compareReports } from './dove.js'
 import { createBackup, restoreBackup } from './backup.js'
 import { LocalStore } from './store.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
-import { DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
+import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
 import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData } from '../shared/business.js'
 
 type Config = { sharedPath: string; teamId: string }
@@ -120,7 +120,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   })
   router.post('/dove/save', async (req: BusinessRequest, res) => {
     await sync(req.businessContext!)
-    res.status(201).json(await dove.save(String(req.body?.draftId || ''), req.localUser!.id, req.businessContext!.actor))
+    res.status(201).json(await dove.save(String(req.body?.draftId || ''), req.localUser!.id, req.businessContext!.actor, req.body?.confirmation))
   })
   router.post('/dove/preview-batch', batchFiles, async (req: BusinessRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined
@@ -140,7 +140,7 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
     await sync(req.businessContext!)
     const results: DoveBatchSaveResult[] = []
     for (const draftId of draftIds as string[]) {
-      try { results.push({ draftId, record: await dove.save(draftId, req.localUser!.id, req.businessContext!.actor) }) }
+      try { results.push({ draftId, record: await dove.save(draftId, req.localUser!.id, req.businessContext!.actor, req.body?.confirmations?.[draftId]) }) }
       catch (error) { results.push({ draftId, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
     }
     res.status(201).json(results)
@@ -149,18 +149,26 @@ export function installBusinessRoutes(app: Express, store: LocalStore, teams: Te
   router.post('/reports/:id/configuration', (req: BusinessRequest, res) => {
     const report = business.get(String(req.params.id)), explanation = reason(req.body?.reason)
     if (report.kind !== 'report' || report.archived || report.version !== req.body.reportVersion) throw new AppError('VERSION_CONFLICT', 409)
-    const selections = req.body?.selections as { controllerIndex: number; partId: string; version: number; fields: string[] }[]
-    if (!Array.isArray(selections) || !selections.length || selections.length > 100 || new Set(selections.map(item => item.partId)).size !== selections.length) throw new AppError('INVALID_INPUT')
-    const allowed = ['supplier', 'serial', 'software', 'functionalPart', 'productPart', 'calibrationPart', 'calibrationVersion']
+    const selections = req.body?.selections as { controllerIndex: number; partId: string | null; version?: number; fields: string[] }[]
+    if (!Array.isArray(selections) || !selections.length || selections.length > 100 || selections.some(item => !item || typeof item !== 'object')) throw new AppError('INVALID_INPUT')
+    const targets = selections.map(item => item.partId || `new:${item.controllerIndex}`)
+    if (new Set(targets).size !== targets.length) throw new AppError('INVALID_INPUT')
     const parsed = (report.data as unknown as ReportData).parsed, updated: BusinessRecord[] = []
     if (business.get(report.vehicleId!).data.vin !== parsed.vin) throw new AppError('REPORT_VIN_MISMATCH', 409)
     store.transaction(() => {
       for (const selection of selections) {
-        const controller = parsed.controllers[selection.controllerIndex], part = business.get(selection.partId)
-        if (!controller || part.kind !== 'part' || part.vehicleId !== report.vehicleId || part.data.category !== 'controller' || part.archived || part.data.removedAt || !Array.isArray(selection.fields) || !selection.fields.length || selection.fields.some(field => !allowed.includes(field))) throw new AppError('INVALID_COMPONENT_MATCH', 409)
-        const data: Fields = { ...part.data }
+        const controller = Number.isInteger(selection.controllerIndex) ? parsed.controllers[selection.controllerIndex] : undefined
+        if (!controller || !Array.isArray(selection.fields) || !selection.fields.length || selection.fields.some(field => !configurationFields.includes(field as typeof configurationFields[number]) || !validControllerValue(controller[field as keyof Controller]))) throw new AppError('INVALID_COMPONENT_MATCH', 409)
+        const name = keyControllerName(controller.name)
+        if (!name) throw new AppError('INVALID_COMPONENT_MATCH', 409)
+        const part = selection.partId ? business.get(selection.partId) : null
+        if (part && (part.kind !== 'part' || part.vehicleId !== report.vehicleId || part.data.category !== 'controller' || part.archived || part.data.removedAt || (name && keyControllerName(part.data.name) !== name))) throw new AppError('INVALID_COMPONENT_MATCH', 409)
+        if (!part && business.list('part', report.vehicleId!).some(item => !item.archived && item.data.category === 'controller' && keyControllerName(item.data.name) === name)) throw new AppError('VERSION_CONFLICT', 409)
+        if (part && doveRecordedTime(parsed.recordedAt) < doveRecordedTime(part.data.reportRecordedAt) && req.body?.allowOlder !== true) throw new AppError('OLDER_REPORT_CONFIRMATION_REQUIRED', 409)
+        const data: Fields = { ...(part?.data || { name, category: 'controller' }), sourceName: controller.name, reportId: report.id, reportRecordedAt: parsed.recordedAt }
+        if (name) data.name = name
         for (const field of selection.fields) data[field] = controller[field as keyof Controller]
-        updated.push(business.write({ id: part.id, kind: 'part', vehicleId: part.vehicleId, data, version: selection.version, actor: req.businessContext!.actor, reason: explanation, sourceId: report.id }))
+        updated.push(business.write({ id: part?.id || controllerRecordId(report.vehicleId!, name), version: part ? selection.version : undefined, kind: 'part', vehicleId: report.vehicleId, data, actor: req.businessContext!.actor, reason: explanation, sourceId: report.id }))
       }
     })
     res.json(updated)
