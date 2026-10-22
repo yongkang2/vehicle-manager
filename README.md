@@ -1,6 +1,6 @@
 # STELLANTIS Vehicle Data Management
 
-Version 0.2.0, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
+Version 1.0.1, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
 
 ## Current Scope
 
@@ -33,11 +33,25 @@ For development, run `npm run dev:server` and `npm run dev` in separate terminal
 3. Once the share exists, enter a UNC path such as `\\fileserver\team\vehicle-data` and test the connection. The signed-in Windows account must already have SMB/NTFS access. The application does not ask for or store Windows credentials.
 4. An existing, empty, dedicated folder may explicitly initialize a team after confirmation. The current account becomes the first administrator. A directory containing another application's files, including the previous Demo's snapshots, is not overwritten or adopted automatically.
 5. For an existing team, submit a join request. An approved administrator must verify the person/device and choose a new member identity or bind it to an existing identity. The first local account on another computer is not automatically an administrator.
-6. The selected path is persisted in the local SQLite settings. Re-entering a path is required only for a fresh installation or an intentional relocation; another team's ID is rejected.
+6. Use the bottom-left account button to open **Personal workspace**. Each login session selects its own team; accounts and passwords remain local. Connect additional teams or switch between connected teams without clearing existing data. A team is identified by its roster ID, not its name or folder path.
 
 The share contains a versioned `team.json` roster and a transient `.vehicle-manager-team-lock/` directory during writes. Approved clients additionally maintain `business/HEAD.json`, immutable `business/snapshots/`, unique `business/operations/` and content-addressed `business/blobs/`. Team and business writes use the same exclusive lock. SQLite merge work is performed on a local temporary copy, not by multiple clients writing a network SQLite WAL. Do not edit shared protocol files manually. A stranded lock requires confirming that every client has stopped and preserving a backup before manual maintenance; locks are never reclaimed merely because they look old. Real SMB behavior still needs multi-computer validation.
 
 Pending or disabled accounts cannot access the administrator API. Offline status may display the last approved cached identity, but all administrator operations require a successful live shared-folder read. People who can modify the share or local SQLite can bypass normal application controls; this is not tamper-proof enterprise authentication. Copy application code to another computer, not `data/`, session files or another device's identity.
+
+## Personal Workspaces (First Version)
+
+**Personal workspace** contains the team list, connect-another-team, withdraw-request, disconnect-session, resume-sync and sign-out actions. On mobile, use the person icon in the top bar. Business navigation and administrator team management remain separate. Account profile/password editing and permanent workspace deletion are not part of this version.
+
+Team databases, originals, sync cursors, pending operations, conflicts and temporary DOVE previews are isolated. The original team keeps the original local database and blob location; subsequent teams use `data/workspaces/<hashed-team-id>/`. Internal paths are relative so the entire application/data directory can be moved on the same computer after clean shutdown. Never copy an existing device identity to another computer. Each account sees only its connected teams; entering business data still requires approved team access.
+
+Switching or disconnecting preserves all local data and does not revoke membership. Explicitly confirm retention if pending changes or conflicts exist. In-flight requests in the same session block switching, and stale pages cannot write after a switch or new login. Reload a stale page before continuing. Distinct sessions can select different teams; ordinary tabs sharing one login cookie also share its selection. The top bar identifies the current team. Selecting or logging back into a workspace with retained pending changes pauses synchronization until you review them and explicitly resume from the personal panel. Other active, sync-enabled sessions for that same workspace may still synchronize its queue. Existing live shared reads are required for administration; offline cached access retains the existing limitations.
+
+Withdrawal updates only the current account/device's pending request under the roster lock; a withdrawn request cannot be approved. If approval wins the lock first, withdrawal fails rather than revoking the approved membership. If the original directory is unavailable, withdrawal fails honestly: you may disconnect locally and connect elsewhere, but ask the original administrator to reject or revoke the remote request. No background cancellation is silently scheduled.
+
+Before first use with existing data, stop the old service and independently copy the complete `data/` directory to a protected backup. Startup upgrades local SQLite to schema 3: it first creates and integrity-checks `data/migration-backups/before-workspaces-<unique-id>.sqlite`, then transactionally adds the catalog/session structures. Existing records, originals, queues, identities and sessions stay in place. Backup failure prevents the catalog upgrade; interrupted transactions can retry. The database backup contains credentials and sessions and excludes separate blob files, so keep the entire data directory protected. It is not a shareable business export or an independent disaster backup. Older application versions intentionally reject schema 3; rollback requires a stopped service and supervised restoration of a complete pre-upgrade backup, preserving all newer workspaces first. Do not replace a live SQLite file or delete WAL files.
+
+API clients must retain the `X-Workspace-Token` returned on login/status and explicit selection changes and send it for setup configuration, business and team operations. Missing/stale tokens are rejected. Tokens are scoped to a login session and selection epoch; clients must not silently adopt a new token from background status calls over existing forms.
 
 ## Business Use
 

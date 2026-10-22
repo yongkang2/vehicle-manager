@@ -15,7 +15,7 @@ const controlToken = randomBytes(32).toString('hex')
 const presenceToken = randomBytes(32).toString('hex')
 let closing = false
 const browserPresence = new BrowserPresence({ onEmpty: () => { console.log('All application pages are closed. Stopping the service.'); void shutdown() } })
-const { app, store, tick, synchronization } = createApp({ dataDir, staticDir: path.join(project, 'dist'), controlToken, presenceToken, browserPresence, onShutdown: () => { void shutdown() } })
+const { app, close, tick } = createApp({ dataDir, staticDir: path.join(project, 'dist'), controlToken, presenceToken, browserPresence, onShutdown: () => { void shutdown() } })
 void tick()
 const interval = setInterval(() => { void tick() }, 30000).unref()
 const stateFile = path.join(dataDir, 'service.json')
@@ -29,12 +29,11 @@ async function shutdown() {
 	if (closing) return
 	closing = true; clearInterval(interval); browserPresence.stop(); disposePresence()
 	server.close(() => {
-		void synchronization.settle().finally(async () => {
-			store.db.close()
+		void close().finally(async () => {
 			const state = await fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value) as { pid: number }).catch(() => null)
 			if (state?.pid === process.pid) await fs.rm(stateFile, { force: true })
 		})
 	})
 }
 process.once('SIGINT', () => { void shutdown() }); process.once('SIGTERM', () => { void shutdown() })
-server.on('error', error => { console.error(error.message); clearInterval(interval); browserPresence.stop(); disposePresence(); void synchronization.settle().finally(() => store.db.close()); process.send?.({ type: 'error' }); process.exitCode = 1 })
+server.on('error', error => { console.error(error.message); clearInterval(interval); browserPresence.stop(); disposePresence(); void close(); process.send?.({ type: 'error' }); process.exitCode = 1 })

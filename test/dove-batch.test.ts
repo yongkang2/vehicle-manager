@@ -31,9 +31,11 @@ async function fixture() {
   const client = createApp({ dataDir: path.join(directory, 'local') }), server = client.app.listen(0, '127.0.0.1')
   if (!server.listening) await new Promise(resolve => server.once('listening', resolve))
   const cookies = new Map<string, string>()
+  const workspaceTokens = new Map<string, string>()
   async function request(url: string, method = 'GET', body?: unknown, user = 'admin') {
     const form = body instanceof FormData, port = (server.address() as { port: number }).port
-    const response = await fetch(`http://127.0.0.1:${port}/api${url}`, { method, headers: { Cookie: cookies.get(user) || '', 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body ? form ? body : JSON.stringify(body) : undefined })
+    const response = await fetch(`http://127.0.0.1:${port}/api${url}`, { method, headers: { Cookie: cookies.get(user) || '', 'X-Workspace-Token': workspaceTokens.get(user) || '', 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body ? form ? body : JSON.stringify(body) : undefined })
+    const workspaceToken = response.headers.get('x-workspace-token'); if (workspaceToken) workspaceTokens.set(user, workspaceToken)
     const cookie = response.headers.get('set-cookie'); if (cookie) cookies.set(user, cookie.split(';')[0])
     return { status: response.status, data: response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer()) }
   }
