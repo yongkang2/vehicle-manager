@@ -6,9 +6,19 @@ import { Business, checksum, now } from './business.js'
 import type { RecordRow } from './business.js'
 import { AppError, TeamDirectory } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
-import type { Actor, Change, Fields, Operation, SyncConflict, SyncStatus } from '../shared/business.js'
+import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus } from '../shared/business.js'
 
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+// Legacy vehicles omit this optional field; an empty editor value is not a change.
+const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => kind === 'vehicle' && field === 'physicalLocation'
+  ? equivalent(left === undefined ? '' : left, right === undefined ? '' : right)
+  : equivalent(left, right)
+function equivalentData(kind: RecordKind, left: Fields, right: Fields): boolean {
+  if (kind !== 'vehicle') return equivalent(left, right)
+  const { physicalLocation: leftLocation, ...leftFields } = left
+  const { physicalLocation: rightLocation, ...rightFields } = right
+  return equivalent(leftFields, rightFields) && equivalentField(kind, 'physicalLocation', leftLocation, rightLocation)
+}
 const stateOf = (row: RecordRow | undefined) => row ? { data: JSON.parse(row.data) as Fields, archived: Boolean(row.archived) } : null
 const hashKey = (key: string) => /^[a-f0-9]{64}$/.test(key)
 const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'part' THEN 1 ELSE 2 END"
@@ -73,9 +83,9 @@ export class BusinessSync {
       if (!first.base) { if (remote) fields.push('_record') }
       else if (!remote) fields.push('_record')
       else {
-        for (const key of Object.keys(last.desired.data)) if (!equivalent(first.base.data[key], last.desired.data[key]) && !equivalent(remote.data[key], first.base.data[key]) && !equivalent(remote.data[key], last.desired.data[key])) fields.push(key)
-        if (remote.archived !== first.base.archived && (last.desired.archived !== remote.archived || !equivalent(last.desired.data, first.base.data) || operations.some(operation => operation.files.length))) fields.push('_archived')
-        if (last.desired.archived !== first.base.archived && !equivalent(remote.data, first.base.data)) fields.push('_archived')
+        for (const key of Object.keys(last.desired.data)) if (!equivalentField(first.kind, key, first.base.data[key], last.desired.data[key]) && !equivalentField(first.kind, key, remote.data[key], first.base.data[key]) && !equivalentField(first.kind, key, remote.data[key], last.desired.data[key])) fields.push(key)
+        if (remote.archived !== first.base.archived && (last.desired.archived !== remote.archived || !equivalentData(first.kind, last.desired.data, first.base.data) || operations.some(operation => operation.files.length))) fields.push('_archived')
+        if (last.desired.archived !== first.base.archived && !equivalentData(first.kind, remote.data, first.base.data)) fields.push('_archived')
       }
     }
     if (first.kind === 'vehicle' && master.prepare('SELECT id FROM records WHERE vin=? AND id<>?').get(String(last.desired.data.vin), first.recordId)) fields.push('_vin')
@@ -93,7 +103,7 @@ export class BusinessSync {
     const duplicateReport = first.kind === 'report' && !first.base && row && JSON.parse(row.data).checksum === last.desired.data.checksum
     if (!first.decision && !duplicateReport) {
       const data: Fields = row ? JSON.parse(row.data) : structuredClone(last.desired.data)
-      if (first.base) for (const key of Object.keys(last.desired.data)) if (!equivalent(first.base.data[key], last.desired.data[key])) data[key] = last.desired.data[key]
+      if (first.base) for (const key of Object.keys(last.desired.data)) if (!equivalentField(first.kind, key, first.base.data[key], last.desired.data[key])) data[key] = last.desired.data[key]
       const archived = !row || !first.base || first.base.archived !== last.desired.archived ? last.desired.archived : Boolean(row.archived)
       const vin = first.kind === 'vehicle' ? String(data.vin) : null
       if (row) master.prepare('UPDATE records SET data=?,vin=?,archived=?,version=version+1,updated=? WHERE id=?').run(JSON.stringify(data), vin, archived ? 1 : 0, now(), first.recordId)
@@ -220,7 +230,7 @@ export class BusinessSync {
     if (conflict.fields.includes('_vin') && !discard) throw new AppError('VIN_EXISTS', 409)
     const desired = structuredClone(conflict.remote || conflict.local)
     if (!discard) {
-      for (const field of Object.keys(current.data)) if ((!conflict.base || !equivalent(conflict.base.data[field], current.data[field])) && (!conflict.fields.includes(field) || choices[field] === 'local')) desired.data[field] = current.data[field]
+      for (const field of Object.keys(current.data)) if ((!conflict.base || !equivalentField(current.kind, field, conflict.base.data[field], current.data[field])) && (!conflict.fields.includes(field) || choices[field] === 'local')) desired.data[field] = current.data[field]
       if (!conflict.base || conflict.base.archived !== current.archived || choices._archived === 'local') desired.archived = current.archived
     }
     const id = randomUUID(), created = now()
