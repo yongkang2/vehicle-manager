@@ -11,7 +11,8 @@
     "test": "tsx --test test/*.test.ts",
     "lint": "oxlint",
     "preview": "vite preview",
-    "package:portable": "npm run build && node scripts/package.mjs"
+    "package:portable": "npm run build && node scripts/package.mjs",
+    "verify:portable": "node scripts/verify-portable.mjs"
   },
   "engines": {
     "node": ">=24"

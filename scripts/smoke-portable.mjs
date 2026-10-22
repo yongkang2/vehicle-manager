@@ -10,6 +10,17 @@ const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const release = path.resolve(process.argv[2] || '')
 const executable = path.join(release, 'runtime', 'node.exe'), launcher = path.join(release, 'launcher.mjs')
 if (!existsSync(executable) || !existsSync(launcher)) throw new Error('Pass the generated portable application directory.')
+const readableStream = JSON.parse(await fs.readFile(path.join(release, 'app', 'node_modules', 'readable-stream', 'package.json'), 'utf8'))
+for (const dependency of Object.keys(readableStream.dependencies || {})) {
+  let current = path.join(release, 'app', 'node_modules', 'readable-stream'), found = false
+  while (true) {
+    if (existsSync(path.join(current, 'node_modules', dependency, 'package.json'))) { found = true; break }
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  assert.ok(found, `Portable package is missing readable-stream dependency: ${dependency}`)
+}
 const root = await fs.mkdtemp(path.join(project, 'test', 'test-data-package-')), data = path.join(root, 'local'), shared = path.join(root, 'shared')
 await fs.mkdir(shared)
 const env = { ...process.env, PORT: '0', VEHICLE_MANAGER_DATA_DIR: data }, execute = promisify(execFile)
