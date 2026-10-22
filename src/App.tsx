@@ -5,6 +5,7 @@ import zhCN from 'antd/locale/zh_CN'
 import { ArrowRight, CarFront, Check, Clock3, FileSpreadsheet, Files, FolderCog, FolderOpen, FolderSync, HardDrive, History, LogOut, RefreshCw, ShieldCheck, UserRound, UsersRound, WifiOff } from 'lucide-react'
 import type { ConnectionCheck, LocalUser, Status } from '../shared/types'
 import { api, ApiError } from './api'
+import { trackBrowserPresence } from './browser-presence'
 import { dictionaries, errorText } from './i18n'
 import type { Dictionary, Language } from './i18n'
 import TeamManagement from './TeamManagement'
@@ -101,6 +102,7 @@ function Application({ language, text }: { language: Language; text: Dictionary 
 }
 
 export default function App() {
+  useEffect(() => trackBrowserPresence(), [])
   const [language, setLanguage] = useState<Language>(() => localStorage.getItem('vdm-language') === 'zh' ? 'zh' : 'en')
   const text = dictionaries[language]
   useEffect(() => { localStorage.setItem('vdm-language', language); document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en'; document.title = `STELLANTIS · ${text.product}` }, [language, text.product])
