@@ -39,7 +39,7 @@ try {
   form.append('file', new Blob([bytes]), 'portable.xlsx')
   const preview = await request('/business/dove/preview', 'POST', form)
   assert.equal(preview.match, 'matched'); assert.equal(preview.parsed.controllers.length, 1)
-  const report = await request('/business/dove/save', 'POST', { draftId: preview.id })
+  const report = await request('/business/dove/save', 'POST', { draftId: preview.id, confirmation: { confirmed: true } })
   assert.deepEqual(await request(`/business/files/${report.id}`), bytes)
   const backup = await request('/business/backup')
   assert.equal(backup.subarray(0, 2).toString(), 'PK')

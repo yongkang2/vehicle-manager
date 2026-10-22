@@ -54,15 +54,57 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     const bytes = await workbook('2.0')
     response = await request(member, '/business/dove/preview', 'POST', upload(bytes, 'scan.xlsx'))
     assert.equal(response.status, 200); assert.equal(response.data.match, 'matched')
-    const report = (await request(member, '/business/dove/save', 'POST', { draftId: response.data.id })).data as BusinessRecord
+    const report = (await request(member, '/business/dove/save', 'POST', { draftId: response.data.id, confirmation: { confirmed: true } })).data as BusinessRecord
     assert.equal(report.kind, 'report')
     assert.deepEqual((await request(member, `/business/files/${report.id}`)).data, bytes)
     const beforeUpdate = (await request(member, '/business/records')).data.find((record: BusinessRecord) => record.id === part.id) as BusinessRecord
-    assert.equal(beforeUpdate.data.software, '1.0')
+    assert.equal(beforeUpdate.data.software, '2.0')
+    assert.equal(beforeUpdate.data.description, 'Control')
+    assert.equal((await request(member, '/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'VCU', category: 'controller', position: 'rear' }, reason: 'Duplicate must be rejected' })).status, 409)
     response = await request(member, `/business/reports/${report.id}/configuration`, 'POST', { reportVersion: report.version, reason: 'Verified current software', selections: [{ controllerIndex: 0, partId: part.id, version: beforeUpdate.version, fields: ['software'] }] })
     assert.equal(response.status, 200); assert.equal(response.data[0].data.software, '2.0')
+    assert.equal(response.data[0].data.name, 'VCU')
+    assert.equal(response.data[0].data.sourceName, 'EVCU')
+    assert.equal(response.data[0].data.reportId, report.id)
+    const controllerBeforeEdit = response.data[0] as BusinessRecord
+    const manualData = { ...controllerBeforeEdit.data, supplier: 'Manual supplier', productPart: 'PN-MANUAL', calibrationPart: 'CAL-MANUAL', calibrationVersion: '2.50', serial: '000789', description: 'Manually verified controller' }
+    response = await request(member, `/business/records/${part.id}`, 'PUT', { data: manualData, version: controllerBeforeEdit.version, reason: 'Manual controller correction' })
+    assert.equal(response.status, 200)
+    assert.equal(response.data.data.name, 'VCU')
+    assert.equal(response.data.data.productPart, 'PN-MANUAL')
+    assert.equal(response.data.data.serial, '000789')
+    assert.equal(response.data.data.software, '2.0')
+    assert.equal(response.data.data.reportId, report.id)
+    assert.equal((await request(member, `/business/records/${part.id}`, 'PUT', { data: manualData, version: controllerBeforeEdit.version, reason: 'Stale correction' })).status, 409)
+    assert.ok((await request(member, '/business/history')).data.some((change: { recordId: string; reason: string; sourceId: string | null }) => change.recordId === part.id && change.reason === 'Manual controller correction' && change.sourceId === null))
+    const keyBook = new ExcelJS.Workbook()
+    keyBook.addWorksheet('DOVE').addRows([['Vin :', car.data.vin], ['Date of record', '2026-10-22']])
+    const keySheet = keyBook.addWorksheet('Identification')
+    keySheet.addRow(['ECU', 'Description', 'Network', 'Supplier'])
+    keySheet.addRow(['MSB', 'Battery control', 'CAN UDS', 'CATL', 'FN', 'PN', '1.0', '', 'CAL', '0.00', '21/06/26', '', '29/03/26', '000456'])
+    keySheet.addRow(['BMS', 'Battery control', 'CAN UDS', 'CATL', 'FN', 'PN', 'invalide', '', 'CAL', '0.00', '', '', '', '000456'])
+    keyBook.addWorksheet('Defauts')
+    const keyBytes = Buffer.from(await keyBook.xlsx.writeBuffer())
+    const keyDraft = (await request(member, '/business/dove/preview', 'POST', upload(keyBytes, 'battery.xlsx'))).data
+    const keyReport = (await request(member, '/business/dove/save', 'POST', { draftId: keyDraft.id, confirmation: { confirmed: true, reportOnly: true } })).data as BusinessRecord
+    const keyPayload = { reportVersion: keyReport.version, reason: 'Confirm battery controller', selections: [{ controllerIndex: 0, partId: null, fields: ['software', 'serial', 'flashingDate'] }] }
+    response = await request(member, `/business/reports/${keyReport.id}/configuration`, 'POST', keyPayload)
+    assert.equal(response.status, 200); const battery = response.data[0] as BusinessRecord
+    assert.equal(battery.data.name, 'BMS/MSB'); assert.equal(battery.data.serial, '000456'); assert.equal(battery.data.flashingDate, '21/06/26')
+    assert.equal((await request(member, `/business/reports/${keyReport.id}/configuration`, 'POST', keyPayload)).status, 409)
+    response = await request(member, `/business/reports/${keyReport.id}/configuration`, 'POST', { ...keyPayload, selections: [{ controllerIndex: 1, partId: battery.id, version: battery.version, fields: ['software'] }] })
+    assert.equal(response.status, 409)
+    response = await request(member, `/business/reports/${keyReport.id}/configuration`, 'POST', { ...keyPayload, selections: [{ controllerIndex: 1, partId: battery.id, version: battery.version, fields: ['serial'] }] })
+    assert.equal(response.status, 200); assert.equal(response.data[0].data.software, '1.0'); assert.equal(response.data[0].data.sourceName, 'BMS')
+    assert.equal((await request(member, `/business/reports/${report.id}/configuration`, 'POST', { reportVersion: report.version, reason: 'Wrong controller', selections: [{ controllerIndex: 0, partId: battery.id, version: 2, fields: ['software'] }] })).status, 409)
+    const latestVcu = (await request(member, '/business/records')).data.find((record: BusinessRecord) => record.id === part.id) as BusinessRecord
+    const newerVcu = (await request(member, `/business/records/${part.id}`, 'PUT', { data: { ...latestVcu.data, reportRecordedAt: '2026-10-23 18h34' }, version: latestVcu.version, reason: 'Newer observed configuration' })).data as BusinessRecord
+    const olderPayload = { reportVersion: report.version, reason: 'Review older source', selections: [{ controllerIndex: 0, partId: part.id, version: newerVcu.version, fields: ['software'] }] }
+    response = await request(member, `/business/reports/${report.id}/configuration`, 'POST', olderPayload)
+    assert.equal(response.status, 409); assert.equal(response.data.error, 'OLDER_REPORT_CONFIRMATION_REQUIRED')
+    assert.equal((await request(member, `/business/reports/${report.id}/configuration`, 'POST', { ...olderPayload, allowOlder: true })).status, 200)
     const draft = (await request(member, '/business/dove/preview', 'POST', upload(await workbook('3.0'), 'scan2.xlsx'))).data
-    const second = (await request(member, '/business/dove/save', 'POST', { draftId: draft.id })).data as BusinessRecord
+    const second = (await request(member, '/business/dove/save', 'POST', { draftId: draft.id, confirmation: { confirmed: true } })).data as BusinessRecord
     response = await request(member, `/business/reports/compare?left=${report.id}&right=${second.id}`)
     assert.equal(response.status, 200); assert.equal(response.data.controllers[0].status, 'changed')
     const unmatched = (await request(member, '/business/dove/preview', 'POST', upload(await workbook('4.0', 'TEST0000000000002'), 'unmatched.xlsx'))).data
@@ -72,14 +114,14 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     assert.equal(duplicate.existingId, report.id)
     await request(member, '/business/sync', 'POST')
     const pulled = (await request(admin, '/business/records')).data as BusinessRecord[]
-    assert.equal(pulled.filter(record => record.kind === 'report').length, 2)
+    assert.equal(pulled.filter(record => record.kind === 'report').length, 3)
     assert.equal((await request(member, '/business/backup')).status, 403)
     assert.equal((await request(member, '/business/audit')).status, 403)
     assert.ok((await request(admin, '/business/audit')).data.some((event: { action: string }) => event.action === 'account.login' || event.action === 'account.registered'))
     const backup = await request(admin, '/business/backup'); assert.equal(backup.status, 200)
     const archive = await unzipper.Open.buffer(backup.data as Buffer)
     const manifest = JSON.parse((await archive.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
-    assert.equal(manifest.records.filter((record: BusinessRecord) => record.kind === 'report').length, 2)
+    assert.equal(manifest.records.filter((record: BusinessRecord) => record.kind === 'report').length, 3)
     assert.equal(manifest.accounts, undefined); assert.equal(manifest.sessions, undefined)
     assert.equal(manifest.team.id, team.id)
     const current = pulled.find(record => record.id === car.id)!
