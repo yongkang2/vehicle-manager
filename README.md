@@ -83,6 +83,16 @@ New backups use format 2 and include permanent deletion markers, retained histor
 
 The roster in the ZIP is preserved for manual identity/disaster investigation; the ordinary business restore UI does not roll back roles, reinstate revoked devices, replace local accounts or silently replay arbitrary historical pending-operation payloads. It restores the backup's record state through newly authorized operations. Lost roster/administrator credentials or incompatible/rolled-back protocol state require a coordinated manual recovery using independently preserved complete data, not pointing `HEAD.json` to an old snapshot and forcing clients onward.
 
+## Configurable CSV exports
+
+Use **Vehicles → Export CSV** to filter the local vehicle list, select vehicles across pages, and choose/reorder columns for vehicles, parts/controllers, modifications, equipment, report summaries and attachment metadata. Different filters combine with AND; multiple values within one filter combine with OR. Archived vehicles and linked records are excluded unless **Include archived** is enabled. Choose English or Chinese headers. The download is always one ZIP with a CSV for each enabled category, including headers-only files when no linked rows exist. Original files, detailed DOVE controller/fault observations, historical snapshots, history and quarantined operations are not included; this export is not a backup.
+
+Named templates remember filters, enabled categories, ordered columns, archive inclusion and header language. Applying a template selects its current matching vehicles for review, not a frozen list of VINs or an immediate download. Manual vehicle checkbox choices apply only to the current export. Templates belong to the signed-in local account and current workspace on this PC, survive restart, and are not shared or included in business backup ZIPs. Save, Save as, Update, Rename and Delete affect only these personal preferences.
+
+Exports use one local working-copy snapshot. Export, selection refresh and template management do not publish pending operations or resume paused synchronization. Offline/pending/conflicted data is identified in the dialog; synchronize separately if a current shared view is required. Known deleted identities are excluded, and a missing or no-longer-matching selection must be refreshed rather than silently replaced by another vehicle with the same VIN. Switching, logout or closing the export dialog cancels/discards an unfinished download.
+
+CSV files use UTF-8 BOM, comma delimiters, CRLF rows, quoted special characters and spreadsheet-formula protection. Headers are localized; stored values and dates are not reformatted, and missing values are empty cells. For identifiers such as serial numbers with leading zeros or long numeric codes, use Excel **Data → From Text/CSV** and import those columns as **Text**; double-clicking a CSV can let Excel auto-convert them. Each export is limited to 20,000 selected vehicles and 200 MiB of uncompressed CSV or ZIP data; export smaller batches if needed. Application version 1.0.1, local schema 4 and shared/backup formats remain unchanged.
+
 ## Portable Distribution
 
 ```powershell

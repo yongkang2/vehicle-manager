@@ -1,0 +1,31 @@
+.csv-export-modal { top: 24px; }
+.csv-export-modal .ant-modal-body { max-height: calc(100dvh - 180px); overflow-y: auto; padding-right: 8px; }
+.csv-export-content { display: grid; gap: 16px; }
+.csv-export-section { border: 1px solid #e6e9ee; border-radius: 8px; padding: 16px; }
+.csv-export-section h3 { margin: 0 0 12px; }
+.csv-export-section .muted { font-size: 12px; line-height: 1.6; }
+.csv-template-toolbar { width: 100%; }
+.csv-template-select { width: 270px; }
+.csv-filter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 0; padding: 0; margin: 0 0 14px; min-width: 0; }
+.csv-filter-grid label, .csv-language { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; min-width: 0; }
+.csv-filter-grid .ant-select { width: 100%; }
+.csv-search-filter { grid-column: 1 / -1; }
+.csv-selection-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.csv-selection-toolbar h3 { margin: 0; }
+.csv-language { flex-direction: row; align-items: center; gap: 10px; }
+.csv-language .ant-select { width: 120px; }
+.csv-category-choices { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 16px; }
+.csv-column-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.csv-column-tools { display: flex; gap: 8px; margin-bottom: 12px; }
+.csv-column-checkboxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.csv-column-checkboxes .ant-checkbox-wrapper { align-items: flex-start; font-size: 12px; }
+.csv-column-editor h4 { margin: 0 0 12px; }
+.csv-column-order { padding-left: 24px; margin: 0; max-height: 330px; overflow-y: auto; }
+.csv-column-order li { padding: 4px 4px 4px 0; font-size: 12px; }
+.csv-column-order li > span:first-child { display: inline-block; width: calc(100% - 72px); vertical-align: middle; }
+.csv-validation { color: #9f5700; margin-bottom: 0; }
+@media (max-width: 700px) {
+  .csv-filter-grid, .csv-column-editor { grid-template-columns: 1fr; }
+  .csv-export-section { padding: 12px; }
+  .csv-template-select { width: 230px; max-width: 100%; }
+}

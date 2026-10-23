@@ -36,7 +36,17 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     if (!['localhost', '127.0.0.1', '[::1]'].includes(req.hostname)) return next(new AppError('HOST_NOT_ALLOWED', 403))
     next()
   })
-  app.use(express.json({ limit: '128kb' }))
+  const normalJson = express.json({ limit: '128kb' }), exportJson = express.json({ limit: '4mb' })
+  app.use((req, res, next) => {
+    // Cross-page UUID selections and personal column/filter templates can exceed
+    // the ordinary form limit. Keep that larger allowance scoped to these APIs.
+    const localExport = /^\/api\/business\/export\/csv\/?$/i.test(req.path) || /^\/api\/business\/export-templates(?:\/[^/]+)?\/?$/i.test(req.path)
+    if (!localExport) return normalJson(req, res, next)
+    exportJson(req, res, error => {
+      if (error?.type === 'entity.too.large') return next(new AppError('EXPORT_TOO_LARGE', 413))
+      next(error)
+    })
+  })
   app.use('/api', (req, res, next) => {
     res.set('Cache-Control', 'no-store')
     if (!['GET', 'HEAD'].includes(req.method) && req.get('X-App-Request') !== 'vehicle-manager') return next(new AppError('INVALID_REQUEST', 403))
