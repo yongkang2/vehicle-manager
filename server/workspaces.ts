@@ -12,6 +12,7 @@ export type WorkspaceSession = { workspace_id: string | null; workspace_epoch: n
 export class Workspaces {
   private readonly opened = new Map<string, ReturnType<Workspaces['open']>>()
   private readonly ticks = new Set<Promise<void>>()
+  private polling: Promise<void> | null = null
   private closing = false
   private closed = false
   private closeJob: Promise<void> | undefined
@@ -74,8 +75,8 @@ export class Workspaces {
   }
   tick(): Promise<void> {
     if (this.closing) return Promise.resolve()
+    if (this.polling) return this.polling
     const rows = this.root.db.prepare('SELECT DISTINCT workspace_id FROM sessions WHERE workspace_id IS NOT NULL AND sync_enabled=1 AND expires>?').all(Date.now())
-    // Resolve all stores before the first await so close cannot miss an opening.
     const workspaces = rows.map(row => this.get(row.workspace_id as string))
     let job: Promise<void>
     job = Promise.resolve().then(async () => {
@@ -83,8 +84,12 @@ export class Workspaces {
         if (this.closing) break
         await workspace.tick()
       }
-    }).finally(() => { this.ticks.delete(job) })
+    }).finally(() => {
+      this.ticks.delete(job)
+      if (this.polling === job) this.polling = null
+    })
     this.ticks.add(job)
+    this.polling = job
     return job
   }
   close(): Promise<void> {
