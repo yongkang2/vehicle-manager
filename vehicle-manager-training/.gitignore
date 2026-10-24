@@ -1,0 +1,23 @@
+# Local runtimes and temporary demo state, never training deliverables
+/production/app/
+/production/browser/
+/production/demo-data/
+/production/demo-share/
+/production/demo-share-temporarily-offline/
+/production/downloads/
+
+# Re-recordable footage and intermediate render output
+/production/capture/
+/production/render/
+/production/*.tar
+/production/*-preview.png
+/production/final-demo-sync.json
+/production/audio/voice-sample-*
+/production/audio/voice-samples.json
+__pycache__/
+*.pyc
+
+# Download tools/models separately; keep their provenance and our source scripts
+/tools/*
+!/tools/*.py
+!/tools/TOOL-SOURCES.md

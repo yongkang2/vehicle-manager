@@ -13,8 +13,17 @@ export type VehicleDeletePreview = { vehicleId: string; vin: string; version: nu
 export type VehicleDeleteRequest = { previewToken: string; version: number; vin: string; confirmation: string; reason: string; requestId: string }
 export type QuarantinedOperation = { id: string; vehicleId: string; reason: 'VEHICLE_DELETED'; quarantinedAt: string; operation: Operation }
 export type RestoreResult = { changed: number; skippedVehicles: number; skippedRecords: number; skippedVehicleIds: string[]; syncError?: string }
-export const vehicleFields = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'coolingArchitecture', 'thermal', 'notes'] as const
+export const vehicleFields = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'thermal', 'notes'] as const
+export const thermalSystemTypes = ['Indirect Heat Pump', 'Direct Heat Pump', 'No Heat Pump'] as const
 export const partFields = ['name', 'description', 'category', 'position', 'supplier', 'serial', 'type', 'hardware', 'software', 'functionalPart', 'productPart', 'calibrationPart', 'calibrationVersion', 'network', 'flashingDate', 'productionDate', 'sourceName', 'reportId', 'reportRecordedAt', 'maturity', 'batteryStatus', 'installedAt', 'removedAt', 'notes'] as const
+export const batteryFields = ['productPart', 'serial', 'maturity'] as const
+export function vehicleHvBatteries(records: readonly BusinessRecord[], vehicleId: string, includeArchived = false): BusinessRecord[] {
+	return records.filter(record => record.kind === 'part' && record.vehicleId === vehicleId && record.data.category === 'battery' && (includeArchived || !record.archived))
+		.sort((left, right) => left.updated > right.updated ? -1 : left.updated < right.updated ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+}
+export function activeHvBatteries(records: readonly BusinessRecord[], vehicleId: string): BusinessRecord[] {
+	return vehicleHvBatteries(records, vehicleId).filter(record => !String(record.data.removedAt ?? '').trim())
+}
 export const keyControllerNames = ['VCU', 'MCU', 'BMS/MSB'] as const
 export type KeyControllerName = typeof keyControllerNames[number]
 export function keyControllerName(value: unknown): KeyControllerName | null {
