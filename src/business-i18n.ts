@@ -1,5 +1,7 @@
 import type { Language } from './i18n'
 const labels: Record<string, [string, string]> = {
+  resizeColumn: ['Resize column', '调整列宽'],
+  vehicleColumnResizeHint: ['Drag header edges to resize. Double-click an edge to reset.', '拖动表头边缘调整列宽，双击边缘可恢复默认宽度。'],
   exportCsv: ['Export CSV', '导出 CSV'], csvDownloadZip: ['Download ZIP', '下载 ZIP'], csvDownloaded: ['CSV export downloaded', 'CSV 导出已下载'], csvCancelDownload: ['Cancel download', '取消下载'],
   csvVehicleLimit: ['Select no more than 20,000 vehicles per export. Narrow the filters or deselect vehicles.', '每次最多导出 20,000 辆车，请缩小筛选范围或取消部分勾选。'],
   csvBlankValue: ['(blank)', '（空白）'],
