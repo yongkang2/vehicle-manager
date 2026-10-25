@@ -4,6 +4,7 @@ import { AppError } from './team.js'
 import { Business, checksum, normalizeFields } from './business.js'
 import type { Actor, BusinessRecord, Change, Operation, QuarantinedOperation, RestoreResult, VehicleDeletion } from '../shared/business.js'
 import type { TeamDocument } from '../shared/types.js'
+import { inspectVehiclePhoto, parsePhotoAttachmentId } from '../shared/vehicle-photo.js'
 
 type Manifest = { application: 'stellantis-vehicle-manager'; format: 1 | 2; teamId: string; created: string; records: BusinessRecord[]; changes: Change[]; pendingOperations: Operation[]; deletions?: VehicleDeletion[]; quarantinedOperations?: QuarantinedOperation[]; team?: TeamDocument }
 
@@ -114,6 +115,19 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
     } else throw new AppError('INVALID_BACKUP', 422)
   }
   for (const record of manifest.records) if ((record.kind !== 'vehicle' && (!record.vehicleId || !ids.has(record.vehicleId))) || (record.kind === 'vehicle' && record.vehicleId)) throw new AppError('INVALID_BACKUP', 422)
+  // Vehicle rows are restored before children. Validate managed references against
+  // the complete manifest first, rather than the old/current working database.
+  const recordsById = new Map(manifest.records.map(record => [record.id, record]))
+  for (const vehicle of manifest.records.filter(record => record.kind === 'vehicle')) {
+    const reference = parsePhotoAttachmentId(vehicle.data.photoAttachmentId)
+    if (reference === null) throw new AppError('INVALID_BACKUP', 422)
+    if (!reference) continue
+    const attachment = recordsById.get(reference)
+    if (!attachment || attachment.kind !== 'attachment' || attachment.vehicleId !== vehicle.id || attachment.data.purpose !== 'vehiclePhoto') throw new AppError('INVALID_BACKUP', 422)
+    const bytes = files.get(`blobs/${attachment.data.checksum}`)
+    const image = bytes && inspectVehiclePhoto(bytes)
+    if (!image || attachment.data.mime !== image.mime || attachment.data.width !== image.width || attachment.data.height !== image.height || !(image.mime === 'image/png' ? /\.png$/i : /\.jpe?g$/i).test(String(attachment.data.name))) throw new AppError('INVALID_BACKUP', 422)
+  }
   if (business.store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get()) throw new AppError('PENDING_BEFORE_RESTORE', 409)
   const skipped = manifest.records.filter(record => deletedIds.has(record.id) || (record.vehicleId !== null && deletedVehicles.has(record.vehicleId)))
   const skippedVehicleIds = [...new Set(skipped.map(record => record.kind === 'vehicle' ? record.id : record.vehicleId!))]

@@ -47,6 +47,7 @@ const errorPairs: Record<string, [string, string]> = {
   BACKUP_DELETION_CONFLICT: ['This backup contains deletion information that conflicts with current live records. Restore was not applied.', '备份中的删除信息与当前有效记录冲突，未执行恢复。'],
   DELETE_REQUEST_MISMATCH: ['This deletion request differs from the recorded request. Refresh the preview and confirm again.', '删除请求与已记录的请求不一致，请刷新预览并重新确认。'],
   WORKSPACE_CHANGED: ['The account or workspace changed. Reload before continuing; no stale operation was applied.', '账号或工作空间已变化，请重新加载后继续；旧页面的操作未执行。'],
+  PHOTO_NOT_FOUND: ['The selected vehicle cover photo is unavailable.', '所选车辆封面照片不可用。'], REQUEST_CANCELLED: ['The request was cancelled.', '请求已取消。'],
   WORKSPACE_BUSY: ['This session has another operation in progress. Wait for it to finish and retry.', '当前会话有操作正在进行，请完成后重试。'],
   WORKSPACE_NOT_FOUND: ['This account has not connected to that team.', '当前账号尚未连接该团队。'],
   PENDING_BEFORE_SWITCH: ['Confirm keeping pending changes and conflicts in the original team before switching.', '切换前请确认将待同步修改和冲突保留在原团队。'],

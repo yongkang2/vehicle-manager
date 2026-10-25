@@ -27,7 +27,7 @@ export class Workspaces {
       store.transaction(() => { store.set('cachedTeam', team); store.set('lastChecked', new Date().toISOString()) })
     }
     const router = express.Router()
-    const services = installBusinessRoutes(router, store, teams, cache, this.root)
+    const services = installBusinessRoutes(router, store, teams, cache, this.root, () => !this.closing)
     return { row, store, teams, cache, router, ...services }
   }
   get(id: string) {

@@ -10,6 +10,8 @@ import { createBackup, restoreBackup } from './backup.js'
 import { LocalStore } from './store.js'
 import { buildCsvExport } from './csv-export.js'
 import { ExportTemplates } from './export-templates.js'
+import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
+import { VehiclePhotos } from './vehicle-photos.js'
 import { MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration } from '../shared/csv-export.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
 import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
@@ -19,8 +21,19 @@ type Config = { sharedPath: string; teamId: string }
 type Context = { actor: Actor; identity: Identity; configuration: Config; online: boolean; syncEnabled: boolean }
 type BusinessRequest = Request & { localUser?: LocalUser; sessionToken?: string; businessContext?: Context; syncEnabled?: boolean }
 const recordKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment']
-export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store) {
+export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store, backgroundSyncAllowed = () => true) {
   const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business), exportTemplates = new ExportTemplates(store)
+  const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business)
+  function sessionGuard(req: BusinessRequest): () => void {
+    const current = () => accounts.db.prepare('SELECT workspace_id,workspace_epoch FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now()) as { workspace_id: string | null; workspace_epoch: number } | undefined
+    const before = current()
+    if (!before) throw new AppError('LOGIN_REQUIRED', 401)
+    return () => {
+      const after = current()
+      if (!after) throw new AppError('LOGIN_REQUIRED', 401)
+      if (after.workspace_id !== before.workspace_id || after.workspace_epoch !== before.workspace_epoch) throw new AppError('WORKSPACE_CHANGED', 409)
+    }
+  }
   async function access(req: BusinessRequest, admin = false): Promise<Context> {
     const configuration = store.get<Config>('configuration')
     if (!configuration) throw new AppError('NOT_CONFIGURED', 409)
@@ -50,16 +63,21 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       await store.runWrite(async () => {
         req.businessContext = await access(req)
         const localPath = req.path.toLowerCase()
-        const localExport = localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/')
+        const localExport = localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/') || localPath === '/vehicle-table-preferences' || localPath === '/vehicle-table-preferences/'
+        const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const canonicalMaintenance = deletePreview || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport) {
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead) {
           const state = await sync(req.businessContext)
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
         }
-        if (!localExport && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => { if (res.statusCode < 400 && synchronization.status().pending > 0) void sync(req.businessContext!) })
+        if (!localExport && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => {
+          // An admitted upload may finish its HTTP response after shutdown has
+          // drained its write. Do not reopen synchronization on a closing store.
+          if (res.statusCode < 400 && backgroundSyncAllowed() && store.db.isOpen && synchronization.status().pending > 0) void sync(req.businessContext!)
+        })
       })
       // Maintenance handlers must start outside the normal-write context.
       next()
@@ -124,6 +142,37 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8')
     return path.basename(decoded.includes('\ufffd') ? file.originalname : decoded).slice(0, 240)
   }
+  writeRoute('get', '/vehicles/:id/photo', async (req: BusinessRequest, res) => {
+    const assertSession = sessionGuard(req)
+    const photo = await photos.read(String(req.params.id), async () => {
+      assertSession()
+      await access(req)
+      assertSession()
+      if (res.destroyed) throw new AppError('REQUEST_CANCELLED', 409)
+    })
+    res.set('Content-Disposition', 'inline').type(photo.mime).send(photo.bytes)
+  })
+  writeRoute('post', '/vehicles/:id/photo', upload.single('file'), async (req: BusinessRequest, res) => {
+    if (!req.file) throw new AppError('FILE_REQUIRED')
+    if (Object.keys(req.body || {}).some(key => !['version', 'reason'].includes(key)) || typeof req.body.version !== 'string' || !/^[1-9]\d*$/.test(req.body.version) || !Number.isSafeInteger(Number(req.body.version))) throw new AppError('INVALID_INPUT')
+    const assertSession = sessionGuard(req)
+    const result = await photos.upload(String(req.params.id), { name: filename(req.file), bytes: req.file.buffer }, Number(req.body.version), req.body.reason, req.businessContext!.actor, async () => {
+      assertSession()
+      const context = await access(req)
+      assertSession()
+      if (res.destroyed) throw new AppError('REQUEST_CANCELLED', 409)
+      return context.actor
+    })
+    res.status(201).json(result)
+  })
+  writeRoute('delete', '/vehicles/:id/photo', async (req: BusinessRequest, res) => {
+    if (!req.body || Object.keys(req.body).some(key => !['version', 'reason'].includes(key)) || !Number.isSafeInteger(req.body.version) || req.body.version < 1) throw new AppError('INVALID_INPUT')
+    const assertSession = sessionGuard(req)
+    const context = await access(req)
+    assertSession()
+    if (res.destroyed) throw new AppError('REQUEST_CANCELLED', 409)
+    res.json(photos.remove(String(req.params.id), req.body.version, req.body.reason, context.actor))
+  })
   writeRoute('post', '/vehicles/:id/attachments', upload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file) throw new AppError('FILE_REQUIRED')
     const car = business.get(String(req.params.id))
@@ -229,6 +278,14 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     res.attachment(`vehicle-data-${new Date().toISOString().slice(0, 10)}.zip`).type('application/zip').send(bytes)
   })
   writeRoute('get', '/export-templates', (req: BusinessRequest, res) => res.json(exportTemplates.list(req.localUser!.id)))
+  writeRoute('get', '/vehicle-table-preferences', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(tablePreferences.get(req.localUser!.id))
+  })
+  writeRoute('put', '/vehicle-table-preferences', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(tablePreferences.put(req.localUser!.id, req.body))
+  })
   writeRoute('post', '/export-templates', (req: BusinessRequest, res) => res.status(201).json(exportTemplates.create(req.localUser!.id, req.body)))
   writeRoute('put', '/export-templates/:id', (req: BusinessRequest, res) => res.json(exportTemplates.update(req.localUser!.id, String(req.params.id), req.body)))
   writeRoute('delete', '/export-templates/:id', (req: BusinessRequest, res) => {

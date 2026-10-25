@@ -5,6 +5,7 @@ import { AppError } from './team.js'
 import { LocalStore } from './store.js'
 import { entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
+import { parsePhotoAttachmentId, PHOTO_MAX_BYTES, PHOTO_MAX_DIMENSION, PHOTO_MAX_PIXELS } from '../shared/vehicle-photo.js'
 
 export const now = () => new Date().toISOString()
 export const checksum = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex')
@@ -31,6 +32,11 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
   }
   if (data.installedAt && data.removedAt && String(data.removedAt) < String(data.installedAt)) throw new AppError('INVALID_DATE')
   if (kind === 'vehicle') {
+    if (Object.hasOwn(source, 'photoAttachmentId')) {
+      const photoId = parsePhotoAttachmentId(source.photoAttachmentId)
+      if (photoId === null) throw new AppError('INVALID_INPUT')
+      data.photoAttachmentId = photoId
+    }
     data.vin = normalizeVin(String(data.vin))
     if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(String(data.vin))) throw new AppError('INVALID_VIN')
     if (!['available', 'testing', 'maintenance', 'inactive'].includes(String(data.status))) throw new AppError('INVALID_INPUT')
@@ -57,19 +63,39 @@ export class Business {
   history(vehicleId?: string): Change[] {
     return this.store.db.prepare('SELECT payload FROM changes WHERE (? IS NULL OR vehicle_id=?) ORDER BY created DESC,rowid DESC LIMIT 1000').all(vehicleId || null, vehicleId || null).map(row => JSON.parse(row.payload as string) as Change)
   }
-  write({ id = randomUUID(), kind, vehicleId = null, data, actor, reason: explanation, version, archived, sourceId = null, internal = false, maintenance }: {
-    id?: string; kind: RecordKind; vehicleId?: string | null; data: Fields; actor: Actor; reason: unknown; version?: number; archived?: boolean; sourceId?: string | null; internal?: boolean; maintenance?: 'restore'
+  write({ id = randomUUID(), kind, vehicleId = null, data, actor, reason: explanation, version, archived, sourceId = null, internal = false, maintenance, photoAttachmentId }: {
+    id?: string; kind: RecordKind; vehicleId?: string | null; data: Fields; actor: Actor; reason: unknown; version?: number; archived?: boolean; sourceId?: string | null; internal?: boolean; maintenance?: 'restore'; photoAttachmentId?: string
   }): BusinessRecord {
     this.store.assertWritable()
     this.store.assertNotDeleted(id, vehicleId)
     const why = reason(explanation)
-    const normalized = internal ? data : normalizeFields(kind, data)
+    if (photoAttachmentId !== undefined && (kind !== 'vehicle' || parsePhotoAttachmentId(photoAttachmentId) === null)) throw new AppError('INVALID_INPUT')
+    // Only trusted photo/restore workflows can change the hidden reference.
+    const input = kind === 'vehicle' && !maintenance && data && typeof data === 'object' && !Array.isArray(data) ? Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'photoAttachmentId')) : data
+    const normalized = internal ? { ...input } : normalizeFields(kind, input)
     this.store.transaction(() => {
       this.store.assertWritable()
       this.store.assertNotDeleted(id, vehicleId)
       const row = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
       const before = row ? fromRow(row) : null
       if (before && (before.kind !== kind || before.vehicleId !== vehicleId || before.version !== version)) throw new AppError('VERSION_CONFLICT', 409)
+      if (kind === 'vehicle') {
+        if (photoAttachmentId !== undefined) {
+          if (photoAttachmentId) {
+            const target = this.get(photoAttachmentId), width = Number(target.data.width), height = Number(target.data.height)
+            const mime = target.data.mime, filename = String(target.data.name || '').toLowerCase()
+            const imageName = mime === 'image/png' ? filename.endsWith('.png') : mime === 'image/jpeg' && /\.jpe?g$/.test(filename)
+            if (target.kind !== 'attachment' || target.vehicleId !== id || target.archived || target.data.purpose !== 'vehiclePhoto' || !imageName || !/^[a-f0-9]{64}$/.test(String(target.data.checksum)) || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || width > PHOTO_MAX_DIMENSION || height > PHOTO_MAX_DIMENSION || width * height > PHOTO_MAX_PIXELS || !Number.isSafeInteger(target.data.size) || Number(target.data.size) <= 0 || Number(target.data.size) > PHOTO_MAX_BYTES) throw new AppError('INVALID_INPUT')
+          }
+          normalized.photoAttachmentId = photoAttachmentId
+        } else if (maintenance === 'restore') {
+          const restoredPhotoId = parsePhotoAttachmentId(data.photoAttachmentId)
+          if (restoredPhotoId === null) throw new AppError('INVALID_INPUT')
+          normalized.photoAttachmentId = restoredPhotoId
+        }
+        else if (before && Object.hasOwn(before.data, 'photoAttachmentId')) normalized.photoAttachmentId = before.data.photoAttachmentId
+        else delete normalized.photoAttachmentId
+      }
       const targetArchived = archived ?? before?.archived ?? false
       if (before?.archived && archived !== false) throw new AppError('RECORD_ARCHIVED', 409)
       if (before && targetArchived !== before.archived && actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
