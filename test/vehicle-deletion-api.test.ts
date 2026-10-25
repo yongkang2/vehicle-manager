@@ -45,7 +45,7 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     assert.equal((await request(admin, '/business/vehicles/' + car.id + '/delete-preview')).data.error, 'VEHICLE_NOT_ARCHIVED')
     const children: BusinessRecord[] = []
     for (const kind of ['part', 'modification', 'equipment']) {
-      const child = await request(admin, '/business/records', 'POST', { kind, vehicleId: car.id, data: { name: kind === 'part' ? 'VCU' : kind, ...(kind === 'part' ? { category: 'controller' } : {}) }, reason: 'Add child' })
+      const child = await request(admin, '/business/records', 'POST', { kind, vehicleId: car.id, data: { name: kind === 'part' ? 'VCU' : kind, ...(kind === 'part' ? { category: 'controller', controllerType: 'Open ECU' } : {}) }, reason: 'Add child' })
       assert.equal(child.status, 201); children.push(child.data)
     }
     const original = Buffer.from('Retained synthetic report bytes'), key = await admin.business.blob(original)

@@ -276,8 +276,9 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: records.find(record => record.kind === 'part' && record.vehicleId === vehicle.id && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null }))
     const available = matchedReports(vehicle)
     return <div className="vehicle-controller-section"><div className="section-toolbar"><h3>{text(editable ? 'parts' : 'controllers')}</h3>{editable && <Tooltip title={!available.length ? text('noMatchedReports') : text('updateConfiguration')}><Button icon={<ClipboardCheck size={15} />} disabled={vehicle.archived || !available.length} onClick={() => openConfiguration(available[0])}>{text('updateConfiguration')}</Button></Tooltip>}</div>
-      <Table<ControllerSlot> rowKey="name" className="controller-summary-table" dataSource={slots} size="small" pagination={false} scroll={{ x: 700 }} columns={[
+      <Table<ControllerSlot> rowKey="name" className="controller-summary-table" dataSource={slots} size="small" pagination={false} scroll={{ x: 875 }} columns={[
         { title: text('name'), width: 110, render: (_, slot) => <strong>{slot.name}</strong> },
+        { title: text('controllerType'), width: 140, render: (_, slot) => <span className="preserve-text">{display(slot.part?.data.controllerType)}</span> },
         ...(['supplier', 'productPart', 'calibrationPart', 'calibrationVersion'] as const).map(field => ({ title: text(field === 'calibrationPart' ? 'softwarePart' : field), width: field === 'calibrationVersion' ? 110 : 150, render: (_: unknown, slot: ControllerSlot) => <span className="preserve-text">{display(slot.part?.data[field])}</span> })),
         { title: text('more'), width: 65, render: (_, slot) => <Tooltip title={text('more')}><Button type="text" icon={<Ellipsis size={17} />} aria-label={`${text('more')} ${slot.name}`} onClick={() => setEditor({ kind: 'part', record: slot.part, vehicleId: vehicle.id, initialName: slot.name })} /></Tooltip> },
       ]} />
@@ -286,10 +287,11 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const hvBatteryTable = (vehicle: BusinessRecord) => <div className="vehicle-hv-battery-section">
     <div className="section-toolbar"><h3>{text('hvBattery')}</h3><Button icon={<Plus size={15} />} disabled={vehicle.archived} onClick={() => setEditor({ kind: 'part', vehicleId: vehicle.id, record: null, initialCategory: 'battery' })}>{text('addHvBattery')}</Button></div>
     {activeHvBatteries(records, vehicle.id).length > 1 && <Alert className="business-notice" type="warning" showIcon title={text('multipleHvBatteries')} />}
-    <Table<BusinessRecord> rowKey="id" className="hv-battery-table" dataSource={vehicleHvBatteries(records, vehicle.id, archived)} size="small" scroll={{ x: 820 }} pagination={{ pageSize: 8, hideOnSinglePage: true }} columns={[
+    <Table<BusinessRecord> rowKey="id" className="hv-battery-table" dataSource={vehicleHvBatteries(records, vehicle.id, archived)} size="small" scroll={{ x: 970 }} pagination={{ pageSize: 8, hideOnSinglePage: true }} columns={[
       { title: text('partNumber'), width: 190, render: (_, record) => <span className="preserve-text">{display(record.data.productPart)}</span> },
       { title: text('serialNumber'), width: 190, render: (_, record) => <span className="preserve-text">{display(record.data.serial)}</span> },
       { title: text('partMaturityLevel'), width: 180, render: (_, record) => <span className="preserve-text">{display(record.data.maturity)}</span> },
+      { title: text('lifeStatus'), width: 150, render: (_, record) => <span className="preserve-text">{display(record.data.lifeStatus)}</span> },
       { title: text('status'), width: 130, render: (_, record) => record.archived ? text('archived') : record.data.removedAt ? `${text('removed')} · ${record.data.removedAt}` : text('installed') },
       { title: text('actions'), width: 130, render: (_, record) => recordActions(record) },
     ]} />

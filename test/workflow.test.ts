@@ -49,7 +49,7 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     const firstSync = await request(admin, '/business/sync', 'POST')
     assert.equal(firstSync.data.phase, 'ready', JSON.stringify(firstSync.data))
     assert.equal((await request(member, '/business/records')).data.length, 1)
-    response = await request(member, '/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'EVCU', category: 'controller', software: '1.0', serial: '000123' }, reason: 'Install controller' })
+    response = await request(member, '/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'EVCU', category: 'controller', controllerType: 'Open ECU', software: '1.0', serial: '000123' }, reason: 'Install controller' })
     assert.equal(response.status, 201); const part = response.data as BusinessRecord
     assert.equal((await request(member, `/business/records/${car.id}/archive`, 'POST', { archived: true, version: car.version, reason: 'Not permitted' })).status, 403)
     const bytes = await workbook('2.0')
@@ -61,7 +61,7 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     const beforeUpdate = (await request(member, '/business/records')).data.find((record: BusinessRecord) => record.id === part.id) as BusinessRecord
     assert.equal(beforeUpdate.data.software, '2.0')
     assert.equal(beforeUpdate.data.description, 'Control')
-    assert.equal((await request(member, '/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'VCU', category: 'controller', position: 'rear' }, reason: 'Duplicate must be rejected' })).status, 409)
+    assert.equal((await request(member, '/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'VCU', category: 'controller', controllerType: 'Open ECU', position: 'rear' }, reason: 'Duplicate must be rejected' })).status, 409)
     response = await request(member, `/business/reports/${report.id}/configuration`, 'POST', { reportVersion: report.version, reason: 'Verified current software', selections: [{ controllerIndex: 0, partId: part.id, version: beforeUpdate.version, fields: ['software'] }] })
     assert.equal(response.status, 200); assert.equal(response.data[0].data.software, '2.0')
     assert.equal(response.data[0].data.name, 'VCU')

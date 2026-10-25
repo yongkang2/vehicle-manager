@@ -3,7 +3,7 @@ import type { Request, RequestHandler } from 'express'
 import multer from 'multer'
 import path from 'node:path'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
-import { Business, reason } from './business.js'
+import { Business, reason, validateManualPartFields } from './business.js'
 import { BusinessSync } from './sync.js'
 import { DoveService, compareReports } from './dove.js'
 import { createBackup, restoreBackup } from './backup.js'
@@ -101,11 +101,13 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   })
   writeRoute('post', '/records', (req: BusinessRequest, res) => {
     if (!['vehicle', 'part', 'modification', 'equipment'].includes(req.body?.kind)) throw new AppError('INVALID_INPUT')
+    validateManualPartFields(req.body.kind, req.body.data)
     res.status(201).json(business.write({ kind: req.body.kind, vehicleId: req.body.vehicleId || null, data: req.body.data, actor: req.businessContext!.actor, reason: req.body.reason }))
   })
   writeRoute('put', '/records/:id', (req: BusinessRequest, res) => {
     const current = business.get(String(req.params.id))
     if (['report', 'attachment'].includes(current.kind)) throw new AppError('IMMUTABLE_REPORT', 409)
+    validateManualPartFields(current.kind, req.body.data, current)
     res.json(business.write({ id: current.id, kind: current.kind, vehicleId: current.vehicleId, data: req.body.data, version: req.body.version, actor: req.businessContext!.actor, reason: req.body.reason }))
   })
   writeRoute('post', '/records/:id/archive', async (req: BusinessRequest, res, next) => {

@@ -63,7 +63,7 @@ async function fixture() {
     assert.equal(result.status, 201, JSON.stringify(result.data)); return result.data as BusinessRecord
   }
   async function part(vehicleId: string) {
-    const result = await request('/business/records', { method: 'POST', body: { kind: 'part', vehicleId, data: { name: 'VCU', category: 'controller', software: '1.0' }, reason: 'Install fictional controller' } })
+    const result = await request('/business/records', { method: 'POST', body: { kind: 'part', vehicleId, data: { name: 'VCU', category: 'controller', controllerType: 'Open ECU', software: '1.0' }, reason: 'Install fictional controller' } })
     assert.equal(result.status, 201, JSON.stringify(result.data)); return result.data as BusinessRecord
   }
   async function preview(bytes: Buffer, session = 'owner', name = 'missing-vin.xlsx') {

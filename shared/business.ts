@@ -15,8 +15,10 @@ export type QuarantinedOperation = { id: string; vehicleId: string; reason: 'VEH
 export type RestoreResult = { changed: number; skippedVehicles: number; skippedRecords: number; skippedVehicleIds: string[]; syncError?: string }
 export const vehicleFields = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'thermal', 'notes'] as const
 export const thermalSystemTypes = ['Indirect Heat Pump', 'Direct Heat Pump', 'No Heat Pump'] as const
-export const partFields = ['name', 'description', 'category', 'position', 'supplier', 'serial', 'type', 'hardware', 'software', 'functionalPart', 'productPart', 'calibrationPart', 'calibrationVersion', 'network', 'flashingDate', 'productionDate', 'sourceName', 'reportId', 'reportRecordedAt', 'maturity', 'batteryStatus', 'installedAt', 'removedAt', 'notes'] as const
-export const batteryFields = ['productPart', 'serial', 'maturity'] as const
+export const controllerTypes = ['Open ECU', 'Close ECU'] as const
+export const batteryLifeStatuses = ['BOL', '2Y Aged', '8Y Aged', '10Y Aged', '15Y Aged', 'EOL'] as const
+export const partFields = ['name', 'description', 'category', 'position', 'supplier', 'serial', 'type', 'controllerType', 'hardware', 'software', 'functionalPart', 'productPart', 'calibrationPart', 'calibrationVersion', 'network', 'flashingDate', 'productionDate', 'sourceName', 'reportId', 'reportRecordedAt', 'maturity', 'lifeStatus', 'batteryStatus', 'installedAt', 'removedAt', 'notes'] as const
+export const batteryFields = ['productPart', 'serial', 'maturity', 'lifeStatus'] as const
 export function vehicleHvBatteries(records: readonly BusinessRecord[], vehicleId: string, includeArchived = false): BusinessRecord[] {
 	return records.filter(record => record.kind === 'part' && record.vehicleId === vehicleId && record.data.category === 'battery' && (includeArchived || !record.archived))
 		.sort((left, right) => left.updated > right.updated ? -1 : left.updated < right.updated ? 1 : left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
@@ -33,6 +35,8 @@ export function keyControllerName(value: unknown): KeyControllerName | null {
 	return name === 'MCU' ? 'MCU' : null
 }
 export const controllerFields = ['name', 'description', 'network', 'supplier', 'functionalPart', 'productPart', 'software', 'calibrationPart', 'calibrationVersion', 'flashingDate', 'productionDate', 'serial'] as const
+// Manual classifications are not observations supplied by DOVE workbooks.
+export const controllerEditFields = ['name', 'controllerType', ...controllerFields.filter(field => field !== 'name')] as const
 export const configurationFields = ['description', 'supplier', 'serial', 'software', 'functionalPart', 'productPart', 'calibrationPart', 'calibrationVersion', 'network', 'flashingDate', 'productionDate'] as const
 export function controllerSources(controllers: Controller[]) {
 	return controllers.map((controller, index) => ({ controller, index })).filter(({ controller, index }) => keyControllerName(controller.name) && !controllers.slice(0, index).some(previous => keyControllerName(previous.name) === keyControllerName(controller.name) && configurationFields.every(field => previous[field] === controller[field])))

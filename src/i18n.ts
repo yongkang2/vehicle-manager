@@ -1,7 +1,7 @@
 export type Language = 'en' | 'zh'
 const en = {
   product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
-  username: 'Username', displayName: 'Full name', password: 'Password', account: 'Local account', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
+  username: 'Username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
   local: 'Local device', online: 'Connected', offline: 'Offline', refresh: 'Refresh', setupTitle: 'Connect your workspace', path: 'Shared folder path', test: 'Test connection', later: 'Set up later',
   notConfigured: 'Shared folder not configured', emptyFolder: 'Empty folder verified', existingTeam: 'Existing team found', checks: 'Read, write and rename checks passed',
   teamName: 'Team name', create: 'Create team', join: 'Request to join', confirmCreate: 'Create a new team in this empty folder and make this account its first administrator.',
@@ -17,7 +17,7 @@ const en = {
 }
 const zh: Record<keyof typeof en, string> = {
   product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', displayName: '姓名', password: '密码',
-  account: '本地账号', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
+  account: '本地账号', developer: '开发者', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
   path: '共享文件夹路径', test: '测试连接', later: '稍后配置', notConfigured: '尚未配置共享目录', emptyFolder: '已验证为空目录', existingTeam: '发现已有团队', checks: '读取、写入和重命名检查通过',
   teamName: '团队名称', create: '创建团队', join: '申请加入', confirmCreate: '确认在此空目录创建新团队，并将当前账号设为首位管理员。', pending: '待审批', pendingTitle: '账号和设备正在等待管理员审批',
   approved: '已批准', disabled: '权限已停用', unbound: '此本地账号尚未绑定团队身份', rejected: '申请未批准', firstAdmin: '管理员', member: '成员', status: '状态', device: '设备', deviceId: '设备标识',
@@ -30,6 +30,8 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  CONTROLLER_TYPE_REQUIRED: ['Choose a controller type before saving.', '保存前请选择控制器类型。'],
+  BATTERY_LIFE_STATUS_REQUIRED: ['Choose an HV battery life status before saving.', '保存前请选择高压电池寿命状态。'],
   EXPORT_SELECTION_CHANGED: ['Selected vehicles are no longer available or no longer match these filters. Refresh and reselect matches before exporting.', '所选车辆已不可用或不再符合筛选条件。请刷新并重选匹配车辆后再导出。'],
   EXPORT_TEMPLATE_NOT_FOUND: ['This export template is no longer available. Reopen export to refresh your templates.', '此导出模板已不可用。请重新打开导出窗口以刷新模板。'],
   EXPORT_TEMPLATE_EXISTS: ['An export template with this name already exists. Choose a different name.', '已有同名导出模板，请使用其他名称。'],

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
-import { entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
+import { batteryLifeStatuses, controllerTypes, entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
 import { parsePhotoAttachmentId, PHOTO_MAX_BYTES, PHOTO_MAX_DIMENSION, PHOTO_MAX_PIXELS } from '../shared/vehicle-photo.js'
 
@@ -42,8 +42,28 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
     if (!['available', 'testing', 'maintenance', 'inactive'].includes(String(data.status))) throw new AppError('INVALID_INPUT')
   }
   if (kind === 'part' && !['motor', 'battery', 'controller'].includes(String(data.category))) throw new AppError('INVALID_INPUT')
+  if (kind === 'part') {
+    for (const [field, options] of [['controllerType', controllerTypes], ['lifeStatus', batteryLifeStatuses]] as const) {
+      if (data[field] && !options.some(value => value === data[field])) throw new AppError('INVALID_INPUT')
+    }
+  }
   if (kind === 'part' && data.category === 'controller') data.name = keyControllerName(data.name) || data.name
   return data
+}
+
+/** Required only for manual record APIs; imports and legacy restoration may remain unclassified. */
+export function validateManualPartFields(kind: RecordKind, input: unknown, current?: BusinessRecord): void {
+  if (kind !== 'part') return
+  const data = normalizeFields(kind, input)
+  if (data.category === 'controller' && !data.controllerType) throw new AppError('CONTROLLER_TYPE_REQUIRED')
+  if (data.category !== 'battery' || data.lifeStatus) return
+  // Existing removal actions share PUT with the editor. Recognize only a real
+  // blank-to-date removal, never a caller-supplied bypass or a simultaneous edit.
+  if (current?.kind === 'part' && current.data.category === 'battery' && !String(current.data.removedAt ?? '').trim() && data.removedAt) {
+    const before = normalizeFields('part', current.data)
+    if (partFields.every(field => field === 'removedAt' || before[field] === data[field])) return
+  }
+  throw new AppError('BATTERY_LIFE_STATUS_REQUIRED')
 }
 export type RecordRow = { id: string; kind: RecordKind; vehicle_id: string | null; data: string; archived: number; version: number; updated: string }
 export function fromRow(row: RecordRow): BusinessRecord { return { id: row.id, kind: row.kind, vehicleId: row.vehicle_id, data: JSON.parse(row.data), archived: Boolean(row.archived), version: row.version, updated: row.updated } }

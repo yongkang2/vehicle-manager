@@ -18,7 +18,7 @@ const batteryData = { name: 'HV Battery', category: 'battery', productPart: 'P00
 const battery = (id: string, data: Fields = {}, options: Partial<BusinessRecord> = {}): BusinessRecord => ({ id, kind: 'part', vehicleId: 'vehicle', data: { ...batteryData, ...data }, archived: false, version: 1, updated: '2026-10-23T00:00:00.000Z', ...options })
 
 test('HV Battery uses existing battery part fields and has bilingual labels independent from controller labels', () => {
-  assert.deepEqual(batteryFields, ['productPart', 'serial', 'maturity'])
+  assert.deepEqual(batteryFields, ['productPart', 'serial', 'maturity', 'lifeStatus'])
   for (const field of batteryFields) assert(partFields.includes(field))
   const english = translateBusiness('en'), chinese = translateBusiness('zh')
   assert.equal(english('part'), 'Controller')
@@ -59,7 +59,7 @@ test('battery selectors preserve multiple legacy batteries, retain removed histo
 })
 
 test('battery number, serial and maturity inherit trimming, blank handling and the 4000-character limit', () => {
-  for (const field of batteryFields) {
+  for (const field of ['productPart', 'serial', 'maturity']) {
     assert.equal(normalizeFields('part', { ...batteryData, [field]: '  0000123  ' })[field], '0000123')
     assert.equal(normalizeFields('part', { ...batteryData, [field]: '   ' })[field], '')
     assert.equal(normalizeFields('part', { ...batteryData, [field]: undefined })[field], '')
@@ -154,7 +154,7 @@ test('existing battery identity and fields survive backup restoration and CSV ex
       const zip = await unzipper.Open.buffer(exported.bytes)
       const csv = (await zip.files.find(file => file.path === 'parts-controllers.csv')!.buffer()).toString('utf8')
       const headers = configuration.columns.part.map(id => exportColumns.part.find(column => column.id === id)!.label[language === 'zh' ? 1 : 0])
-      assert.equal(csv, '\ufeff' + headers.join(',') + '\r\n' + [legacyBattery.id, car.id, 'battery', 'P001234', '0000123', 'B1', 'healthy', 'Demo supplier'].join(',') + '\r\n')
+      assert.equal(csv, '\ufeff' + headers.join(',') + '\r\n' + [legacyBattery.id, car.id, 'battery', 'P001234', '0000123', 'B1', '', 'healthy', 'Demo supplier'].join(',') + '\r\n')
     }
     assert.equal(stores[1].db.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok')
   } finally { for (const store of stores) store.db.close(); await fs.rm(directory, { recursive: true, force: true }) }

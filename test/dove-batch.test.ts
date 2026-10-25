@@ -61,7 +61,7 @@ test('DOVE batch preview isolates file errors; retention stores exact bytes and 
   const client = await fixture(), { request } = client
   try {
     const car = await createVehicle(request)
-    const part = (await request('/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'EVCU', category: 'controller', software: '1.0' }, reason: 'Install original controller' })).data as BusinessRecord
+    const part = (await request('/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'EVCU', category: 'controller', controllerType: 'Open ECU', software: '1.0' }, reason: 'Install original controller' })).data as BusinessRecord
     const firstBytes = await workbook(), lastBytes = await workbook(vin, '3.0')
     await client.synchronization.settle()
     const beforeRecords = client.business.list(), beforeHistory = client.business.history()
