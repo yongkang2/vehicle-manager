@@ -1,11 +1,11 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { App, Alert, Button, Checkbox, Descriptions, Drawer, Empty, Input, Modal, Pagination, Select, Space, Spin, Table, Tabs, Tag, Timeline, Tooltip, Upload } from 'antd'
 import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
-import { api, ApiError, download } from './api'
+import { api, ApiError, createWorkspaceScope, download } from './api'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
 import { translateBusiness } from './business-i18n'
-import { activeHvBatteries, configurationFields, controllerSources as parsedControllerSources, doveRecordedTime, keyControllerName, keyControllerNames, thermalSystemTypes, validControllerValue, vehicleFields, vehicleHvBatteries } from '../shared/business'
+import { activeHvBatteries, configurationFields, controllerSources as parsedControllerSources, doveRecordedTime, keyControllerName, keyControllerNames, reportAssociationVin, reportMatchesVehicle, thermalSystemTypes, validControllerValue, vehicleFields, vehicleHvBatteries } from '../shared/business'
 import type { BusinessRecord, Change, Fields, KeyControllerName, QuarantinedOperation, RecordKind, ReportData, RestoreResult, SyncConflict, SyncStatus, VehicleDeletePreview, VehicleDeleteReceipt, VehicleDeleteRequest } from '../shared/business'
 import RecordEditor from './RecordEditor'
 import DoveImport from './DoveImport'
@@ -31,11 +31,12 @@ const reportTime = (record: BusinessRecord) => { const date = doveRecordedTime(r
 function controllerSources(report: BusinessRecord) {
   return parsedControllerSources((report.data as unknown as ReportData).parsed.controllers)
 }
-async function fetchWorkspace(includeAudit = false, includeQuarantined = false) {
-  const records = await api<BusinessRecord[]>('/api/business/records')
-  const [sync, changes] = await Promise.all([api<SyncStatus>('/api/business/sync'), api<Change[]>('/api/business/history')])
-  const audit = includeAudit ? await api<AuditEntry[]>('/api/business/audit') : []
-  const quarantined = includeQuarantined ? await api<QuarantinedOperation[]>('/api/business/sync/quarantined') : []
+type WorkspaceReader = <T>(url: string) => Promise<T>
+async function fetchWorkspace(includeAudit = false, includeQuarantined = false, request: WorkspaceReader = api) {
+  const records = await request<BusinessRecord[]>('/api/business/records')
+  const [sync, changes] = await Promise.all([request<SyncStatus>('/api/business/sync'), request<Change[]>('/api/business/history')])
+  const audit = includeAudit ? await request<AuditEntry[]>('/api/business/audit') : []
+  const quarantined = includeQuarantined ? await request<QuarantinedOperation[]>('/api/business/sync/quarantined') : []
   return { records, sync, changes, audit, quarantined }
 }
 
@@ -144,6 +145,12 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     try {
       acceptWorkspace(await fetchWorkspace(view === 'audit', view === 'sync'))
     } catch (error) { onError(error) } finally { setLoading(false) }
+  }
+  async function loadDove(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
+    const request: WorkspaceReader = url => scope.request(url, { signal })
+    const result = await fetchWorkspace(view === 'audit', view === 'sync', request)
+    scope.assertCurrent(signal)
+    acceptWorkspace(result); setLoading(false)
   }
   const reportInitialError = useEffectEvent(onError)
   useEffect(() => {
@@ -264,7 +271,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     { title: text('vehicle'), width: 150, render: (_, record) => display(vehicleName(record.vehicleId)) }, { title: text('recordedAt'), width: 160, render: (_, record) => display(record.data.recordedAt) },
     { title: text('savedAt'), width: 170, render: (_, record) => date(String(record.data.savedAt || record.updated)) }, { title: text('actions'), width: 110, render: (_, record) => <Space><Tooltip title={text('download')}><Button type="text" icon={<Download size={16} />} aria-label={text('download')} onClick={() => downloadFile(record)} /></Tooltip>{recordActions(record)}</Space> },
   ]} />
-  const matchedReports = (vehicle: BusinessRecord) => reports.filter(report => report.vehicleId === vehicle.id && !report.archived && (report.data as unknown as ReportData).parsed.vin === vehicle.data.vin && controllerSources(report).length > 0)
+  const matchedReports = (vehicle: BusinessRecord) => reports.filter(report => !report.archived && reportMatchesVehicle(report, vehicle) && controllerSources(report).length > 0)
   const controllerTable = (vehicle: BusinessRecord, editable: boolean) => {
     const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: records.find(record => record.kind === 'part' && record.vehicleId === vehicle.id && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null }))
     const available = matchedReports(vehicle)
@@ -337,8 +344,8 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         return <Tooltip title={value}><span>{value}</span></Tooltip>
       } })),
     ]} /></>}
-    <DoveImport active={view === 'dove'} language={language} disabled={busy} onBusyChange={setBusy} onRetained={load} onOpenReport={async id => { await load(); setReportId(id) }} onError={onError} />
-    {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${(record.data as unknown as ReportData).parsed.vin}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
+    <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadDove} onOpenReport={async (id, scope, signal) => { await loadDove(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
+    {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
     {view === 'history' && history(changes)}
     {view === 'audit' && <><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} value={query} onChange={event => setQuery(event.target.value)} /></div><Table<AuditEntry> rowKey="id" size="small" dataSource={audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase()))} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
     {view === 'sync' && <>
@@ -370,10 +377,11 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
     {editor && <RecordEditor record={editor.record} kind={editor.kind} initialName={editor.initialName} initialCategory={editor.initialCategory} language={language} busy={busy} onCancel={() => { if (!busy) setEditor(null) }} onSave={(data, reason) => void saveRecord(data, reason)} />}
     <Modal open={Boolean(action)} title={action ? text(action.type === 'remove' ? 'recordRemoval' : action.archived ? 'archive' : 'restore') : ''} onCancel={() => { if (!busy) setAction(null) }} onOk={() => void applyAction()} confirmLoading={busy} okText={text('save')} cancelText={text('cancel')} okButtonProps={{ disabled: !actionReason.trim() }}><p className="operation-name">{display(action?.record.data.name)}</p><label className="standalone-label">{text('reason')}<Input.TextArea value={actionReason} maxLength={500} rows={3} onChange={event => setActionReason(event.target.value)} /></label></Modal>
-    <Modal open={Boolean(activeReport)} onCancel={() => setReportId(null)} title={activeReport ? display(activeReport.data.name) : ''} footer={null} width={1150} destroyOnHidden>{activeReport && <><div className="report-actions"><Button icon={<Download size={16} />} onClick={() => downloadFile(activeReport)}>{text('download')}</Button><Button type="primary" icon={<ClipboardCheck size={16} />} disabled={activeReport.archived || cars.find(car => car.id === activeReport.vehicleId)?.archived} onClick={() => openConfiguration(activeReport)}>{text('updateConfiguration')}</Button>{recordActions(activeReport)}</div><Suspense fallback={<Spin />}><ReportViewer report={(activeReport.data as unknown as ReportData).parsed} language={language} /></Suspense></>}</Modal>
+    <Modal open={Boolean(activeReport)} onCancel={() => setReportId(null)} title={activeReport ? display(activeReport.data.name) : ''} footer={null} width={1150} destroyOnHidden>{activeReport && <><div className="report-actions"><Button icon={<Download size={16} />} onClick={() => downloadFile(activeReport)}>{text('download')}</Button><Button type="primary" icon={<ClipboardCheck size={16} />} disabled={activeReport.archived || !cars.some(car => !car.archived && reportMatchesVehicle(activeReport, car))} onClick={() => openConfiguration(activeReport)}>{text('updateConfiguration')}</Button>{recordActions(activeReport)}</div><Suspense fallback={<Spin />}><ReportViewer report={(activeReport.data as unknown as ReportData).parsed} record={activeReport} language={language} /></Suspense></>}</Modal>
     <Modal open={Boolean(comparison)} onCancel={() => setComparison(null)} title={text('compare')} footer={null} width={1200} destroyOnHidden>{comparison && <><Alert type="info" showIcon title={text('comparisonNote')} /><div className="comparison-names"><span>{display(comparison.left.data.name)} · {display(comparison.left.data.recordedAt)}</span><span>{display(comparison.right.data.name)} · {display(comparison.right.data.recordedAt)}</span></div><Tabs items={['controllers', 'faults'].map(kind => ({ key: kind, label: text(kind), children: <Table<Difference> rowKey="key" dataSource={comparison[kind as 'controllers' | 'faults']} size="small" scroll={{ x: 900 }} pagination={{ pageSize: 10 }} columns={[{ title: text(kind === 'controllers' ? 'controller' : 'code'), dataIndex: 'key', width: 150 }, { title: text('status'), width: 110, render: (_, record) => <Tag color={record.status === 'changed' ? 'warning' : record.status === 'added' ? 'processing' : 'default'}>{text(record.status)}</Tag> }, { title: text('leftReport'), width: 320, render: (_, record) => <DifferenceValue value={record.before} fields={record.fields} text={text} /> }, { title: text('rightReport'), width: 320, render: (_, record) => <DifferenceValue value={record.after} fields={record.fields} text={text} /> }]} /> }))} /></>}</Modal>
     <Modal open={Boolean(configuration)} onCancel={() => { if (!busy) setConfiguration(null) }} title={text('updateConfiguration')} width={950} confirmLoading={busy} onOk={() => void applyConfiguration()} okText={text('save')} cancelText={text('cancel')} okButtonProps={{ disabled: !configuration || configuration.controllerIndex === null || !configuration.fields.length || !configuration.reason.trim() || duplicateTarget || (olderReport && !configuration.allowOlder) }} destroyOnHidden>{configuration && <div className="configuration-form">
-      <label>{text('matchedDoveReport')}<Select value={configuration.report.id} onChange={id => { const report = reports.find(record => record.id === id); if (report) openConfiguration(report, selectedController ? keyControllerName(selectedController.name) || undefined : undefined) }} options={reports.filter(report => report.vehicleId === configuration.report.vehicleId && !report.archived && (report.data as unknown as ReportData).parsed.vin === cars.find(car => car.id === report.vehicleId)?.data.vin && controllerSources(report).length > 0).map(report => ({ value: report.id, label: `${report.data.name} · ${report.data.recordedAt || '—'}` }))} /></label>
+      <label>{text('matchedDoveReport')}<Select value={configuration.report.id} onChange={id => { const report = reports.find(record => record.id === id); if (report) openConfiguration(report, selectedController ? keyControllerName(selectedController.name) || undefined : undefined) }} options={reports.filter(report => report.vehicleId === configuration.report.vehicleId && !report.archived && cars.some(car => !car.archived && reportMatchesVehicle(report, car)) && controllerSources(report).length > 0).map(report => ({ value: report.id, label: `${report.data.name} · ${report.data.recordedAt || '—'}` }))} /></label>
+      {Boolean(configuration.report.data.association) && <Alert type="warning" showIcon title={text('manualVehicleWarning')} description={`${text('manualVehicleTarget')}: ${reportAssociationVin(configuration.report) || '—'}`} />}
       {conflictingSources.length > 0 && <Alert type="warning" showIcon title={text('controllerSourceConflict')} />}
       <label>{text('controller')}<Select value={configuration.controllerIndex} placeholder={text('controller')} onChange={value => chooseController(configuration.report, value)} options={controllerSources(configuration.report).map(({ controller, index }) => ({ value: index, label: `${keyControllerName(controller.name) || controller.name} (${controller.name}) · ${controller.network} · ${controller.serial || '—'} · ${controller.software || '—'} · #${index + 1}` }))} /></label>
       {duplicateTarget && <Alert type="warning" showIcon title={text('duplicateControllerRecords')} />}

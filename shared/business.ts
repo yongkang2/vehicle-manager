@@ -48,10 +48,30 @@ export const entryFields = ['name', 'description', 'installedAt', 'removedAt', '
 export type Controller = { name: string; description: string; network: string; supplier: string; functionalPart: string; productPart: string; software: string; calibrationPart: string; calibrationVersion: string; flashingDate: string; productionDate: string; serial: string }
 export type Fault = { controller: string; code: string; status: string; statusByte: string; description: string; context: string }
 export type DoveData = { vin: string; rawVin: string; vehicleId: string; recordedAt: string; software: string; mileage: number | null; soc: number | null; vehicleMode: string; controllers: Controller[]; faults: Fault[]; warnings: string[]; sheets: string[] }
-export type ReportData = { name: string; checksum: string; size: number; recordedAt: string; savedAt: string; parserVersion: string; parsed: DoveData; vehicleSnapshot: Fields }
+export type DoveReportAssociation = { method: 'manual'; vehicleId: string; vin: string; actor: Actor; assignedAt: string }
+export type ReportData = { name: string; checksum: string; size: number; recordedAt: string; savedAt: string; parserVersion: string; parsed: DoveData; vehicleSnapshot: Fields; association?: DoveReportAssociation }
+const reportObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+const reportedVin = (value: unknown): value is string => typeof value === 'string' && /^[A-HJ-NPR-Z0-9]{17}$/.test(value)
+const blankReportVin = (value: unknown) => value === undefined || (typeof value === 'string' && !value.trim())
+/** The original source remains blank for manually associated reports. */
+export function reportAssociationVin(record: BusinessRecord): string | null {
+	if (record.kind !== 'report' || !record.vehicleId || !reportObject(record.data.parsed)) return null
+	const parsed = record.data.parsed, association = record.data.association
+	if (association === undefined) return reportedVin(parsed.vin) ? parsed.vin : null
+	if (!blankReportVin(parsed.vin) || !blankReportVin(parsed.rawVin) || !reportObject(association) || association.method !== 'manual' || association.vehicleId !== record.vehicleId || !reportedVin(association.vin) || typeof association.assignedAt !== 'string' || association.assignedAt.length > 64 || !Number.isFinite(Date.parse(association.assignedAt)) || !reportObject(association.actor)) return null
+	const actor = association.actor
+	if (![actor.id, actor.name, actor.deviceId].every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 120) || (actor.role !== 'member' && actor.role !== 'admin')) return null
+	return association.vin
+}
+export function validReportAssociation(record: BusinessRecord): boolean { return reportAssociationVin(record) !== null }
+export function reportMatchesVehicle(report: BusinessRecord, vehicle: BusinessRecord): boolean {
+	const vin = reportAssociationVin(report)
+	return vehicle.kind === 'vehicle' && report.vehicleId === vehicle.id && vin !== null && vin === vehicle.data.vin
+}
 export const DOVE_BATCH_LIMIT = 8
 export const DOVE_MAX_FILE_BYTES = 10 * 1024 * 1024
-export type DoveImportConfirmation = { confirmed: true; reportOnly?: boolean; selections?: Partial<Record<KeyControllerName, number>>; versions?: Partial<Record<KeyControllerName, number | null>>; allowOlder?: boolean }
-export type DovePreview = { id: string; filename: string; checksum: string; size: number; parsed: DoveData; expires: number; vehicle: BusinessRecord | null; currentControllers: BusinessRecord[]; match: 'matched' | 'unmatched' | 'ambiguous'; existingId: string | null }
+export type DoveImportConfirmation = { confirmed: true; reportOnly?: boolean; selections?: Partial<Record<KeyControllerName, number>>; versions?: Partial<Record<KeyControllerName, number | null>>; allowOlder?: boolean; bindingToken?: string; manualVehicleConfirmed?: boolean }
+export type DoveManualBinding = { vehicleId: string; vin: string; token: string }
+export type DovePreview = { id: string; filename: string; checksum: string; size: number; parsed: DoveData; expires: number; vehicle: BusinessRecord | null; currentControllers: BusinessRecord[]; match: 'matched' | 'unmatched' | 'ambiguous' | 'manual-required'; existingId: string | null; manualBinding?: DoveManualBinding }
 export type DoveBatchPreviewResult = { index: number; filename: string } & ({ preview: DovePreview; error?: never } | { preview?: never; error: string })
 export type DoveBatchSaveResult = { draftId: string } & ({ record: BusinessRecord; error?: never } | { record?: never; error: string })

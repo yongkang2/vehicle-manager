@@ -25,15 +25,21 @@ export async function parseDove(bytes: Buffer): Promise<DoveData> {
   const dove = book.getWorksheet('DOVE'), identification = book.getWorksheet('Identification'), defects = book.getWorksheet('Defauts')
   if (!dove || !identification || !defects) throw new Error('UNSUPPORTED_REPORT')
   const metadata = new Map<string, string>()
-  dove.eachRow(row => metadata.set(cellText(row.getCell(1)).replace(/\s*:\s*$/, '').toLowerCase(), cellText(row.getCell(2))))
-  const rawVin = metadata.get('vin') || '', vin = normalizeReportVin(rawVin)
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) throw new Error('INVALID_VIN')
-  const vins = new Set([vin])
+  const vinCandidates: string[] = []
+  dove.eachRow(row => {
+    const key = cellText(row.getCell(1)).replace(/\s*:\s*$/, '').toLowerCase(), value = cellText(row.getCell(2))
+    metadata.set(key, value)
+    if (key === 'vin') vinCandidates.push(value)
+  })
   for (const sheet of book.worksheets) for (let row = 1; row <= Math.min(sheet.rowCount, 10); row++) for (let column = 1; column <= 2; column++) {
-    const match = cellText(sheet.getCell(row, column)).match(/^Vin\s*:\s*(.+)$/i)
-    if (match) vins.add(normalizeReportVin(match[1]))
+    const match = cellText(sheet.getCell(row, column)).match(/^Vin\s*:\s*(.*)$/i)
+    if (match) vinCandidates.push(match[1].trim())
   }
-  if (vins.size !== 1) throw new Error('VIN_MISMATCH')
+  const nonblankVins = vinCandidates.filter(value => value.trim()), normalizedVins = nonblankVins.map(normalizeReportVin)
+  if (normalizedVins.some(value => !/^[A-HJ-NPR-Z0-9]{17}$/.test(value))) throw new Error('INVALID_VIN')
+  const vins = new Set(normalizedVins)
+  if (vins.size > 1) throw new Error('VIN_MISMATCH')
+  const rawVin = nonblankVins[0] || '', vin = normalizedVins[0] || ''
   const controllers: Controller[] = []
   let header = 0
   identification.eachRow((row, index) => {
@@ -56,6 +62,7 @@ export async function parseDove(bytes: Buffer): Promise<DoveData> {
   const rawSoc = metadata.get('value soc') || '', socNumber = Number(rawSoc)
   const soc = rawSoc && Number.isFinite(socNumber) && socNumber >= 0 && socNumber <= 100 ? socNumber : null
   const warnings: string[] = []
+  if (!vin) warnings.push('VIN_MISSING')
   if (mileage === null) warnings.push('MILEAGE_UNKNOWN')
   if (controllers.some(item => /invalide|FFF\.FFF|FF\/FF|255\/255/i.test([item.software, item.functionalPart, item.calibrationPart, item.calibrationVersion, item.flashingDate].join(' ')))) warnings.push('CONTROLLER_PLACEHOLDER')
   return { vin, rawVin, vehicleId: metadata.get('vehicle id') || '', recordedAt: metadata.get('date of record') || '', software: metadata.get('soft') || '', mileage, soc, vehicleMode: metadata.get('vehicle mode') || '', controllers, faults, warnings, sheets: book.worksheets.map(sheet => sheet.name) }

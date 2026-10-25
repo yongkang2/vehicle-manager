@@ -14,7 +14,7 @@ import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
 import { VehiclePhotos } from './vehicle-photos.js'
 import { MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration } from '../shared/csv-export.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
-import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
+import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, reportMatchesVehicle, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
 import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData, VehicleDeleteRequest } from '../shared/business.js'
 
 type Config = { sharedPath: string; teamId: string }
@@ -49,6 +49,16 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     if (admin && member.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
     return { actor: { id: member.id, name: member.name, role: member.role, deviceId: store.deviceId }, identity, configuration, online, syncEnabled: req.syncEnabled !== false }
   }
+  function finalAccess(req: BusinessRequest, res: express.Response): () => Promise<Actor> {
+    const assertSession = sessionGuard(req)
+    return async () => {
+      assertSession()
+      const context = await access(req)
+      assertSession()
+      if (res.destroyed) throw new AppError('REQUEST_CANCELLED', 409)
+      return context.actor
+    }
+  }
   const sync = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity) : synchronization.status()
   const router = express.Router()
   function writeRoute(method: 'post' | 'put' | 'get' | 'delete', route: string, ...handlers: RequestHandler[]) {
@@ -65,6 +75,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const localPath = req.path.toLowerCase()
         const localExport = localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/') || localPath === '/vehicle-table-preferences' || localPath === '/vehicle-table-preferences/'
         const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
+        const localDraftBinding = req.method === 'POST' && /^\/dove\/[^/]+\/vehicle\/?$/.test(localPath)
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const canonicalMaintenance = deletePreview || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
@@ -73,7 +84,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
         }
-        if (!localExport && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => {
+        if (!localExport && !localDraftBinding && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => {
           // An admitted upload may finish its HTTP response after shutdown has
           // drained its write. Do not reopen synchronization on a closing store.
           if (res.statusCode < 400 && backgroundSyncAllowed() && store.db.isOpen && synchronization.status().pending > 0) void sync(req.businessContext!)
@@ -192,21 +203,38 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   })
   writeRoute('post', '/dove/preview', upload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file) throw new AppError('FILE_REQUIRED')
+    const verify = finalAccess(req, res)
     await sync(req.businessContext!)
-    res.json(await dove.preview(req.file.buffer, filename(req.file), req.localUser!.id))
+    await verify()
+    const preview = await dove.preview(req.file.buffer, filename(req.file), req.localUser!.id)
+    await verify()
+    res.json(preview)
+  })
+  writeRoute('post', '/dove/:draftId/vehicle', async (req: BusinessRequest, res) => {
+    if (!req.body || Array.isArray(req.body) || Object.keys(req.body).some(key => !['vehicleId', 'expectedVin'].includes(key)) || typeof req.body.vehicleId !== 'string' || typeof req.body.expectedVin !== 'string') throw new AppError('INVALID_INPUT')
+    await finalAccess(req, res)()
+    res.json(dove.bind(String(req.params.draftId), req.localUser!.id, req.body.vehicleId, req.body.expectedVin))
   })
   writeRoute('post', '/dove/save', async (req: BusinessRequest, res) => {
+    const verify = finalAccess(req, res)
     await sync(req.businessContext!)
-    res.status(201).json(await dove.save(String(req.body?.draftId || ''), req.localUser!.id, req.businessContext!.actor, req.body?.confirmation))
+    const actor = await verify()
+    res.status(201).json(await dove.save(String(req.body?.draftId || ''), req.localUser!.id, actor, req.body?.confirmation, verify))
   })
   writeRoute('post', '/dove/preview-batch', batchFiles, async (req: BusinessRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined
     if (!files?.length) throw new AppError('FILE_REQUIRED')
+    const verify = finalAccess(req, res)
     await sync(req.businessContext!)
     const results: DoveBatchPreviewResult[] = []
     for (const [index, file] of files.entries()) {
       const name = filename(file)
-      try { results.push({ index, filename: name, preview: await dove.preview(file.buffer, name, req.localUser!.id) }) }
+      try {
+        await verify()
+        const preview = await dove.preview(file.buffer, name, req.localUser!.id)
+        await verify()
+        results.push({ index, filename: name, preview })
+      }
       catch (error) { results.push({ index, filename: name, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
     }
     res.json(results)
@@ -214,16 +242,18 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   writeRoute('post', '/dove/save-batch', async (req: BusinessRequest, res) => {
     const draftIds: unknown = req.body?.draftIds
     if (!Array.isArray(draftIds) || !draftIds.length || draftIds.length > DOVE_BATCH_LIMIT || draftIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(draftIds).size !== draftIds.length) throw new AppError('INVALID_INPUT')
+    const verify = finalAccess(req, res)
     await sync(req.businessContext!)
     const results: DoveBatchSaveResult[] = []
     for (const draftId of draftIds as string[]) {
-      try { results.push({ draftId, record: await dove.save(draftId, req.localUser!.id, req.businessContext!.actor, req.body?.confirmations?.[draftId]) }) }
+      try { results.push({ draftId, record: await dove.save(draftId, req.localUser!.id, await verify(), req.body?.confirmations?.[draftId], verify) }) }
       catch (error) { results.push({ draftId, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
     }
     res.status(201).json(results)
   })
   router.get('/reports/compare', (req, res) => res.json(compareReports(business.get(String(req.query.left || '')), business.get(String(req.query.right || '')))))
-  writeRoute('post', '/reports/:id/configuration', (req: BusinessRequest, res) => {
+  writeRoute('post', '/reports/:id/configuration', async (req: BusinessRequest, res) => {
+    const actor = await finalAccess(req, res)()
     const report = business.get(String(req.params.id)), explanation = reason(req.body?.reason)
     if (report.kind !== 'report' || report.archived || report.version !== req.body.reportVersion) throw new AppError('VERSION_CONFLICT', 409)
     const selections = req.body?.selections as { controllerIndex: number; partId: string | null; version?: number; fields: string[] }[]
@@ -231,7 +261,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const targets = selections.map(item => item.partId || `new:${item.controllerIndex}`)
     if (new Set(targets).size !== targets.length) throw new AppError('INVALID_INPUT')
     const parsed = (report.data as unknown as ReportData).parsed, updated: BusinessRecord[] = []
-    if (business.get(report.vehicleId!).data.vin !== parsed.vin) throw new AppError('REPORT_VIN_MISMATCH', 409)
+    if (!reportMatchesVehicle(report, business.get(report.vehicleId!))) throw new AppError('REPORT_VIN_MISMATCH', 409)
     store.transaction(() => {
       for (const selection of selections) {
         const controller = Number.isInteger(selection.controllerIndex) ? parsed.controllers[selection.controllerIndex] : undefined
@@ -245,7 +275,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const data: Fields = { ...(part?.data || { name, category: 'controller' }), sourceName: controller.name, reportId: report.id, reportRecordedAt: parsed.recordedAt }
         if (name) data.name = name
         for (const field of selection.fields) data[field] = controller[field as keyof Controller]
-        updated.push(business.write({ id: part?.id || controllerRecordId(report.vehicleId!, name), version: part ? selection.version : undefined, kind: 'part', vehicleId: report.vehicleId, data, actor: req.businessContext!.actor, reason: explanation, sourceId: report.id }))
+        updated.push(business.write({ id: part?.id || controllerRecordId(report.vehicleId!, name), version: part ? selection.version : undefined, kind: 'part', vehicleId: report.vehicleId, data, actor, reason: explanation, sourceId: report.id }))
       }
     })
     res.json(updated)

@@ -52,6 +52,7 @@ export function createWorkspaceScope() {
     return result as T
   }
   return {
+    assertCurrent,
     async request<T>(url: string, options: WorkspaceRequestOptions = {}): Promise<T> {
       return jsonFor<T>(await responseFor(url, options), options.signal)
     },
