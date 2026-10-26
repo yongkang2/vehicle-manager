@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4411 --strictPort",
     "dev:server": "tsx server/main.ts",
-    "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
+    "build": "node scripts/sync-version.mjs && tsc -b && tsc -p tsconfig.server.json && vite build",
     "start": "node dist-server/server/main.js",
     "test": "tsx --test test/*.test.ts",
     "lint": "oxlint",
     "preview": "vite preview",
     "package:portable": "npm run build && node scripts/package.mjs",
+    "version": "node scripts/sync-version.mjs && git add shared/version.ts",
     "verify:portable": "node scripts/verify-portable.mjs"
   },
   "engines": {

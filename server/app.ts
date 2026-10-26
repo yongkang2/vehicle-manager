@@ -10,6 +10,7 @@ import { AppError, bindingFor, TeamDirectory } from './team.js'
 import type { Access, Identity, LocalUser, Role, Status, TeamDocument } from '../shared/types.js'
 import { Workspaces } from './workspaces.js'
 import { Business } from './business.js'
+import { appVersion } from '../shared/version.js'
 import type { BrowserPresence } from './browser-presence.js'
 
 type Config = { sharedPath: string; teamId: string }
@@ -73,7 +74,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     next()
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
-  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: '1.0.1', user: req.localUser || null, instanceId, pid: process.pid }))
+  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
   if (browserPresence && presenceToken) app.post('/api/local/browser-presence-token', (req, res) => res.json({ token: presenceToken }))
   app.post('/api/local/shutdown', (req, res) => {
     const supplied = req.get('X-Control-Token') || ''
@@ -152,7 +153,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       const { member, binding } = team ? bindingFor(team, identity(req)) : {}
       const request = team?.requests.filter(item => item.identity.deviceId === store.deviceId && item.identity.localUserId === req.localUser!.id).at(-1)
       const access: Access = !config ? 'unconfigured' : binding ? (binding.enabled && member?.enabled ? 'approved' : 'disabled') : request?.status === 'pending' ? 'pending' : request?.status === 'rejected' ? 'rejected' : 'unbound'
-      return { version: '1.0.1', user: req.localUser!, deviceId: store.deviceId, deviceName: store.deviceName, sharedPath: config?.sharedPath || null, teamId: config?.teamId || null, workspaceToken: workspaces.token(session), syncPaused: !session.sync_enabled, teamName: team?.name || null, access, online, error, lastChecked: workspace?.store.get<string>('lastChecked') || null, member: member || null }
+      return { version: appVersion, user: req.localUser!, deviceId: store.deviceId, deviceName: store.deviceName, sharedPath: config?.sharedPath || null, teamId: config?.teamId || null, workspaceToken: workspaces.token(session), syncPaused: !session.sync_enabled, teamName: team?.name || null, access, online, error, lastChecked: workspace?.store.get<string>('lastChecked') || null, member: member || null }
     }
     return workspace ? workspace.store.runWrite(readStatus) : readStatus()
   }
