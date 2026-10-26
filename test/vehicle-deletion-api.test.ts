@@ -41,11 +41,11 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     const team = (await request(admin, '/team')).data
     assert.equal((await request(admin, '/team/requests/' + team.requests[0].id + '/approve', 'POST', { role: 'member', memberId: null, reason: 'Verified test identity' })).status, 200)
 
-    const car = (await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { name: 'Delete target', vin: 'TEST0000000000001', status: 'available', physicalLocation: 'Workshop A' }, reason: 'Register vehicle' })).data as BusinessRecord
+    const car = (await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { name: 'Delete target', vin: 'TEST0000000000001', status: 'available', complianceLevel: 'Eu7', physicalLocation: 'Workshop A' }, reason: 'Register vehicle' })).data as BusinessRecord
     assert.equal((await request(admin, '/business/vehicles/' + car.id + '/delete-preview')).data.error, 'VEHICLE_NOT_ARCHIVED')
     const children: BusinessRecord[] = []
     for (const kind of ['part', 'modification', 'equipment']) {
-      const child = await request(admin, '/business/records', 'POST', { kind, vehicleId: car.id, data: { name: kind === 'part' ? 'VCU' : kind, ...(kind === 'part' ? { category: 'controller' } : {}) }, reason: 'Add child' })
+      const child = await request(admin, '/business/records', 'POST', { kind, vehicleId: car.id, data: { name: kind === 'part' ? 'VCU' : kind, ...(kind === 'part' ? { category: 'controller', controllerType: 'Open ECU' } : {}) }, reason: 'Add child' })
       assert.equal(child.status, 201); children.push(child.data)
     }
     const original = Buffer.from('Retained synthetic report bytes'), key = await admin.business.blob(original)
@@ -106,7 +106,7 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     assert.equal(restored.status, 200); assert.equal(restored.data.skippedVehicles, 1); assert.equal(restored.data.skippedRecords, 6)
     assert.equal((await request(admin, '/business/records')).data.length, 0)
     assert.equal(admin.store.deletionRows().length, 1)
-    const replacement = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: car.data.vin, status: 'available', physicalLocation: 'New registration' }, reason: 'Reuse VIN under a new identity' })
+    const replacement = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: car.data.vin, status: 'available', complianceLevel: 'Eu7', physicalLocation: 'New registration' }, reason: 'Reuse VIN under a new identity' })
     assert.equal(replacement.status, 201); assert.notEqual(replacement.data.id, car.id)
     assert.equal(replacement.data.data.physicalLocation, 'New registration')
     await fs.rename(shared, shared + '-offline')

@@ -36,7 +36,7 @@ function Authentication({ text, onError, onLogin }: BaseProps & { onLogin: (user
       <Form.Item label={text.username} name="username" rules={[{ required: true, message: text.required }, { min: 2, max: 24 }]}><Input autoComplete="username" prefix={glyph(UserRound)} maxLength={24} /></Form.Item>
       <Form.Item label={text.password} name="password" rules={[{ required: true, message: text.required }, ...(mode === 'register' ? [{ min: 10, max: 128, message: text.passwordHint }] : [])]}><Input.Password autoComplete={mode === 'login' ? 'current-password' : 'new-password'} maxLength={128} placeholder={mode === 'register' ? text.passwordHint : undefined} /></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} block className="auth-submit" icon={glyph(ArrowRight)} iconPlacement="end">{mode === 'login' ? text.signIn : text.register}</Button>
-    </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div></div></main>
+    </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main>
 }
 
 function Setup({ text, language, onError, status, onDone, onLater }: BaseProps & { status: Status; onDone: () => Promise<void>; onLater: () => void }) {

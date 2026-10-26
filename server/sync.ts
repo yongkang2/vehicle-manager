@@ -11,15 +11,17 @@ import type { Identity, TeamDocument } from '../shared/types.js'
 import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
-// Legacy vehicles omit this optional field; an empty editor value is not a change.
-const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => kind === 'vehicle' && field === 'physicalLocation'
+// Legacy records omit these values; materializing a blank is not a change.
+const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus'] : []
+const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => blankEquivalentFields(kind).includes(field)
   ? equivalent(left === undefined ? '' : left, right === undefined ? '' : right)
   : equivalent(left, right)
 function equivalentData(kind: RecordKind, left: Fields, right: Fields): boolean {
-  if (kind !== 'vehicle') return equivalent(left, right)
-  const { physicalLocation: leftLocation, ...leftFields } = left
-  const { physicalLocation: rightLocation, ...rightFields } = right
-  return equivalent(leftFields, rightFields) && equivalentField(kind, 'physicalLocation', leftLocation, rightLocation)
+  const blanks = blankEquivalentFields(kind)
+  if (!blanks.length) return equivalent(left, right)
+  const leftFields = Object.fromEntries(Object.entries(left).filter(([field]) => !blanks.includes(field)))
+  const rightFields = Object.fromEntries(Object.entries(right).filter(([field]) => !blanks.includes(field)))
+  return equivalent(leftFields, rightFields) && blanks.every(field => equivalentField(kind, field, left[field], right[field]))
 }
 const stateOf = (row: RecordRow | undefined) => row ? { data: JSON.parse(row.data) as Fields, archived: Boolean(row.archived) } : null
 const hashKey = (key: string) => /^[a-f0-9]{64}$/.test(key)

@@ -32,7 +32,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   const active = new Map<string, number>(), switching = new Set<string>()
   const app = express()
   app.disable('x-powered-by')
-  app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null } } }))
+  app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null, 'img-src': ["'self'", 'data:', 'blob:'] } } }))
   app.use((req, res, next) => {
     if (!['localhost', '127.0.0.1', '[::1]'].includes(req.hostname)) return next(new AppError('HOST_NOT_ALLOWED', 403))
     next()

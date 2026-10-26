@@ -1,7 +1,7 @@
 export type Language = 'en' | 'zh'
 const en = {
   product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
-  username: 'Username', displayName: 'Full name', password: 'Password', account: 'Local account', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
+  username: 'Username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
   local: 'Local device', online: 'Connected', offline: 'Offline', refresh: 'Refresh', setupTitle: 'Connect your workspace', path: 'Shared folder path', test: 'Test connection', later: 'Set up later',
   notConfigured: 'Shared folder not configured', emptyFolder: 'Empty folder verified', existingTeam: 'Existing team found', checks: 'Read, write and rename checks passed',
   teamName: 'Team name', create: 'Create team', join: 'Request to join', confirmCreate: 'Create a new team in this empty folder and make this account its first administrator.',
@@ -17,7 +17,7 @@ const en = {
 }
 const zh: Record<keyof typeof en, string> = {
   product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', displayName: '姓名', password: '密码',
-  account: '本地账号', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
+  account: '本地账号', developer: '开发者', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
   path: '共享文件夹路径', test: '测试连接', later: '稍后配置', notConfigured: '尚未配置共享目录', emptyFolder: '已验证为空目录', existingTeam: '发现已有团队', checks: '读取、写入和重命名检查通过',
   teamName: '团队名称', create: '创建团队', join: '申请加入', confirmCreate: '确认在此空目录创建新团队，并将当前账号设为首位管理员。', pending: '待审批', pendingTitle: '账号和设备正在等待管理员审批',
   approved: '已批准', disabled: '权限已停用', unbound: '此本地账号尚未绑定团队身份', rejected: '申请未批准', firstAdmin: '管理员', member: '成员', status: '状态', device: '设备', deviceId: '设备标识',
@@ -30,6 +30,9 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  COMPLIANCE_LEVEL_REQUIRED: ['Choose a compliance level before saving.', '保存前请选择合规等级。'],
+  CONTROLLER_TYPE_REQUIRED: ['Choose a controller type before saving.', '保存前请选择控制器类型。'],
+  BATTERY_LIFE_STATUS_REQUIRED: ['Choose an HV battery life status before saving.', '保存前请选择高压电池寿命状态。'],
   EXPORT_SELECTION_CHANGED: ['Selected vehicles are no longer available or no longer match these filters. Refresh and reselect matches before exporting.', '所选车辆已不可用或不再符合筛选条件。请刷新并重选匹配车辆后再导出。'],
   EXPORT_TEMPLATE_NOT_FOUND: ['This export template is no longer available. Reopen export to refresh your templates.', '此导出模板已不可用。请重新打开导出窗口以刷新模板。'],
   EXPORT_TEMPLATE_EXISTS: ['An export template with this name already exists. Choose a different name.', '已有同名导出模板，请使用其他名称。'],
@@ -47,6 +50,7 @@ const errorPairs: Record<string, [string, string]> = {
   BACKUP_DELETION_CONFLICT: ['This backup contains deletion information that conflicts with current live records. Restore was not applied.', '备份中的删除信息与当前有效记录冲突，未执行恢复。'],
   DELETE_REQUEST_MISMATCH: ['This deletion request differs from the recorded request. Refresh the preview and confirm again.', '删除请求与已记录的请求不一致，请刷新预览并重新确认。'],
   WORKSPACE_CHANGED: ['The account or workspace changed. Reload before continuing; no stale operation was applied.', '账号或工作空间已变化，请重新加载后继续；旧页面的操作未执行。'],
+  PHOTO_NOT_FOUND: ['The selected vehicle cover photo is unavailable.', '所选车辆封面照片不可用。'], REQUEST_CANCELLED: ['The request was cancelled.', '请求已取消。'],
   WORKSPACE_BUSY: ['This session has another operation in progress. Wait for it to finish and retry.', '当前会话有操作正在进行，请完成后重试。'],
   WORKSPACE_NOT_FOUND: ['This account has not connected to that team.', '当前账号尚未连接该团队。'],
   PENDING_BEFORE_SWITCH: ['Confirm keeping pending changes and conflicts in the original team before switching.', '切换前请确认将待同步修改和冲突保留在原团队。'],
@@ -61,6 +65,10 @@ const errorPairs: Record<string, [string, string]> = {
   CONTROLLER_EXISTS: ['This vehicle already has this controller. Update the existing record.', '该车辆已有此控制器，请更新现有记录。'],
   IMPORT_CONFIRMATION_REQUIRED: ['Review the matched data and confirm the import.', '请核对匹配数据并手动确认导入。'], IMPORT_SOURCE_REQUIRED: ['Select the source for each conflicting controller.', '请选择存在冲突的控制器来源条目。'],
   DOVE_PARSE_FAILED: ['The workbook is damaged, encrypted or unsupported.', '工作簿损坏、加密或不受支持。'], UNSUPPORTED_REPORT: ['Required DOVE sheets or controller headers were not found.', '未找到必要 DOVE 工作表或控制器表头。'], VIN_MISMATCH: ['VIN values in the workbook disagree.', '工作簿不同工作表的 VIN 不一致。'], VIN_NOT_MATCHED: ['A unique active vehicle must match the workbook VIN before retention.', '必须唯一匹配工作簿 VIN 对应的有效车辆才能留存。'],
+  MANUAL_VEHICLE_REQUIRED: ['This report has no VIN. Choose an existing vehicle before importing.', '报告未提供 VIN，请先选择已有车辆再导入。'],
+  MANUAL_BINDING_CHANGED: ['The vehicle selection changed. Choose the vehicle again and review a fresh confirmation.', '车辆关联已变化，请重新选择车辆并核对新的确认信息。'],
+  MANUAL_VEHICLE_CONFIRMATION_REQUIRED: ['Confirm that the report belongs to the manually selected vehicle.', '请确认这份报告属于手动选择的车辆。'],
+  VEHICLE_SELECTION_CHANGED: ['The selected vehicle changed or is unavailable. Refresh and choose again.', '所选车辆已变化或不可用，请刷新后重新选择。'],
   DRAFT_EXPIRED: ['The preview expired. Upload the report again.', '预览已过期，请重新上传。'], DOVE_BUSY: ['Two reports are already being parsed. Retry shortly.', '已有两份报告正在解析，请稍后重试。'], PARSE_TIMEOUT: ['Report parsing timed out.', '报告解析超时。'], EXCEL_RESOURCE_LIMIT: ['The workbook exceeds safe parsing resource limits.', '工作簿超出安全解析资源限制。'],
   DOVE_BATCH_LIMIT: ['Select at most eight DOVE files per batch.', '每批最多选择 8 份 DOVE 文件。'],
   REPORT_VIN_MISMATCH: ['The reports or target configuration do not belong to the same VIN.', '报告或目标配置不属于同一 VIN。'], IMMUTABLE_REPORT: ['Retained originals and parsed snapshots cannot be edited.', '已留存原件和解析快照不能编辑。'], CONFLICT_CHANGED: ['The conflict changed. Refresh and choose again.', '冲突已变化，请刷新后重新选择。'],

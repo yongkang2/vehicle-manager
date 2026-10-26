@@ -4,10 +4,10 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './team.js'
 import { Business, checksum, now } from './business.js'
-import { configurationFields, controllerRecordId, controllerSources, doveRecordedTime, keyControllerName, keyControllerNames, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
-import type { Actor, BusinessRecord, DoveData, DoveImportConfirmation, DovePreview, ReportData } from '../shared/business.js'
+import { configurationFields, controllerRecordId, controllerSources, doveRecordedTime, keyControllerName, keyControllerNames, reportAssociationVin, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
+import type { Actor, BusinessRecord, DoveData, DoveImportConfirmation, DoveManualBinding, DovePreview, ReportData } from '../shared/business.js'
 
-type Draft = { id: string; owner: string; filename: string; bytes: Buffer; parsed: DoveData; checksum: string; expires: number; vehicleId: string | null }
+type Draft = { id: string; owner: string; filename: string; bytes: Buffer; parsed: DoveData; checksum: string; expires: number; vehicleId: string | null; manualBinding?: DoveManualBinding }
 export type Preview = DovePreview
 function parseIsolated(bytes: Buffer): Promise<DoveData> {
   return new Promise((resolve, reject) => {
@@ -32,14 +32,30 @@ export class DoveService {
   private readonly drafts = new Map<string, Draft>()
   private active = 0
   constructor(readonly business: Business) {}
+  private draft(id: string, owner: string): Draft {
+    const draft = this.drafts.get(id)
+    if (!draft || draft.owner !== owner || draft.expires < Date.now()) throw new AppError('DRAFT_EXPIRED', 409)
+    return draft
+  }
   private view(draft: Draft): Preview {
-    const matches = this.business.list('vehicle').filter(record => !record.archived && record.data.vin === draft.parsed.vin)
-    if (!draft.vehicleId && matches.length === 1) draft.vehicleId = matches[0].id
-    const vehicle = matches.length === 1 && matches[0].id === draft.vehicleId ? matches[0] : null
+    const manual = !draft.parsed.vin
+    let vehicle: BusinessRecord | null = null, ambiguous = false
+    if (manual && draft.manualBinding) {
+      this.business.store.assertNotDeleted(draft.manualBinding.vehicleId)
+      try {
+        const current = this.business.get(draft.manualBinding.vehicleId)
+        if (current.kind === 'vehicle' && !current.archived && current.data.vin === draft.manualBinding.vin) vehicle = current
+      } catch (error) { if (!(error instanceof AppError) || error.code !== 'RECORD_NOT_FOUND') throw error }
+    } else if (!manual) {
+      const matches = this.business.list('vehicle').filter(record => !record.archived && record.data.vin === draft.parsed.vin)
+      if (!draft.vehicleId && matches.length === 1) draft.vehicleId = matches[0].id
+      vehicle = matches.length === 1 && matches[0].id === draft.vehicleId ? matches[0] : null
+      ambiguous = matches.length > 1
+    }
     // Legacy report IDs remain valid; deduplication belongs to the vehicle UUID.
     const existing = vehicle ? this.business.list('report', vehicle.id).find(record => record.data.checksum === draft.checksum) : undefined
     const currentControllers = vehicle ? this.business.list('part', vehicle.id).filter(part => !part.archived && part.data.category === 'controller' && keyControllerName(part.data.name)) : []
-    return { id: draft.id, filename: draft.filename, checksum: draft.checksum, size: draft.bytes.length, parsed: draft.parsed, expires: draft.expires, vehicle, currentControllers, match: vehicle ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched', existingId: existing?.id || null }
+    return { id: draft.id, filename: draft.filename, checksum: draft.checksum, size: draft.bytes.length, parsed: draft.parsed, expires: draft.expires, vehicle, currentControllers, match: vehicle ? 'matched' : manual ? 'manual-required' : ambiguous ? 'ambiguous' : 'unmatched', existingId: existing?.id || null, ...(draft.manualBinding ? { manualBinding: { ...draft.manualBinding } } : {}) }
   }
   async preview(bytes: Buffer, filename: string, owner: string): Promise<Preview> {
     if (!/\.xlsx$/i.test(filename)) throw new AppError('XLSX_REQUIRED', 422)
@@ -54,24 +70,55 @@ export class DoveService {
     this.drafts.set(draft.id, draft)
     return this.view(draft)
   }
-  async save(id: string, owner: string, actor: Actor, confirmation?: DoveImportConfirmation): Promise<BusinessRecord> {
-    const draft = this.drafts.get(id)
-    if (!draft || draft.owner !== owner || draft.expires < Date.now()) throw new AppError('DRAFT_EXPIRED', 409)
+  bind(id: string, owner: string, vehicleId: string, expectedVin: string): Preview {
+    const draft = this.draft(id, owner)
+    if (draft.parsed.vin || draft.parsed.rawVin || typeof vehicleId !== 'string' || !vehicleId || typeof expectedVin !== 'string') throw new AppError('INVALID_INPUT')
+    this.business.store.assertNotDeleted(vehicleId)
+    let vehicle: BusinessRecord
+    try { vehicle = this.business.get(vehicleId) } catch (error) {
+      if (error instanceof AppError && error.code === 'RECORD_NOT_FOUND') throw new AppError('VEHICLE_SELECTION_CHANGED', 409)
+      throw error
+    }
+    if (vehicle.kind !== 'vehicle' || vehicle.archived || !/^[A-HJ-NPR-Z0-9]{17}$/.test(expectedVin) || vehicle.data.vin !== expectedVin) throw new AppError('VEHICLE_SELECTION_CHANGED', 409)
+    draft.vehicleId = vehicle.id
+    draft.manualBinding = { vehicleId: vehicle.id, vin: expectedVin, token: randomUUID() }
+    return this.view(draft)
+  }
+  async save(id: string, owner: string, actor: Actor, confirmation?: DoveImportConfirmation, beforeCommit?: () => Promise<Actor>): Promise<BusinessRecord> {
+    const draft = this.draft(id, owner), manual = !draft.parsed.vin, binding = draft.manualBinding ? { ...draft.manualBinding } : undefined
     if (draft.vehicleId) this.business.store.assertNotDeleted(draft.vehicleId)
+    if (manual && !binding) throw new AppError('MANUAL_VEHICLE_REQUIRED', 409)
+    const assertBinding = () => {
+      if (!manual) return
+      if (!binding || draft.manualBinding?.token !== binding.token || confirmation?.bindingToken !== binding.token) throw new AppError('MANUAL_BINDING_CHANGED', 409)
+    }
+    assertBinding()
     const preview = this.view(draft)
-    if (!preview.vehicle) throw new AppError('VIN_NOT_MATCHED', 409)
+    if (!preview.vehicle) throw new AppError(manual ? 'VEHICLE_SELECTION_CHANGED' : 'VIN_NOT_MATCHED', 409)
     if (confirmation?.confirmed !== true) throw new AppError('IMPORT_CONFIRMATION_REQUIRED', 409)
+    if (manual && confirmation.manualVehicleConfirmed !== true) throw new AppError('MANUAL_VEHICLE_CONFIRMATION_REQUIRED', 409)
+    const targetId = preview.vehicle.id, effectiveVin = binding?.vin || draft.parsed.vin
+    const assertExisting = (current: Preview) => {
+      if (current.existingId && reportAssociationVin(this.business.get(current.existingId)) !== effectiveVin) throw new AppError('REPORT_VIN_MISMATCH', 409)
+    }
+    assertExisting(preview)
     await this.business.blob(draft.bytes)
-    if (draft.vehicleId) this.business.store.assertNotDeleted(draft.vehicleId)
+    const author = beforeCommit ? await beforeCommit() : actor
+    this.draft(id, owner)
+    assertBinding()
+    this.business.store.assertNotDeleted(targetId)
     const current = this.view(draft)
-    if (!current.vehicle) throw new AppError('VIN_NOT_MATCHED', 409)
-    const data: ReportData = { name: draft.filename, checksum: draft.checksum, size: draft.bytes.length, recordedAt: draft.parsed.recordedAt, savedAt: now(), parserVersion: 'dove-current-1', parsed: draft.parsed, vehicleSnapshot: current.vehicle.data }
+    if (!current.vehicle || current.vehicle.id !== targetId || current.vehicle.data.vin !== effectiveVin) throw new AppError(manual ? 'VEHICLE_SELECTION_CHANGED' : 'VIN_NOT_MATCHED', 409)
+    assertExisting(current)
+    const savedAt = now()
+    const data: ReportData = { name: draft.filename, checksum: draft.checksum, size: draft.bytes.length, recordedAt: draft.parsed.recordedAt, savedAt, parserVersion: 'dove-current-2', parsed: draft.parsed, vehicleSnapshot: current.vehicle.data, ...(manual ? { association: { method: 'manual', vehicleId: targetId, vin: effectiveVin, actor: author, assignedAt: savedAt } } : {}) }
     let report!: BusinessRecord
     this.business.store.transaction(() => {
       this.business.store.assertNotDeleted(current.vehicle!.id)
-      report = current.existingId ? this.business.get(current.existingId) : this.business.write({ id: `report-${current.vehicle!.id}-${draft.checksum}`, kind: 'report', vehicleId: current.vehicle!.id, data: { ...data }, actor, reason: 'DOVE retained after VIN verification and manual confirmation', internal: true })
+      assertBinding()
+      report = current.existingId ? this.business.get(current.existingId) : this.business.write({ id: `report-${current.vehicle!.id}-${draft.checksum}`, kind: 'report', vehicleId: current.vehicle!.id, data: { ...data }, actor: author, reason: manual ? 'DOVE retained after explicit manual vehicle association' : 'DOVE retained after VIN verification and manual confirmation', internal: true })
       if (report.vehicleId !== current.vehicle!.id) throw new AppError('REPORT_VIN_MISMATCH', 409)
-      if (confirmation.reportOnly === true) return
+      if (manual ? confirmation.reportOnly !== false : confirmation.reportOnly === true) return
       if (report.archived) throw new AppError('RECORD_ARCHIVED', 409)
       const sources = controllerSources(draft.parsed.controllers)
       for (const name of keyControllerNames) {
@@ -83,13 +130,13 @@ export class DoveService {
         const matches = this.business.list('part', current.vehicle!.id).filter(part => !part.archived && part.data.category === 'controller' && keyControllerName(part.data.name) === name)
         if (matches.length > 1) throw new AppError('CONTROLLER_EXISTS', 409)
         const controller = observation.controller, part = matches[0]
-        if (confirmation.versions && confirmation.versions[name] !== (part?.version ?? null)) throw new AppError('VERSION_CONFLICT', 409)
+        if ((manual && !Object.hasOwn(confirmation.versions || {}, name)) || (confirmation.versions && confirmation.versions[name] !== (part?.version ?? null))) throw new AppError('VERSION_CONFLICT', 409)
         if (part && doveRecordedTime(draft.parsed.recordedAt) < doveRecordedTime(part.data.reportRecordedAt) && confirmation.allowOlder !== true) throw new AppError('OLDER_REPORT_CONFIRMATION_REQUIRED', 409)
         const fields = configurationFields.filter(field => validControllerValue(controller[field]))
         if (!fields.length || (part && fields.every(field => part.data[field] === controller[field]))) continue
         const values = { ...part?.data, name, category: 'controller', sourceName: controller.name, reportId: report.id, reportRecordedAt: draft.parsed.recordedAt }
         const data = { ...values, ...Object.fromEntries(fields.map(field => [field, controller[field]])) }
-        this.business.write({ id: part?.id || controllerRecordId(current.vehicle!.id, name), version: part?.version, kind: 'part', vehicleId: current.vehicle!.id, data, actor, sourceId: report.id, reason: 'Controller data confirmed during DOVE import' })
+        this.business.write({ id: part?.id || controllerRecordId(current.vehicle!.id, name), version: part?.version, kind: 'part', vehicleId: current.vehicle!.id, data, actor: author, sourceId: report.id, reason: 'Controller data confirmed during DOVE import' })
       }
     })
     this.drafts.delete(id)
@@ -110,6 +157,7 @@ function differences<T extends object>(before: T[], after: T[], keyOf: (item: T)
 export function compareReports(left: BusinessRecord, right: BusinessRecord) {
   if (left.kind !== 'report' || right.kind !== 'report' || left.vehicleId !== right.vehicleId) throw new AppError('REPORT_VIN_MISMATCH', 409)
   const before = (left.data as unknown as ReportData).parsed, after = (right.data as unknown as ReportData).parsed
-  if (before.vin !== after.vin) throw new AppError('REPORT_VIN_MISMATCH', 409)
+  const leftVin = reportAssociationVin(left), rightVin = reportAssociationVin(right)
+  if (!leftVin || leftVin !== rightVin) throw new AppError('REPORT_VIN_MISMATCH', 409)
   return { left, right, controllers: differences(before.controllers, after.controllers, item => `${keyControllerName(item.name) || item.name}|${item.network}`, ['name']), faults: differences(before.faults, after.faults, item => `${item.controller}|${item.code}`) }
 }

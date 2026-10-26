@@ -52,7 +52,7 @@ async function fixture() {
   } catch (error) { await close(); throw error }
 }
 async function createVehicle(request: Awaited<ReturnType<typeof fixture>>['request'], reportVin = vin) {
-  const response = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: reportVin, status: 'available', project: 'Original project' }, reason: 'Register batch test vehicle' })
+  const response = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: reportVin, status: 'available', complianceLevel: 'Eu7', project: 'Original project' }, reason: 'Register batch test vehicle' })
   assert.equal(response.status, 201)
   return response.data as BusinessRecord
 }
@@ -61,7 +61,7 @@ test('DOVE batch preview isolates file errors; retention stores exact bytes and 
   const client = await fixture(), { request } = client
   try {
     const car = await createVehicle(request)
-    const part = (await request('/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'EVCU', category: 'controller', software: '1.0' }, reason: 'Install original controller' })).data as BusinessRecord
+    const part = (await request('/business/records', 'POST', { kind: 'part', vehicleId: car.id, data: { name: 'EVCU', category: 'controller', controllerType: 'Open ECU', software: '1.0' }, reason: 'Install original controller' })).data as BusinessRecord
     const firstBytes = await workbook(), lastBytes = await workbook(vin, '3.0')
     await client.synchronization.settle()
     const beforeRecords = client.business.list(), beforeHistory = client.business.history()
