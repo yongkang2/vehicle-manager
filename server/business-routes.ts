@@ -191,7 +191,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const car = business.get(String(req.params.id))
     if (car.kind !== 'vehicle' || car.archived) throw new AppError('PARENT_ARCHIVED', 409)
     const name = filename(req.file), extension = path.extname(name).toLowerCase(), bytes = req.file.buffer
-    const valid = extension === '.xlsx' ? bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])) : extension === '.xls' ? bytes.subarray(0, 8).equals(Buffer.from([208, 207, 17, 224, 161, 177, 26, 225])) : extension === '.pdf' ? bytes.subarray(0, 5).toString() === '%PDF-' : extension === '.png' ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : ['.jpg', '.jpeg'].includes(extension) && bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
+    const valid = extension === '.xlsx' ? bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])) : extension === '.xls' ? bytes.subarray(0, 8).equals(Buffer.from([208, 207, 17, 224, 161, 177, 26, 225])) : extension === '.pdf' ? bytes.subarray(0, 5).toString() === '%PDF-' : extension === '.png' ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : ['.jpg', '.jpeg', '.jfif'].includes(extension) && bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
     if (!valid) throw new AppError('FILE_TYPE_NOT_ALLOWED', 422)
     const key = await business.blob(bytes)
     res.status(201).json(business.write({ kind: 'attachment', vehicleId: car.id, data: { name, checksum: key, size: bytes.length, savedAt: new Date().toISOString() }, actor: req.businessContext!.actor, reason: 'Attachment uploaded', internal: true }))
