@@ -1,5 +1,16 @@
 import type { Language } from './i18n'
 const labels: Record<string, [string, string]> = {
+  attachmentUploadQueue: ['Attachment upload queue', '附件上传队列'], attachmentChooseFiles: ['Select files', '选择文件'],
+  attachmentBatchLimits: ['Up to 8 files per batch · Maximum 10 MB per file · XLSX, XLS, PDF, PNG, JPG, JPEG or JFIF', '每批最多 8 份文件 · 单份最大 10 MB · 支持 XLSX、XLS、PDF、PNG、JPG、JPEG、JFIF'],
+  attachmentSelectionLimit: ['Only the first files that fit were added. The queue holds up to 8 files; remove rows or clear the list before adding more.', '仅添加可容纳的前几份文件。队列最多 8 份，请移除条目或清空列表后再添加。'],
+  attachmentRetryFailed: ['Retry failed', '重试失败文件'], attachmentRefreshList: ['Refresh attachment list', '刷新附件列表'],
+  attachmentCompleted: ['Completed', '已处理'], attachmentUploadedCount: ['Uploaded', '已上传'], attachmentRemoveFromQueue: ['Remove from queue', '从队列移除'],
+  attachmentStatus_pending: ['Pending', '待上传'], attachmentStatus_invalid: ['Invalid file', '文件不符合要求'], attachmentStatus_uploading: ['Uploading', '正在上传'],
+  attachmentStatus_uploaded: ['Uploaded', '已上传'], attachmentStatus_failed: ['Failed', '上传失败'], attachmentStatus_unknown: ['Result unknown', '上传结果未知'],
+  attachmentUnknownNotice: ['An upload response was not confirmed. The file may already be saved. It will not be retried automatically.', '未能确认上传响应，文件可能已保存，系统不会自动重试。'],
+  attachmentInspectBeforeRetry: ['Refresh and inspect the saved attachment list before removing unknown rows or selecting those files again, to avoid duplicate attachments.', '请先刷新并核对已保存的附件列表，再移除结果未知的条目或重新选择这些文件，以免产生重复附件。'],
+  attachmentInspectionDone: ['The attachment list has been refreshed. Check it before clearing an unknown row and selecting the file again. Saved files remain saved.', '附件列表已刷新，请核对后再清除结果未知的条目并重新选择文件。已保存的文件仍然保留。'],
+  attachmentRefreshFailed: ['The attachment list could not be refreshed. Upload results are retained; try refreshing again.', '无法刷新附件列表。上传结果已保留，请重试刷新。'],
   resizeColumn: ['Resize column', '调整列宽'],
   vehicleColumnResizeHint: ['Drag header edges to resize. Double-click an edge to reset.', '拖动表头边缘调整列宽，双击边缘可恢复默认宽度。'],
   vehicleTableColumns: ['Columns', '列设置'], vehicleTableColumnsTitle: ['Customize vehicle columns', '自定义车辆列'], vehicleTableColumnsClose: ['Done', '完成'],
