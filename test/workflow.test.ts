@@ -43,7 +43,7 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     assert.equal((await request(member, '/business/records')).status, 403)
     const team = (await request(admin, '/team')).data
     assert.equal((await request(admin, `/team/requests/${team.requests[0].id}/approve`, 'POST', { role: 'member', memberId: null, reason: 'Verified' })).status, 200)
-    let response = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', project: 'eP64' }, reason: 'Register without a nickname' })
+    let response = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', complianceLevel: 'Eu7', project: 'eP64' }, reason: 'Register without a nickname' })
     assert.equal(response.status, 201); const car = response.data as BusinessRecord
     assert.equal(car.data.name, '')
     const firstSync = await request(admin, '/business/sync', 'POST')

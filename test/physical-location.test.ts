@@ -75,12 +75,12 @@ test('record APIs create, update, clear and export vehicle location with existin
   try {
     assert.equal((await request('/register', 'POST', { username: 'location-user', displayName: 'Location tester', password: 'location-test-password' })).status, 201)
     assert.equal((await request('/setup/configure', 'POST', { path: shared, mode: 'create', teamName: 'Location test team', confirmed: true })).status, 200)
-    const payload = { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', physicalLocation: '  Workshop A  ' }, reason: 'Register location' }
+    const payload = { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', complianceLevel: 'Eu7', physicalLocation: '  Workshop A  ' }, reason: 'Register location' }
     assert.equal((await request('/business/records', 'POST', payload, false)).status, 401)
     const created = await request('/business/records', 'POST', payload)
     assert.equal(created.status, 201); const car = created.data as BusinessRecord
     assert.equal(car.data.physicalLocation, 'Workshop A')
-    const blank = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000002', status: 'available' }, reason: 'Location not yet known' })
+    const blank = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000002', status: 'available', complianceLevel: 'Eu7' }, reason: 'Location not yet known' })
     assert.equal(blank.status, 201); assert.equal(blank.data.data.physicalLocation, '')
     assert.equal((await request('/business/records/' + car.id, 'PUT', { data: { ...car.data, physicalLocation: 'Parking B' }, version: 0, reason: 'Stale edit' })).status, 409)
     assert.equal((await request('/business/records/' + car.id, 'PUT', { data: { ...car.data, physicalLocation: 'Parking B' }, version: car.version, reason: '' })).status, 400)

@@ -59,7 +59,7 @@ async function fixture() {
     const status = (await request('/status', { session })).data; assert.equal(status.member.role, 'member'); return status.member as { id: string; name: string }
   }
   async function vehicle(vin = vinA) {
-    const result = await request('/business/records', { method: 'POST', body: { kind: 'vehicle', data: { vin, status: 'available', name: 'Fictional manual vehicle' }, reason: 'Register fictional manual vehicle' } })
+    const result = await request('/business/records', { method: 'POST', body: { kind: 'vehicle', data: { vin, status: 'available', complianceLevel: 'Eu7', name: 'Fictional manual vehicle' }, reason: 'Register fictional manual vehicle' } })
     assert.equal(result.status, 201, JSON.stringify(result.data)); return result.data as BusinessRecord
   }
   async function part(vehicleId: string) {

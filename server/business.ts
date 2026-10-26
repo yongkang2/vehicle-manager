@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
-import { batteryLifeStatuses, controllerTypes, entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
+import { batteryLifeStatuses, complianceLevels, controllerTypes, entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
 import { parsePhotoAttachmentId, PHOTO_MAX_BYTES, PHOTO_MAX_DIMENSION, PHOTO_MAX_PIXELS } from '../shared/vehicle-photo.js'
 
@@ -40,6 +40,7 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
     data.vin = normalizeVin(String(data.vin))
     if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(String(data.vin))) throw new AppError('INVALID_VIN')
     if (!['available', 'testing', 'maintenance', 'inactive'].includes(String(data.status))) throw new AppError('INVALID_INPUT')
+    if (data.complianceLevel && !complianceLevels.some(value => value === data.complianceLevel)) throw new AppError('INVALID_INPUT')
   }
   if (kind === 'part' && !['motor', 'battery', 'controller'].includes(String(data.category))) throw new AppError('INVALID_INPUT')
   if (kind === 'part') {
@@ -64,6 +65,15 @@ export function validateManualPartFields(kind: RecordKind, input: unknown, curre
     if (partFields.every(field => field === 'removedAt' || before[field] === data[field])) return
   }
   throw new AppError('BATTERY_LIFE_STATUS_REQUIRED')
+}
+
+export function validateManualRecordFields(kind: RecordKind, input: unknown, current?: BusinessRecord): void {
+  if (kind !== 'vehicle') return validateManualPartFields(kind, input, current)
+  // Ordinary vehicle edits ignore this server-managed reference, just as write()
+  // does. Classification validation must not give callers a new photo-write path.
+  const fields = input && typeof input === 'object' && !Array.isArray(input) ? Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'photoAttachmentId')) : input
+  const data = normalizeFields(kind, fields)
+  if (!data.complianceLevel) throw new AppError('COMPLIANCE_LEVEL_REQUIRED')
 }
 export type RecordRow = { id: string; kind: RecordKind; vehicle_id: string | null; data: string; archived: number; version: number; updated: string }
 export function fromRow(row: RecordRow): BusinessRecord { return { id: row.id, kind: row.kind, vehicleId: row.vehicle_id, data: JSON.parse(row.data), archived: Boolean(row.archived), version: row.version, updated: row.updated } }

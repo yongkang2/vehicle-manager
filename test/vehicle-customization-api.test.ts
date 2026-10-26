@@ -52,7 +52,7 @@ async function fixture() {
     return account
   }
   async function vehicle(session = 'owner', vin = 'TEST0000000000001') {
-    const result = await request('/business/records', { method: 'POST', session, body: { kind: 'vehicle', data: { vin, status: 'available' }, reason: 'Register fictional vehicle' } })
+    const result = await request('/business/records', { method: 'POST', session, body: { kind: 'vehicle', data: { vin, status: 'available', complianceLevel: 'Eu7' }, reason: 'Register fictional vehicle' } })
     assert.equal(result.status, 201, JSON.stringify(result.data)); return result.data as BusinessRecord
   }
   async function reopen() {

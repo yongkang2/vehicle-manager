@@ -12,7 +12,7 @@ import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncSt
 
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 // Legacy records omit these values; materializing a blank is not a change.
-const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId'] : kind === 'part' ? ['controllerType', 'lifeStatus'] : []
+const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus'] : []
 const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => blankEquivalentFields(kind).includes(field)
   ? equivalent(left === undefined ? '' : left, right === undefined ? '' : right)
   : equivalent(left, right)

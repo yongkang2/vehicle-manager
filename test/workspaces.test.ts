@@ -61,7 +61,7 @@ test('workspace switching isolates offline records, originals, sessions and stal
     assert.equal((await request('/register', account)).status, 201)
     const first = await team('first-team'), original = client.workspaces.get(first.id)
     await fs.rename(first.shared, `${first.shared}-offline`)
-    const car = await request('/business/records', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', project: 'First' }, reason: 'Keep offline data' })
+    const car = await request('/business/records', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', complianceLevel: 'Eu7', project: 'First' }, reason: 'Keep offline data' })
     assert.equal(car.status, 201)
     await client.synchronization.settle()
     const blob = await original.business.blob(Buffer.from('first-team original'))
@@ -126,7 +126,7 @@ test('legacy upgrade backs up before schema changes, retries safely and preserve
     await request('/register', account)
     const first = await team('legacy-team'), workspace = client.workspaces.get(first.id)
     await fs.rename(first.shared, `${first.shared}-offline`)
-    const car = await request('/business/records', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available' }, reason: 'Legacy offline record' })
+    const car = await request('/business/records', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', complianceLevel: 'Eu7' }, reason: 'Legacy offline record' })
     await client.synchronization.settle()
     const deviceId = client.store.deviceId
     const blob = await workspace.business.blob(Buffer.from('legacy original'))

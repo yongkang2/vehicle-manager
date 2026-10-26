@@ -15,6 +15,7 @@ const labels: Record<string, [string, string]> = {
   id: ['Record ID', '记录标识'], vehicleId: ['Vehicle ID', '车辆标识'], vehicleVin: ['Vehicle VIN', '车辆 VIN'], archived: ['Archived', '已归档'], version: ['Version', '版本'], updated: ['Last updated', '最近更新'],
   name: ['Name', '名称'], project: ['Project code', '项目代号'], model: ['Model', '车型'], vin: ['VIN', 'VIN'], color: ['Color', '颜色'], plate: ['License plate', '车牌'], plateExpiry: ['Plate valid until', '车牌有效期'],
   status: ['Status', '状态'], physicalLocation: ['Physical location', '实际位置'], owner: ['Owner', '负责人'], thermal: ['Thermal System Type', '热管理系统类型'], notes: ['Notes', '其他说明'],
+  complianceLevel: ['Compliance Level', '排放合规等级'],
   description: ['Description', '说明'], category: ['Category', '部件类别'], position: ['Position / identifier', '位置 / 标识'], supplier: ['Supplier', '供应商'], serial: ['Serial number', '序列号'], type: ['Type', '类型'], hardware: ['Hardware version', '硬件版本'], software: ['Software identifier / version', '软件标识 / 版本'],
   controllerType: ['Controller Type', '控制器类型'], lifeStatus: ['Life Status', '寿命状态'],
   functionalPart: ['Functional part number', '功能零件号'], productPart: ['Product part number', '产品零件号'], calibrationPart: ['Software / calibration part', '软件 / 标定零件号'], calibrationVersion: ['Calibration version', '标定版本'], network: ['Diagnostic network', '诊断网络'],

@@ -40,7 +40,7 @@ async function fixture() {
   }
   const select = (id: string, session = 'owner') => request('/workspaces/select', { method: 'POST', session, body: { teamId: id, retainPending: true } })
   async function vehicle(session = 'owner', data: Fields = {}) {
-    const result = await request('/business/records', { method: 'POST', session, body: { kind: 'vehicle', data: { vin, status: 'available', project: 'Project A', model: 'Model A', owner: 'Ada', physicalLocation: 'Workshop A', thermal: 'Indirect Heat Pump', ...data }, reason: 'Register CSV test vehicle' } })
+    const result = await request('/business/records', { method: 'POST', session, body: { kind: 'vehicle', data: { vin, status: 'available', complianceLevel: 'Eu7', project: 'Project A', model: 'Model A', owner: 'Ada', physicalLocation: 'Workshop A', thermal: 'Indirect Heat Pump', ...data }, reason: 'Register CSV test vehicle' } })
     assert.equal(result.status, 201, JSON.stringify(result.data)); return result.data as BusinessRecord
   }
   async function closeServer() { if (!serverClosed) { serverClosed = true; await new Promise<void>(resolve => server.close(() => resolve())) } }

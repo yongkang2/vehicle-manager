@@ -52,7 +52,7 @@ async function fixture() {
   } catch (error) { await close(); throw error }
 }
 async function createVehicle(request: Awaited<ReturnType<typeof fixture>>['request'], reportVin = vin) {
-  const response = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: reportVin, status: 'available', project: 'Original project' }, reason: 'Register batch test vehicle' })
+  const response = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: reportVin, status: 'available', complianceLevel: 'Eu7', project: 'Original project' }, reason: 'Register batch test vehicle' })
   assert.equal(response.status, 201)
   return response.data as BusinessRecord
 }

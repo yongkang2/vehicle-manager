@@ -39,7 +39,7 @@ async function fixture() {
   }
   const select = (id: string, session = 'owner', retainPending = false) => request('/workspaces/select', { method: 'POST', session, body: { teamId: id, retainPending } })
   const vehicle = async (session = 'owner') => {
-    const response = await request('/business/records', { method: 'POST', session, body: { kind: 'vehicle', data: { vin, status: 'available', physicalLocation: `Location ${session}` }, reason: 'Register isolated vehicle' } })
+    const response = await request('/business/records', { method: 'POST', session, body: { kind: 'vehicle', data: { vin, status: 'available', complianceLevel: 'Eu7', physicalLocation: `Location ${session}` }, reason: 'Register isolated vehicle' } })
     assert.equal(response.status, 201, JSON.stringify(response.data)); return response.data as BusinessRecord
   }
   let serverClosed = false

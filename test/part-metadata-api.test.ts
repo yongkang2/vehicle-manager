@@ -35,7 +35,7 @@ async function fixture() {
   const approved = (await request('/status', 'GET', undefined, 'member')).data.member, workspace = client.workspaces.get(configured.data.teamId)
   const actor: Actor = { id: approved.id, name: approved.name, role: 'member', deviceId: workspace.store.deviceId }
   client.store.db.exec('UPDATE sessions SET sync_enabled=0')
-  const carResult = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available' }, reason: 'Register synthetic vehicle' })
+  const carResult = await request('/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available', complianceLevel: 'Eu7' }, reason: 'Register synthetic vehicle' })
   assert.equal(carResult.status, 201)
   const car = carResult.data as BusinessRecord
   const counts = () => [workspace.business.list().length, workspace.business.history().length, workspace.store.db.prepare('SELECT COUNT(*) AS n FROM outbox').get()!.n]

@@ -103,7 +103,7 @@ test('vehicle APIs save each thermal type, omit cooling architecture and export 
     assert.equal((await request('/register', 'POST', { username: 'thermal-user', displayName: 'Thermal tester', password: 'thermal-test-password' })).status, 201)
     assert.equal((await request('/setup/configure', 'POST', { path: shared, mode: 'create', teamName: 'Thermal test team', confirmed: true })).status, 200)
     for (const [index, thermal] of thermalSystemTypes.entries()) {
-      const created = await request('/business/records', 'POST', { kind: 'vehicle', data: { ...base, vin: `TEST000000000000${index + 1}`, thermal, coolingArchitecture: 'INDIRECT HEAT PUMP' }, reason: 'Register thermal type' })
+      const created = await request('/business/records', 'POST', { kind: 'vehicle', data: { ...base, vin: `TEST000000000000${index + 1}`, complianceLevel: 'Eu7', thermal, coolingArchitecture: 'INDIRECT HEAT PUMP' }, reason: 'Register thermal type' })
       assert.equal(created.status, 201)
       const car = created.data as BusinessRecord
       assert.equal(car.data.thermal, thermal)

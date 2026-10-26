@@ -30,6 +30,7 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  COMPLIANCE_LEVEL_REQUIRED: ['Choose a compliance level before saving.', '保存前请选择合规等级。'],
   CONTROLLER_TYPE_REQUIRED: ['Choose a controller type before saving.', '保存前请选择控制器类型。'],
   BATTERY_LIFE_STATUS_REQUIRED: ['Choose an HV battery life status before saving.', '保存前请选择高压电池寿命状态。'],
   EXPORT_SELECTION_CHANGED: ['Selected vehicles are no longer available or no longer match these filters. Refresh and reselect matches before exporting.', '所选车辆已不可用或不再符合筛选条件。请刷新并重选匹配车辆后再导出。'],
