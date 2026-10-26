@@ -30,6 +30,11 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  EXPORT_SELECTION_CHANGED: ['Selected vehicles are no longer available or no longer match these filters. Refresh and reselect matches before exporting.', '所选车辆已不可用或不再符合筛选条件。请刷新并重选匹配车辆后再导出。'],
+  EXPORT_TEMPLATE_NOT_FOUND: ['This export template is no longer available. Reopen export to refresh your templates.', '此导出模板已不可用。请重新打开导出窗口以刷新模板。'],
+  EXPORT_TEMPLATE_EXISTS: ['An export template with this name already exists. Choose a different name.', '已有同名导出模板，请使用其他名称。'],
+  EXPORT_TEMPLATE_LIMIT: ['You can save up to 100 templates per account and workspace. Delete an unused template first.', '每个账号在每个工作空间中最多保存 100 个模板，请先删除不再使用的模板。'],
+  EXPORT_TOO_LARGE: ['This export exceeds the 200 MB safe limit. Select fewer vehicles, categories or columns.', '本次导出超过 200 MB 安全限制，请减少车辆、类别或列。'],
   VEHICLE_NOT_ARCHIVED: ['Archive the vehicle before permanently deleting it.', '请先归档车辆，再执行永久删除。'],
   DELETE_CONFIRMATION_REQUIRED: ['Type the exact VIN and DELETE, and enter a deletion reason.', '请输入完全一致的 VIN、DELETE 及删除原因。'],
   DELETE_PREVIEW_CHANGED: ['The vehicle or related records changed. Refresh the deletion preview and review it again.', '车辆或关联记录已变化，请刷新删除预览并重新核对。'],

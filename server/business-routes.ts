@@ -8,16 +8,19 @@ import { BusinessSync } from './sync.js'
 import { DoveService, compareReports } from './dove.js'
 import { createBackup, restoreBackup } from './backup.js'
 import { LocalStore } from './store.js'
+import { buildCsvExport } from './csv-export.js'
+import { ExportTemplates } from './export-templates.js'
+import { MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration } from '../shared/csv-export.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
 import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
 import type { Actor, BusinessRecord, Controller, DoveBatchPreviewResult, DoveBatchSaveResult, Fields, RecordKind, ReportData, VehicleDeleteRequest } from '../shared/business.js'
 
 type Config = { sharedPath: string; teamId: string }
 type Context = { actor: Actor; identity: Identity; configuration: Config; online: boolean; syncEnabled: boolean }
-type BusinessRequest = Request & { localUser?: LocalUser; businessContext?: Context; syncEnabled?: boolean }
+type BusinessRequest = Request & { localUser?: LocalUser; sessionToken?: string; businessContext?: Context; syncEnabled?: boolean }
 const recordKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment']
 export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store) {
-  const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business)
+  const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business), exportTemplates = new ExportTemplates(store)
   async function access(req: BusinessRequest, admin = false): Promise<Context> {
     const configuration = store.get<Config>('configuration')
     if (!configuration) throw new AppError('NOT_CONFIGURED', 409)
@@ -35,7 +38,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   }
   const sync = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity) : synchronization.status()
   const router = express.Router()
-  function writeRoute(method: 'post' | 'put' | 'get', route: string, ...handlers: RequestHandler[]) {
+  function writeRoute(method: 'post' | 'put' | 'get' | 'delete', route: string, ...handlers: RequestHandler[]) {
     const action = handlers.pop()!
     router[method](route, ...handlers, (req, res, next) => {
       void store.runWrite(() => action(req, res, next)).catch(next)
@@ -46,15 +49,17 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       // An aborted connection must not hide access/cache work from switch/close.
       await store.runWrite(async () => {
         req.businessContext = await access(req)
+        const localPath = req.path.toLowerCase()
+        const localExport = localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/')
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const canonicalMaintenance = deletePreview || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview) {
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport) {
           const state = await sync(req.businessContext)
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
         }
-        if (['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => { if (res.statusCode < 400 && synchronization.status().pending > 0) void sync(req.businessContext!) })
+        if (!localExport && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => { if (res.statusCode < 400 && synchronization.status().pending > 0) void sync(req.businessContext!) })
       })
       // Maintenance handlers must start outside the normal-write context.
       next()
@@ -199,6 +204,36 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   router.get('/export', (req: BusinessRequest, res) => {
     store.event(req.businessContext!.actor.id, 'business.exported', {})
     res.attachment('vehicle-data.json').json({ exportedAt: new Date().toISOString(), records: business.list() })
+  })
+  writeRoute('get', '/export/records', (_req, res) => res.json(business.list()))
+  writeRoute('post', '/export/csv', async (req: BusinessRequest, res) => {
+    const input = req.body
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['vehicleIds', 'configuration'].includes(key))) throw new AppError('INVALID_INPUT')
+    const configuration = parseExportConfiguration(input.configuration)
+    if (!configuration || !Array.isArray(input.vehicleIds) || !input.vehicleIds.length || input.vehicleIds.length > MAX_EXPORT_VEHICLES || input.vehicleIds.some((id: unknown) => typeof id !== 'string' || !id || id.length > MAX_EXPORT_ID_LENGTH) || new Set(input.vehicleIds).size !== input.vehicleIds.length) throw new AppError('INVALID_INPUT')
+    const vehicleIds = input.vehicleIds as string[]
+    const currentSession = () => accounts.db.prepare('SELECT workspace_id,workspace_epoch FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now()) as { workspace_id: string; workspace_epoch: number } | undefined
+    const sessionBefore = currentSession()
+    if (!sessionBefore) throw new AppError('LOGIN_REQUIRED', 401)
+    // Capture once before asynchronous ZIP creation; never resolve selected VINs.
+    const { bytes, counts } = await buildCsvExport(business.list(), { vehicleIds, configuration })
+    if (res.destroyed) return
+    const sessionAfter = currentSession()
+    if (!sessionAfter) throw new AppError('LOGIN_REQUIRED', 401)
+    if (sessionAfter.workspace_id !== sessionBefore.workspace_id || sessionAfter.workspace_epoch !== sessionBefore.workspace_epoch) throw new AppError('WORKSPACE_CHANGED', 409)
+    // Data remains from the captured snapshot, but a deletion, archive or filter-changing
+    // write during ZIP creation must require a fresh selection rather than return stale matches.
+    const currentVehicles = new Map(business.list('vehicle').map(record => [record.id, record]))
+    if (vehicleIds.some(id => { const current = currentVehicles.get(id); return !current || !matchesExportVehicle(current, configuration) })) throw new AppError('EXPORT_SELECTION_CHANGED', 409)
+    store.event(req.businessContext!.actor.id, 'business.exported', { format: 'csv', vehicles: vehicleIds.length, columns: configuration.columns, counts, language: configuration.language })
+    res.attachment(`vehicle-data-${new Date().toISOString().slice(0, 10)}.zip`).type('application/zip').send(bytes)
+  })
+  writeRoute('get', '/export-templates', (req: BusinessRequest, res) => res.json(exportTemplates.list(req.localUser!.id)))
+  writeRoute('post', '/export-templates', (req: BusinessRequest, res) => res.status(201).json(exportTemplates.create(req.localUser!.id, req.body)))
+  writeRoute('put', '/export-templates/:id', (req: BusinessRequest, res) => res.json(exportTemplates.update(req.localUser!.id, String(req.params.id), req.body)))
+  writeRoute('delete', '/export-templates/:id', (req: BusinessRequest, res) => {
+    exportTemplates.remove(req.localUser!.id, String(req.params.id))
+    res.json({ ok: true })
   })
   writeRoute('get', '/backup', async (req: BusinessRequest, res) => {
     const context = await access(req, true)

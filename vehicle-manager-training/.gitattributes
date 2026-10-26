@@ -1,0 +1,6 @@
+# Preserve delivered bytes so SHA256SUMS.txt is valid on Windows and other hosts.
+/delivery/** -text
+/production/audio/*.wav binary
+/production/fixtures/*.xlsx binary
+*.py text eol=lf
+*.mjs text eol=lf
