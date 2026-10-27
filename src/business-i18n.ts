@@ -19,7 +19,7 @@ const labels: Record<string, [string, string]> = {
   vehicleTableMoveUp: ['Move column left', '列向左移'], vehicleTableMoveDown: ['Move column right', '列向右移'], vehicleTableResetColumns: ['Reset layout', '恢复默认布局'],
   vehicleTableSettingsLoading: ['Loading layout…', '正在加载布局…'], vehicleTableSettingsSaving: ['Saving layout…', '正在保存布局…'], vehicleTableSettingsSaved: ['Layout saved', '布局已保存'],
   vehicleTableSettingsError: ['Layout could not be saved or loaded. Retry to keep your personal settings.', '无法保存或加载布局，请重试以保留个人设置。'], vehicleTableSettingsRetry: ['Retry', '重试'],
-  hvBatteryPartNumber: ['HV Battery Part Number', '高压电池零件号'], hvBatterySerialNumber: ['HV Battery Serial Number', '高压电池序列号'],
+  hvBatteryPartNumber: ['HV Battery Part Number', '高压电池零件号'], hvBatterySerialNumber: ['HV Battery Serial Number', '高压电池序列号'], vcuType: ['VCU Type', 'VCU 类型'],
   photoAttachmentId: ['Vehicle cover photo', '车辆封面照片'], vehiclePhoto: ['Vehicle photo', '车辆照片'], vehiclePhotoEmpty: ['No cover photo', '暂无封面照片'],
   vehiclePhotoUnavailable: ['The cover photo is unavailable. Other attachments have not been substituted.', '封面照片不可用，不会自动替换为其他附件。'],
   vehiclePhotoLoading: ['Loading photo…', '正在加载照片…'], vehiclePhotoRetry: ['Retry photo', '重新加载照片'], vehiclePhotoAdd: ['Upload photo', '上传照片'], vehiclePhotoReplace: ['Replace photo', '更换照片'],

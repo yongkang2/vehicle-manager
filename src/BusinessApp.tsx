@@ -266,8 +266,9 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     { title: text('savedAt'), width: 170, render: (_, record) => date(String(record.data.savedAt || record.updated)) }, { title: text('actions'), width: 110, render: (_, record) => <Space><Tooltip title={text('download')}><Button type="text" icon={<Download size={16} />} aria-label={text('download')} onClick={() => downloadFile(record)} /></Tooltip>{recordActions(record)}</Space> },
   ]} />
   const matchedReports = (vehicle: BusinessRecord) => reports.filter(report => !report.archived && reportMatchesVehicle(report, vehicle) && controllerSources(report).length > 0)
+  const controllerFor = (vehicleId: string, name: KeyControllerName) => records.find(record => record.kind === 'part' && record.vehicleId === vehicleId && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null
   const controllerTable = (vehicle: BusinessRecord, editable: boolean) => {
-    const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: records.find(record => record.kind === 'part' && record.vehicleId === vehicle.id && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null }))
+    const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: controllerFor(vehicle.id, name) }))
     const available = matchedReports(vehicle)
     return <div className="vehicle-controller-section"><div className="section-toolbar"><h3>{text(editable ? 'parts' : 'controllers')}</h3>{editable && <Tooltip title={!available.length ? text('noMatchedReports') : text('updateConfiguration')}><Button icon={<ClipboardCheck size={15} />} disabled={vehicle.archived || !available.length} onClick={() => openConfiguration(available[0])}>{text('updateConfiguration')}</Button></Tooltip>}</div>
       <Table<ControllerSlot> rowKey="name" className="controller-summary-table" dataSource={slots} size="small" pagination={false} scroll={{ x: 875 }} columns={[
@@ -339,6 +340,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         const value = activeHvBatteries(records, record.id).map(battery => display(battery.data[field])).join(' / ') || '—'
         return <Tooltip title={value}><span>{value}</span></Tooltip>
       } })),
+      { key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
+        const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
+        return <Tooltip title={value}><span>{value}</span></Tooltip>
+      } },
     ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
