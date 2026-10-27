@@ -200,7 +200,8 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     try {
       if (typeof req.body?.enabled !== 'boolean') throw new AppError('INVALID_INPUT')
       const { teams, cache } = current(req), config = configuration(req)
-      const team = await teams.changeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body.enabled, text(req.body?.reason))
+      const profile = req.body?.name !== undefined || req.body?.nickname !== undefined ? { name: text(req.body?.name, 1, 60), nickname: text(req.body?.nickname ?? '', 0, 60) } : undefined
+      const team = await teams.changeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body.enabled, text(req.body?.reason), profile)
       cache(team); res.json(team)
     } catch (error) { next(error) }
   })
