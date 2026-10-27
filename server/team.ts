@@ -229,7 +229,7 @@ export class TeamDirectory {
       const team = await this.read(directory, teamId)
       const admin = requireAdmin(team, actor)
       const member = team.members.find(item => item.id === memberId)
-      if (!member) throw new AppError('MEMBER_UNAVAILABLE', 404)
+      if (!member || member.deletedAt) throw new AppError('MEMBER_UNAVAILABLE', 404)
       if (profile) {
         if (typeof profile.name !== 'string' || !profile.name.trim() || profile.name.length > 60 || typeof profile.nickname !== 'string' || profile.nickname.length > 60) throw new AppError('INVALID_INPUT')
         member.name = profile.name.trim()
@@ -238,6 +238,23 @@ export class TeamDirectory {
       member.role = role; member.enabled = enabled
       if (!effectiveAdmins(team)) throw new AppError('LAST_ADMIN', 409)
       event(team, admin.id, 'member.updated', memberId, reason)
+      await atomicDocument(directory, team)
+      return team
+    })
+  }
+
+  async removeMember(directory: string, teamId: string, actor: Identity, memberId: string, reason: string): Promise<TeamDocument> {
+    return locked(directory, async () => {
+      const team = await this.read(directory, teamId)
+      const admin = requireAdmin(team, actor)
+      const member = team.members.find(item => item.id === memberId)
+      if (!member) throw new AppError('MEMBER_UNAVAILABLE', 404)
+      if (member.role === 'admin') throw new AppError('MEMBER_IS_ADMIN', 409)
+      if (member.deletedAt) return team
+      member.enabled = false
+      member.deletedAt = created()
+      for (const binding of team.bindings) if (binding.memberId === memberId) binding.enabled = false
+      event(team, admin.id, 'member.deleted', memberId, reason)
       await atomicDocument(directory, team)
       return team
     })
