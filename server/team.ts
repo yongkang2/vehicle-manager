@@ -39,7 +39,7 @@ async function atomicDocument(directory: string, team: TeamDocument): Promise<vo
     const handle = await fs.open(temporary, 'wx')
     try { await handle.writeFile(JSON.stringify(team, null, 2)); await handle.sync() } finally { await handle.close() }
     await fs.rename(temporary, path.join(directory, filename))
-  } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
+  } finally { await fs.rm(temporary, { force: true }).catch(() => { }) }
 }
 
 export function bindingFor(team: TeamDocument, identity: Identity): { member?: Member; binding?: Binding } {
@@ -78,7 +78,7 @@ async function locked<T>(directory: string, work: () => Promise<T>): Promise<T> 
   finally {
     if (acquired) {
       const owner = await fs.readFile(path.join(lock, 'owner.json'), 'utf8').then(value => JSON.parse(value) as { token: string }).catch(() => null)
-      if (owner?.token === token) await fs.rm(lock, { recursive: true }).catch(() => {})
+      if (owner?.token === token) await fs.rm(lock, { recursive: true }).catch(() => { })
     }
   }
 }
@@ -133,7 +133,7 @@ export class TeamDirectory {
       if (entries.filter(name => !name.startsWith('.vdm-probe-')).length) throw new AppError('SHARE_NOT_EMPTY', 409)
       return { kind: 'empty', path: directory }
     } catch (error) { return mapFileError(error) }
-    finally { await Promise.all([original, renamed].map(file => fs.rm(file, { force: true }).catch(() => {}))) }
+    finally { await Promise.all([original, renamed].map(file => fs.rm(file, { force: true }).catch(() => { }))) }
   }
 
   async create(directory: string, teamName: string, identity: Identity): Promise<TeamDocument> {
