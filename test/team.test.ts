@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { TeamDirectory } from '../server/team.js'
+import { appVersion } from '../shared/version.js'
 import type { Identity } from '../shared/types.js'
 
 const admin: Identity = { deviceId: 'admin-device', deviceName: 'ADMIN-PC', localUserId: 'admin-account', displayName: 'Administrator' }
@@ -65,5 +66,28 @@ test('two independent initializers cannot both create administrators', async () 
     const results = await Promise.allSettled([service.create(root, 'First', admin), service.create(root, 'Second', member)])
     assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
     assert.equal((await service.read(root)).members.length, 1)
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('upgrade gate requires an administrator and rejects clients below its minimum version', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const shared = path.join(root, 'shared'); await fs.mkdir(shared)
+  const current = new TeamDirectory(null, appVersion), older = new TeamDirectory(null, '1.0.3')
+  try {
+    const team = await current.create(shared, 'Engineering', admin)
+    await assert.rejects(current.enableUpgradeGate(shared, team.id, member, 'Require current version'), { code: 'ADMIN_REQUIRED' })
+    await assert.rejects(current.enableUpgradeGate(shared, team.id, admin, 'Require current version'), { code: 'TWO_ADMINS_REQUIRED' })
+    const secondAdmin = { ...member, displayName: 'Second administrator' }
+    const request = await current.join(shared, team.id, secondAdmin)
+    await current.approve(shared, team.id, admin, request.requests[0].id, 'admin', null, 'Approve second administrator')
+    const gated = await current.enableUpgradeGate(shared, team.id, admin, 'Require current version')
+    assert.equal(gated.protocol, 2)
+    assert.equal(gated.minWritableVersion, appVersion)
+    await assert.rejects(older.read(shared, team.id), { code: 'CLIENT_UPGRADE_REQUIRED' })
+    assert.equal((await current.read(shared, team.id)).protocol, 2)
+    const nextVersion = new TeamDirectory(null, '1.2.0')
+    const advanced = await nextVersion.enableUpgradeGate(shared, team.id, admin, 'Raise minimum version')
+    assert.equal(advanced.minWritableVersion, '1.2.0')
+    await assert.rejects(current.read(shared, team.id), { code: 'CLIENT_UPGRADE_REQUIRED' })
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })

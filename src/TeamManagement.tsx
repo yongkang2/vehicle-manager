@@ -1,11 +1,12 @@
 import { useEffect, useEffectEvent, useState } from 'react'
-import { Button, Checkbox, Input, Modal, Select, Table, Tabs, Tag } from 'antd'
+import { Alert, Button, Checkbox, Input, Modal, Select, Table, Tabs, Tag } from 'antd'
 import { Check, RefreshCw } from 'lucide-react'
 import type { Binding, JoinRequest, Member, Role, TeamDocument, TeamEvent } from '../shared/types'
 import { api } from './api'
 import type { Dictionary, Language } from './i18n'
+import { appVersion } from '../shared/version'
 
-type Decision = { kind: 'approve' | 'reject' | 'member' | 'device'; id: string; title: string; role: Role; enabled: boolean; memberId: string | null; reason: string }
+type Decision = { kind: 'approve' | 'reject' | 'member' | 'device' | 'gate'; id: string; title: string; role: Role; enabled: boolean; memberId: string | null; reason: string }
 export default function TeamManagement({ text, language, onError, onUpdated }: { text: Dictionary; language: Language; onError: (error: unknown) => void; onUpdated: () => Promise<void> }) {
   const [team, setTeam] = useState<TeamDocument | null>(null), [loading, setLoading] = useState(true)
   const [decision, setDecision] = useState<Decision | null>(null), [saving, setSaving] = useState(false)
@@ -21,7 +22,7 @@ export default function TeamManagement({ text, language, onError, onUpdated }: {
     if (!decision || !decision.reason.trim()) return
     setSaving(true)
     try {
-      const endpoint = decision.kind === 'approve' || decision.kind === 'reject' ? `/api/team/requests/${decision.id}/${decision.kind}` : decision.kind === 'member' ? `/api/team/members/${decision.id}` : `/api/team/devices/${decision.id}/revoke`
+      const endpoint = decision.kind === 'gate' ? '/api/team/upgrade-gate' : decision.kind === 'approve' || decision.kind === 'reject' ? `/api/team/requests/${decision.id}/${decision.kind}` : decision.kind === 'member' ? `/api/team/members/${decision.id}` : `/api/team/devices/${decision.id}/revoke`
       setTeam(await api<TeamDocument>(endpoint, { method: 'POST', body: { role: decision.role, enabled: decision.enabled, memberId: decision.memberId, reason: decision.reason } }))
       setDecision(null); await onUpdated()
     } catch (error) { onError(error) } finally { setSaving(false) }
@@ -44,8 +45,8 @@ export default function TeamManagement({ text, language, onError, onUpdated }: {
     { title: text.status, key: 'status', render: (_: unknown, record: Binding) => record.enabled ? text.approved : text.disabled },
     { title: text.actions, key: 'action', render: (_: unknown, record: Binding) => <Button size="small" danger disabled={!record.enabled} onClick={() => setDecision({ kind: 'device', id: record.id, title: `${text.revoke} · ${record.deviceName}`, role: 'member', enabled: false, memberId: null, reason: '' })}>{text.revoke}</Button> },
   ]
-  const operations: Record<string, string> = { 'team.created': text.teamCreated, 'join.requested': text.joinRequested, 'join.cancelled': text.joinCancelled, 'join.approved': text.joinApproved, 'join.rejected': text.joinRejected, 'member.updated': text.memberUpdated, 'device.revoked': text.deviceRevoked }
-  return <><div className="page-heading"><div><span className="eyebrow">TEAM ACCESS</span><h1>{text.team}</h1></div><Button icon={<RefreshCw size={16} />} onClick={() => void load()} loading={loading}>{text.refresh}</Button></div><Tabs items={[
+  const operations: Record<string, string> = { 'team.created': text.teamCreated, 'join.requested': text.joinRequested, 'join.cancelled': text.joinCancelled, 'join.approved': text.joinApproved, 'join.rejected': text.joinRejected, 'member.updated': text.memberUpdated, 'device.revoked': text.deviceRevoked, 'team.upgrade-gate.enabled': text.teamUpgradeGate, 'team.upgrade-gate.advanced': text.teamUpgradeGateAdvanced }
+  return <><div className="page-heading"><div><span className="eyebrow">TEAM ACCESS</span><h1>{text.team}</h1></div><div className="row-actions">{team && (team.protocol === 1 || team.minWritableVersion !== appVersion) && <Button danger onClick={() => setDecision({ kind: 'gate', id: team.id, title: text.upgradeGate, role: 'admin', enabled: true, memberId: null, reason: '' })}>{text.upgradeGate}</Button>}<Button icon={<RefreshCw size={16} />} onClick={() => void load()} loading={loading}>{text.refresh}</Button></div></div><Tabs items={[
     { key: 'requests', label: `${text.requests} (${team?.requests.filter(request => request.status === 'pending').length || 0})`, children: <Table<JoinRequest> rowKey="id" loading={loading} columns={requestColumns} dataSource={team?.requests.filter(request => request.status === 'pending') || []} scroll={{ x: 650 }} locale={{ emptyText: text.noRequests }} pagination={{ pageSize: 8, hideOnSinglePage: true }} /> },
     { key: 'members', label: text.members, children: <Table<Member> rowKey="id" columns={memberColumns} dataSource={team?.members || []} scroll={{ x: 580 }} pagination={{ pageSize: 8, hideOnSinglePage: true }} /> },
     { key: 'devices', label: text.devices, children: <Table<Binding> rowKey="id" columns={deviceColumns} dataSource={team?.bindings || []} scroll={{ x: 650 }} pagination={{ pageSize: 8, hideOnSinglePage: true }} /> },
@@ -55,6 +56,7 @@ export default function TeamManagement({ text, language, onError, onUpdated }: {
       {decision.kind === 'approve' && <label>{text.bindIdentity}<Select value={decision.memberId || 'new'} onChange={value => setDecision({ ...decision, memberId: value === 'new' ? null : value })} options={[{ value: 'new', label: text.newIdentity }, ...(team?.members.filter(member => member.enabled).map(member => ({ value: member.id, label: `${member.name} · ${roleName(member.role)}` })) || [])]} /></label>}
       {(decision.kind === 'approve' || decision.kind === 'member') && <label>{text.role}<Select value={decision.memberId ? team?.members.find(member => member.id === decision.memberId)?.role : decision.role} disabled={Boolean(decision.memberId)} onChange={(value: Role) => setDecision({ ...decision, role: value })} options={[{ value: 'member', label: text.member }, { value: 'admin', label: text.firstAdmin }]} /></label>}
       {decision.kind === 'member' && <Checkbox checked={decision.enabled} onChange={event => setDecision({ ...decision, enabled: event.target.checked })}>{text.enabled}</Checkbox>}
+      {decision.kind === 'gate' && <Alert type="warning" showIcon title={text.upgradeGateWarning} />}
       <label>{text.reason}<Input.TextArea value={decision.reason} maxLength={500} rows={3} onChange={event => setDecision({ ...decision, reason: event.target.value })} /></label>
     </div>}</Modal></>
 }

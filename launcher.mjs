@@ -2,11 +2,14 @@ import { fork, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, openSync, closeSync, existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const application = existsSync(path.join(root, 'app', 'dist-server')) ? path.join(root, 'app') : root
-const dataDir = process.env.VEHICLE_MANAGER_DATA_DIR || path.join(root, 'data')
+const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
+const appVersion = String(packageInfo.version)
+const { resolveDataDirectory } = await import(pathToFileURL(path.join(application, 'dist-server', 'shared', 'data-directory.js')).href)
+const dataDir = await resolveDataDirectory(root)
 const stateFile = path.join(dataDir, 'service.json')
 const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
 const readState = () => fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value)).catch(() => null)
@@ -40,7 +43,16 @@ async function launch() {
     const state = await readState()
     if (state) {
       const current = await probe(state.port)
-      if (current?.instanceId === instanceId && current.pid === state.pid) port = state.port
+      if (current?.instanceId === instanceId && current.pid === state.pid) {
+        if (current.version === appVersion && (!state.version || state.version === appVersion)) port = state.port
+        else {
+          const response = await fetch(`http://127.0.0.1:${state.port}/api/local/shutdown`, { method: 'POST', headers: { 'X-App-Request': 'vehicle-manager', 'X-Control-Token': state.controlToken }, signal: AbortSignal.timeout(5000) })
+          if (!response.ok) throw new Error('A different application version is using this local data and rejected a safe stop. Stop it with its matching Stop.cmd.')
+          const deadline = Date.now() + 60000
+          while ((alive(state.pid) || await readState()) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100))
+          if (alive(state.pid) || await readState()) throw new Error('The previous application version is still shutting down. Retry after it closes.')
+        }
+      }
       else if (alive(state.pid)) throw new Error('An existing process could not be verified. Refusing to open this database twice.')
     }
     if (!port) {
@@ -55,10 +67,10 @@ async function launch() {
         try {
           child = fork(entry, [], { cwd: application, execArgv: [], env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir }, detached: true, windowsHide: true, stdio: ['ignore', log, log, 'ipc'] })
           port = await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => { child.kill(); reject(new Error('Startup timed out. See data/startup.log.')) }, 20000)
-            child.once('message', message => { clearTimeout(timer); if (message.type === 'ready' && message.instanceId === instanceId) resolve(message.port); else reject(new Error('Port busy or startup failed.')) })
-            child.once('error', error => { clearTimeout(timer); reject(error) })
-            child.once('exit', () => { clearTimeout(timer); reject(new Error('Application exited during startup.')) })
+            const notice = setTimeout(() => console.log('The application is still starting. A large local database migration may take several minutes; leave this window open.'), 20000)
+            child.once('message', message => { clearTimeout(notice); if (message.type === 'ready' && message.instanceId === instanceId) resolve(message.port); else reject(new Error('Port busy or startup failed.')) })
+            child.once('error', error => { clearTimeout(notice); reject(error) })
+            child.once('exit', () => { clearTimeout(notice); reject(new Error('Application exited during startup.')) })
           })
           child.disconnect(); child.unref()
         } catch (error) { child?.kill(); if (attempt === 19 || base === 0) throw error } finally { closeSync(log) }

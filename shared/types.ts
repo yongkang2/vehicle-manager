@@ -7,7 +7,8 @@ export type JoinRequest = { id: string; identity: Identity; status: 'pending' | 
 export type TeamEvent = { id: string; actorId: string; action: string; targetId: string; reason: string; created: string }
 export type TeamDocument = {
   application: 'stellantis-vehicle-manager'
-  protocol: 1
+  protocol: 1 | 2
+  minWritableVersion?: string
   id: string
   name: string
   revision: number

@@ -7,10 +7,11 @@ import path from 'node:path'
 import { ZipArchive } from 'archiver'
 import unzipper from 'unzipper'
 import ExcelJS from 'exceljs'
-import { createBackup, restoreBackup } from '../server/backup.js'
+import { createBackup, previewBackup, restoreBackup } from '../server/backup.js'
 import { Business, checksum } from '../server/business.js'
 import { DoveService } from '../server/dove.js'
 import { LocalStore } from '../server/store.js'
+import { appVersion } from '../shared/version.js'
 import type { Actor, BusinessRecord, Operation, QuarantinedOperation, VehicleDeletion } from '../shared/business.js'
 
 const vin = 'TEST0000000000001', teamId = 'deletion-backup-team'
@@ -47,6 +48,41 @@ async function workbook(): Promise<Buffer> {
   return Buffer.from(await book.xlsx.writeBuffer())
 }
 
+
+test('restore preview reports changes, archive candidates and unrecognized fields, then invalidates after edits', async () => {
+  const source = await fixture(), target = await fixture()
+  try {
+    const sharedId = randomUUID()
+    const sourceCar = source.createVehicle(vin, sharedId)
+    source.business.write({ id: sourceCar.id, kind: 'vehicle', data: { ...sourceCar.data, owner: 'From backup', futureField: 'Preserve for review' }, version: sourceCar.version, actor: source.actor, reason: 'Prepare future-format backup', internal: true })
+    const bytes = await createBackup(source.business, teamId)
+    const backup = await unzipper.Open.buffer(bytes)
+    const manifest = JSON.parse((await backup.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
+    assert.equal(manifest.format, 3)
+    assert.equal(manifest.appVersion, appVersion)
+    assert.equal(manifest.schemaVersion, 4)
+    assert.equal(manifest.fieldVersion, 1)
+    assert.equal(manifest.recordCounts.vehicle, 1)
+    target.business.write({ id: sharedId, kind: 'vehicle', data: { vin, status: 'available', owner: 'Current value' }, actor: target.actor, reason: 'Current record' })
+    const extra = target.createVehicle('TEST0000000000002')
+    const extraPart = target.business.write({ kind: 'part', vehicleId: extra.id, data: { name: 'Extra motor', category: 'motor' }, actor: target.actor, reason: 'Extra vehicle part' })
+    target.sent()
+    const preview = await previewBackup(target.business, bytes, teamId)
+    assert.equal(preview.records, 1)
+    assert.equal(preview.additions, 0)
+    assert.equal(preview.changes, 1)
+    assert.deepEqual(preview.archiveCandidates.map(item => [item.id, item.relatedRecords]), [[extra.id, 1]])
+    assert.deepEqual(preview.droppedFields, [{ recordId: sharedId, fields: ['futureField'] }])
+    const current = target.business.get(sharedId)
+    target.business.write({ id: sharedId, kind: 'vehicle', data: { ...current.data, owner: 'Edited after preview' }, version: current.version, actor: target.actor, reason: 'Invalidate preview' })
+    const refreshed = await previewBackup(target.business, bytes, teamId)
+    assert.notEqual(refreshed.fingerprint, preview.fingerprint)
+    target.sent()
+    await restoreBackup(target.business, bytes, teamId, target.actor, 'Archive omitted vehicle graph', [extra.id])
+    assert.equal(target.business.get(extra.id).archived, true)
+    assert.equal(target.business.get(extraPart.id).archived, true)
+  } finally { await source.close(); await target.close() }
+})
 for (const format of [1, 2]) {
   test(`format ${format} restore skips tombstoned vehicle UUIDs and all their children`, async () => {
     const source = await fixture(), target = await fixture()
@@ -80,7 +116,7 @@ test('format 2 retains quarantine originals, markers and history without replayi
     const backup = await createBackup(source.business, teamId), zip = await unzipper.Open.buffer(backup)
     assert.deepEqual(await zip.files.find(file => file.path === `blobs/${key}`)!.buffer(), bytes)
     const manifest = JSON.parse((await zip.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
-    assert.equal(manifest.format, 2); assert.equal(manifest.records.length, 0); assert.equal(manifest.deletions.length, 1); assert.equal(manifest.quarantinedOperations.length, 1)
+    assert.equal(manifest.format, 3); assert.equal(manifest.records.length, 0); assert.equal(manifest.deletions.length, 1); assert.equal(manifest.quarantinedOperations.length, 1)
     const result = await restoreBackup(target.business, backup, teamId, target.actor, 'Restore retained audit data')
     assert.equal(result.changed, 0); assert.equal(target.business.list().length, 0)
     assert.deepEqual(target.store.quarantineRows(), [quarantine]); assert.deepEqual(await target.business.readBlob(key), bytes)

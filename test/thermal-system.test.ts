@@ -24,7 +24,7 @@ test('vehicle fields replace cooling architecture with the bilingual thermal typ
   for (const value of thermalSystemTypes) {
     const data = normalizeFields('vehicle', { ...base, thermal: `  ${value}  `, coolingArchitecture: 'INDIRECT HEAT PUMP' })
     assert.equal(data.thermal, value)
-    assert.equal(Object.hasOwn(data, 'coolingArchitecture'), false)
+    assert.equal(data.coolingArchitecture, 'INDIRECT HEAT PUMP')
     assert.equal(english(value), value)
     assert.notEqual(chinese(value), value)
   }
@@ -69,21 +69,22 @@ test('legacy thermal text survives an unrelated edit and backup restore without 
   try {
     const legacy = source.write({ kind: 'vehicle', data: { ...normalizeFields('vehicle', base), coolingArchitecture: 'WITHOUT HEAT PUMP', thermal: 'Legacy thermal notes' }, actor, reason: 'Legacy vehicle', internal: true })
     assert.equal(source.get(legacy.id).data.coolingArchitecture, 'WITHOUT HEAT PUMP')
-    const edited = source.write({ id: legacy.id, kind: 'vehicle', data: { ...legacy.data, owner: 'New owner' }, version: legacy.version, actor, reason: 'Change owner only' })
+    const edited = source.write({ id: legacy.id, kind: 'vehicle', data: { ...legacy.data, owner: 'New owner', coolingArchitecture: 'Changed by ordinary editor' }, version: legacy.version, actor, reason: 'Change owner only' })
     assert.equal(edited.data.thermal, 'Legacy thermal notes')
-    assert.equal(Object.hasOwn(edited.data, 'coolingArchitecture'), false)
+    assert.equal(edited.data.coolingArchitecture, 'WITHOUT HEAT PUMP')
     assert.equal(source.history(legacy.id).find(change => change.reason === 'Legacy vehicle')!.after.coolingArchitecture, 'WITHOUT HEAT PUMP')
     const bytes = await createBackup(source, 'thermal-test-team')
     assert.equal((await restoreBackup(restored, bytes, 'thermal-test-team', { ...actor, deviceId: stores[1].deviceId }, 'Restore thermal data')).changed, 1)
     assert.equal(restored.get(legacy.id).data.thermal, 'Legacy thermal notes')
     assert.equal(restored.get(legacy.id).data.owner, 'New owner')
+    assert.equal(restored.get(legacy.id).data.coolingArchitecture, 'WITHOUT HEAT PUMP')
     assert.ok(restored.history(legacy.id).some(change => change.after.coolingArchitecture === 'WITHOUT HEAT PUMP'))
     const updated = restored.write({ id: legacy.id, kind: 'vehicle', data: { ...restored.get(legacy.id).data, thermal: 'Direct Heat Pump' }, version: restored.get(legacy.id).version, actor, reason: 'Select new thermal type' })
     assert.equal(updated.data.thermal, 'Direct Heat Pump')
   } finally { for (const store of stores) store.db.close(); await fs.rm(directory, { recursive: true, force: true }) }
 })
 
-test('vehicle APIs save each thermal type, omit cooling architecture and export the current selection', async () => {
+test('vehicle APIs save each thermal type, preserve legacy cooling architecture and export the current selection', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-thermal-api-')), shared = path.join(directory, 'shared')
   await fs.mkdir(shared)
   const services = createApp({ dataDir: path.join(directory, 'local') }), server = services.app.listen(0, '127.0.0.1')
@@ -107,9 +108,9 @@ test('vehicle APIs save each thermal type, omit cooling architecture and export 
       assert.equal(created.status, 201)
       const car = created.data as BusinessRecord
       assert.equal(car.data.thermal, thermal)
-      assert.equal(Object.hasOwn(car.data, 'coolingArchitecture'), false)
+      assert.equal(car.data.coolingArchitecture, 'INDIRECT HEAT PUMP')
       const cleared = await request('/business/records/' + car.id, 'PUT', { data: { ...car.data, thermal: '' }, version: car.version, reason: 'Clear thermal type' })
-      assert.equal(cleared.status, 200); assert.equal(cleared.data.data.thermal, '')
+      assert.equal(cleared.status, 200); assert.equal(cleared.data.data.thermal, ''); assert.equal(cleared.data.data.coolingArchitecture, 'INDIRECT HEAT PUMP')
     }
     const car = (await request('/business/records')).data[0] as BusinessRecord
     const updated = await request('/business/records/' + car.id, 'PUT', { data: { ...car.data, thermal: 'Direct Heat Pump' }, version: car.version, reason: 'Select direct heat pump' })
@@ -117,7 +118,7 @@ test('vehicle APIs save each thermal type, omit cooling architecture and export 
     const exported = await request('/business/export')
     assert.equal(exported.status, 200)
     assert.equal(exported.data.records.find((record: BusinessRecord) => record.id === car.id).data.thermal, 'Direct Heat Pump')
-    assert.equal(exported.data.records.some((record: BusinessRecord) => Object.hasOwn(record.data, 'coolingArchitecture')), false)
+    assert.equal(exported.data.records.find((record: BusinessRecord) => record.id === car.id).data.coolingArchitecture, 'INDIRECT HEAT PUMP')
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()))
     await services.close()

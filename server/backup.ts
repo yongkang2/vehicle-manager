@@ -1,13 +1,17 @@
 import { ZipArchive } from 'archiver'
+import path from 'node:path'
+import { Transform } from 'node:stream'
 import unzipper from 'unzipper'
 import { AppError } from './team.js'
 import { Business, checksum, normalizeFields } from './business.js'
-import type { Actor, BusinessRecord, Change, Operation, QuarantinedOperation, RestoreResult, VehicleDeletion } from '../shared/business.js'
-import { validReportAssociation } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, Operation, QuarantinedOperation, RestorePreview, RestoreResult, VehicleDeletion } from '../shared/business.js'
+import { businessFieldRegistry, validReportAssociation } from '../shared/business.js'
 import type { TeamDocument } from '../shared/types.js'
 import { inspectVehiclePhoto, parsePhotoAttachmentId } from '../shared/vehicle-photo.js'
+import { appVersion } from '../shared/version.js'
 
-type Manifest = { application: 'stellantis-vehicle-manager'; format: 1 | 2; teamId: string; created: string; records: BusinessRecord[]; changes: Change[]; pendingOperations: Operation[]; deletions?: VehicleDeletion[]; quarantinedOperations?: QuarantinedOperation[]; team?: TeamDocument }
+type Manifest = { application: 'stellantis-vehicle-manager'; format: 1 | 2 | 3; teamId: string; created: string; appVersion?: string; schemaVersion?: number; fieldVersion?: number; recordCounts?: Record<string, number>; records: BusinessRecord[]; changes: Change[]; pendingOperations: Operation[]; deletions?: VehicleDeletion[]; quarantinedOperations?: QuarantinedOperation[]; team?: TeamDocument }
+const maximumFiles = 20000, maximumManifestBytes = 20 * 1024 * 1024, maximumBlobBytes = 10 * 1024 * 1024, maximumTotalBytes = 200 * 1024 * 1024
 
 const identifier = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 120
 const uuid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value)
@@ -27,53 +31,119 @@ function validQuarantine(value: unknown): value is QuarantinedOperation {
   return operation.id === value.id && identifier(operation.recordId) && kinds.includes(String(operation.kind)) && (operation.kind === 'vehicle' ? operation.vehicleId === null && operation.recordId === value.vehicleId : operation.vehicleId === value.vehicleId) && (operation.base === null || state(operation.base)) && state(operation.desired) && actorValue(operation.actor) && timestamp(operation.created) && Array.isArray(operation.files) && operation.files.length <= 20000 && operation.files.every(hashKey) && Array.isArray(operation.changes) && operation.changes.length <= 200000 && operation.changes.every(change => object(change) && identifier(change.id) && identifier(change.recordId) && identifier(change.vehicleId) && kinds.includes(String(change.kind)) && (change.before === null || object(change.before)) && object(change.after) && actorValue(change.actor) && typeof change.reason === 'string' && change.reason.length <= 500 && typeof change.action === 'string' && timestamp(change.created))
 }
 
-export async function createBackup(business: Business, teamId: string, team?: TeamDocument): Promise<Buffer> {
+export async function createBackupStream(business: Business, teamId: string, team?: TeamDocument): Promise<Transform> {
+  const records = business.list()
+  const changes = business.store.db.prepare('SELECT payload FROM changes ORDER BY created,id').all().map(row => JSON.parse(row.payload as string))
+  const pendingOperations = business.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY seq").all().map(row => JSON.parse(row.payload as string))
+  if (records.length > 20000 || changes.length > 200000) throw new AppError('BACKUP_TOO_LARGE', 413)
+  const recordCounts = Object.fromEntries(['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment'].map(kind => [kind, records.filter(record => record.kind === kind).length]))
   const manifest: Manifest = {
-    application: 'stellantis-vehicle-manager', format: 2, teamId, created: new Date().toISOString(), records: business.list(),
-    changes: business.store.db.prepare('SELECT payload FROM changes ORDER BY created,id').all().map(row => JSON.parse(row.payload as string)),
-    pendingOperations: business.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY seq").all().map(row => JSON.parse(row.payload as string)),
+    application: 'stellantis-vehicle-manager', format: 3, teamId, created: new Date().toISOString(), appVersion, schemaVersion: business.store.db.prepare('PRAGMA user_version').get()!.user_version as number, fieldVersion: 1, recordCounts, records, changes, pendingOperations,
     deletions: business.store.deletionRows(), quarantinedOperations: business.store.quarantineRows(), team,
   }
-  const archive = new ZipArchive({ zlib: { level: 6 } }), chunks: Buffer[] = []
-  let size = 0
-  const completed = new Promise<Buffer>((resolve, reject) => {
-    archive.on('data', (chunk: Buffer) => { size += chunk.length; if (size > 200 * 1024 * 1024) { archive.abort(); reject(new AppError('BACKUP_TOO_LARGE', 413)) } else chunks.push(chunk) })
-    archive.once('error', reject); archive.once('end', () => resolve(Buffer.concat(chunks)))
+  const manifestBytes = Buffer.from(JSON.stringify(manifest))
+  if (manifestBytes.length > maximumManifestBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
+  const keys = new Set(records.filter(record => ['report', 'attachment'].includes(record.kind)).map(record => String(record.data.checksum)))
+  for (const entry of manifest.quarantinedOperations!) for (const key of entry.operation.files) keys.add(key)
+  if (keys.size + 1 > maximumFiles) throw new AppError('BACKUP_TOO_LARGE', 413)
+  let uncompressedBytes = manifestBytes.length
+  for (const key of keys) {
+    const bytes = await business.readBlob(key)
+    if (bytes.length > maximumBlobBytes || (uncompressedBytes += bytes.length) > maximumTotalBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
+  }
+  const archive = new ZipArchive({ zlib: { level: 6 } })
+  let compressedBytes = 0
+  const output = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      compressedBytes += chunk.length
+      callback(compressedBytes > maximumTotalBytes ? new AppError('BACKUP_TOO_LARGE', 413) : null, chunk)
+    },
   })
-  try {
-    archive.append(JSON.stringify(manifest), { name: 'manifest.json' })
-    const keys = new Set(manifest.records.filter(record => ['report', 'attachment'].includes(record.kind)).map(record => String(record.data.checksum)))
-    for (const entry of manifest.quarantinedOperations!) for (const key of entry.operation.files) keys.add(key)
-    for (const key of keys) archive.append(await business.readBlob(key), { name: `blobs/${key}` })
-    void archive.finalize()
-    return await completed
-  } catch (error) { archive.abort(); throw error }
+  archive.on('error', error => output.destroy(error))
+  output.on('error', () => archive.abort())
+  archive.pipe(output)
+  archive.append(manifestBytes, { name: 'manifest.json' })
+  for (const key of keys) archive.file(path.join(business.store.directory, 'blobs', key), { name: `blobs/${key}` })
+  void archive.finalize().catch(error => output.destroy(error))
+  return output
 }
 
-export async function restoreBackup(business: Business, bytes: Buffer, teamId: string, actor: Actor, reason: string): Promise<RestoreResult> {
+export async function createBackup(business: Business, teamId: string, team?: TeamDocument): Promise<Buffer> {
+  const stream = await createBackupStream(business, teamId, team), chunks: Buffer[] = []
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+  return Buffer.concat(chunks)
+}
+
+export async function previewBackup(business: Business, bytes: Buffer, teamId: string): Promise<RestorePreview> {
+  if (bytes.length > maximumTotalBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
+  const zip = await unzipper.Open.buffer(bytes).catch(() => { throw new AppError('INVALID_BACKUP', 422) })
+  if (zip.files.length > maximumFiles || zip.files.reduce((sum, entry) => sum + entry.uncompressedSize, 0) > maximumTotalBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
+  const entry = zip.files.find(file => file.path === 'manifest.json')
+  if (!entry || entry.uncompressedSize > maximumManifestBytes) throw new AppError('INVALID_BACKUP', 422)
+  let manifest: Manifest
+  try { manifest = JSON.parse((await entry.buffer()).toString()) as Manifest } catch { throw new AppError('INVALID_BACKUP', 422) }
+  if (!object(manifest) || manifest.application !== 'stellantis-vehicle-manager' || ![1, 2, 3].includes(manifest.format) || manifest.teamId !== teamId || (manifest.team && manifest.team.id !== teamId) || !Array.isArray(manifest.records) || manifest.records.length > 20000 || !Array.isArray(manifest.changes) || manifest.changes.length > 200000) throw new AppError('INVALID_BACKUP', 422)
+  const current = business.list(), currentById = new Map(current.map(record => [record.id, record]))
+  const incomingIds = new Set<string>(), conflicts: string[] = [], droppedFields: RestorePreview['droppedFields'] = []
+  let additions = 0, changes = 0
+  const vins = new Map(current.filter(record => record.kind === 'vehicle').map(record => [String(record.data.vin), record.id]))
+  for (const record of manifest.records) {
+    if (!object(record) || !identifier(record.id) || incomingIds.has(record.id) || !object(record.data) || !kinds.includes(String(record.kind))) throw new AppError('INVALID_BACKUP', 422)
+    incomingIds.add(record.id)
+    const existing = currentById.get(record.id)
+    if (!existing) additions++
+    else if (existing.kind !== record.kind || existing.vehicleId !== record.vehicleId) conflicts.push(record.id)
+    else if (JSON.stringify(existing.data) !== JSON.stringify(record.data) || existing.archived !== record.archived) changes++
+    if (record.kind === 'vehicle') {
+      const vin = String(record.data.vin || '')
+      const owner = vins.get(vin)
+      if (owner && owner !== record.id) conflicts.push(`VIN:${vin}`)
+      vins.set(vin, record.id)
+    }
+    if (['vehicle', 'part', 'modification', 'equipment'].includes(record.kind)) {
+      const registry = record.kind === 'vehicle' ? businessFieldRegistry.vehicle : record.kind === 'part' ? businessFieldRegistry.part : businessFieldRegistry.entry
+      const allowed = new Set([...registry.active, ...registry.legacy, ...(record.kind === 'vehicle' ? ['photoAttachmentId'] : [])])
+      const fields = Object.keys(record.data).filter(field => !allowed.has(field))
+      if (fields.length) droppedFields.push({ recordId: record.id, fields })
+    }
+  }
+  const deletions = manifest.format >= 2 ? manifest.deletions : []
+  if (!Array.isArray(deletions) || deletions.length > 20000 || !deletions.every(validDeletion)) throw new AppError('INVALID_BACKUP', 422)
+  const liveIds = new Set(current.map(record => record.id)), liveParents = new Set(current.map(record => record.vehicleId))
+  for (const deletion of deletions) if (liveIds.has(deletion.vehicleId) || liveParents.has(deletion.vehicleId) || deletion.recordIds.some(id => liveIds.has(id))) conflicts.push(`DELETION:${deletion.vehicleId}`)
+  const deleted = new Set(business.store.deletionRows().flatMap(row => row.recordIds))
+  const recordsById = new Map(current.map(record => [record.id, record]))
+  const archiveCandidates = current.filter(record => !record.archived && !incomingIds.has(record.id) && !deleted.has(record.id) && (record.kind === 'vehicle' || Boolean(record.vehicleId && incomingIds.has(record.vehicleId)))).map(record => ({ id: record.id, kind: record.kind, name: String(record.data.name || record.id), parentName: record.vehicleId ? String(recordsById.get(record.vehicleId)?.data.name || record.vehicleId) : null, relatedRecords: record.kind === 'vehicle' ? current.filter(child => child.vehicleId === record.id && !child.archived && !incomingIds.has(child.id) && !deleted.has(child.id)).length : 0 }))
+  const pending = business.store.db.prepare("SELECT id,record_id,payload FROM outbox WHERE state='pending' ORDER BY seq").all()
+  const fingerprint = checksum(JSON.stringify({ backup: checksum(bytes), current: current.map(record => [record.id, record.kind, record.vehicleId, record.version, record.archived, record.data]), deletions: business.store.deletionRows(), pending }))
+  return { appVersion: typeof manifest.appVersion === 'string' ? manifest.appVersion : null, records: manifest.records.length, additions, changes, archiveCandidates, droppedFields, conflicts: [...new Set(conflicts)], fingerprint }
+}
+
+export async function restoreBackup(business: Business, bytes: Buffer, teamId: string, actor: Actor, reason: string, archiveRecordIds: string[] = []): Promise<RestoreResult> {
   if (actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
   const zip = await unzipper.Open.buffer(bytes).catch(() => { throw new AppError('INVALID_BACKUP', 422) })
-  if (zip.files.length > 20000 || zip.files.reduce((sum, entry) => sum + entry.uncompressedSize, 0) > 200 * 1024 * 1024) throw new AppError('BACKUP_TOO_LARGE', 413)
+  if (zip.files.length > maximumFiles || zip.files.reduce((sum, entry) => sum + entry.uncompressedSize, 0) > maximumTotalBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
   const files = new Map<string, Buffer>()
   let totalLength = 0
   for (const file of zip.files) {
     if (file.type === 'Directory') continue
     if (files.has(file.path) || (file.path !== 'manifest.json' && !/^blobs\/[a-f0-9]{64}$/.test(file.path))) throw new AppError('INVALID_BACKUP', 422)
     const chunks: Buffer[] = []; let length = 0
-    const limit = file.path === 'manifest.json' ? 20 * 1024 * 1024 : 10 * 1024 * 1024
+    const limit = file.path === 'manifest.json' ? maximumManifestBytes : maximumBlobBytes
     for await (const chunk of file.stream()) {
       length += chunk.length
       totalLength += chunk.length
-      if (length > limit || totalLength > 200 * 1024 * 1024) throw new AppError('BACKUP_TOO_LARGE', 413)
+      if (length > limit || totalLength > maximumTotalBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
       chunks.push(Buffer.from(chunk))
     }
     files.set(file.path, Buffer.concat(chunks))
   }
   let manifest: Manifest
   try { manifest = JSON.parse(files.get('manifest.json')!.toString()) as Manifest } catch { throw new AppError('INVALID_BACKUP', 422) }
-  if (!object(manifest) || manifest.application !== 'stellantis-vehicle-manager' || ![1, 2].includes(manifest.format) || manifest.teamId !== teamId || (manifest.team && manifest.team.id !== teamId) || !Array.isArray(manifest.records) || manifest.records.length > 20000 || !Array.isArray(manifest.changes) || manifest.changes.length > 200000) throw new AppError('INVALID_BACKUP', 422)
-  const deletions = manifest.format === 2 ? manifest.deletions : []
-  const quarantine = manifest.format === 2 ? manifest.quarantinedOperations : []
+  if (!object(manifest) || manifest.application !== 'stellantis-vehicle-manager' || ![1, 2, 3].includes(manifest.format) || manifest.teamId !== teamId || (manifest.team && manifest.team.id !== teamId) || !Array.isArray(manifest.records) || manifest.records.length > 20000 || !Array.isArray(manifest.changes) || manifest.changes.length > 200000) throw new AppError('INVALID_BACKUP', 422)
+  if (manifest.format === 3 && (typeof manifest.appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.appVersion) || !Number.isSafeInteger(manifest.schemaVersion) || !Number.isSafeInteger(manifest.fieldVersion) || !object(manifest.recordCounts))) throw new AppError('INVALID_BACKUP', 422)
+  const deletions = manifest.format >= 2 ? manifest.deletions : []
+  const quarantine = manifest.format >= 2 ? manifest.quarantinedOperations : []
   if (!Array.isArray(deletions) || deletions.length > 20000 || !deletions.every(validDeletion) || new Set(deletions.map(row => row.id)).size !== deletions.length || new Set(deletions.map(row => row.vehicleId)).size !== deletions.length || !Array.isArray(quarantine) || quarantine.length > 200000 || !quarantine.every(validQuarantine) || new Set(quarantine.map(row => row.id)).size !== quarantine.length) throw new AppError('INVALID_BACKUP', 422)
   const canonicalDeletions = business.store.deletionRows()
   const markerByRecord = new Map(canonicalDeletions.flatMap(row => row.recordIds.map(id => [id, row] as const)))
@@ -137,6 +207,10 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
   if (business.store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get()) throw new AppError('PENDING_BEFORE_RESTORE', 409)
   const skipped = manifest.records.filter(record => deletedIds.has(record.id) || (record.vehicleId !== null && deletedVehicles.has(record.vehicleId)))
   const skippedVehicleIds = [...new Set(skipped.map(record => record.kind === 'vehicle' ? record.id : record.vehicleId!))]
+  const currentRecords = business.list()
+  const archiveCandidates = currentRecords.filter(record => !record.archived && !ids.has(record.id) && !deletedIds.has(record.id) && (record.kind === 'vehicle' || Boolean(record.vehicleId && ids.has(record.vehicleId))))
+  if (!Array.isArray(archiveRecordIds) || archiveRecordIds.some(id => typeof id !== 'string') || new Set(archiveRecordIds).size !== archiveRecordIds.length || archiveRecordIds.some(id => !archiveCandidates.some(record => record.id === id))) throw new AppError('RESTORE_PREVIEW_CHANGED', 409)
+  if (archiveCandidates.some(record => !archiveRecordIds.includes(record.id))) throw new AppError('RESTORE_ARCHIVE_CONFIRMATION_REQUIRED', 409)
   const skippedIds = new Set(skipped.map(record => record.id))
   const ordered = manifest.records.filter(record => !skippedIds.has(record.id)).toSorted((left, right) => Number(right.kind === 'vehicle') - Number(left.kind === 'vehicle'))
   const summary: RestoreResult = { changed: 0, skippedVehicles: skippedVehicleIds.length, skippedRecords: skipped.length, skippedVehicleIds }
@@ -168,7 +242,9 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
       business.write({ id: record.id, kind: record.kind, vehicleId: record.vehicleId, data: record.data, version: current?.version, archived: targetArchived, actor, reason: `Restore: ${reason}`, internal: ['report', 'attachment'].includes(record.kind), maintenance: 'restore' })
       changed++
     }
-    const extras = business.list().filter(record => !ids.has(record.id) && !record.archived).sort((left, right) => Number(left.kind === 'vehicle') - Number(right.kind === 'vehicle'))
+    const archivedIds = new Set(archiveRecordIds)
+    for (const record of currentRecords) if (record.vehicleId && archivedIds.has(record.vehicleId)) archivedIds.add(record.id)
+    const extras = business.list().filter(record => !ids.has(record.id) && !record.archived && archivedIds.has(record.id)).sort((left, right) => Number(left.kind === 'vehicle') - Number(right.kind === 'vehicle'))
     for (const record of extras) { business.write({ id: record.id, kind: record.kind, vehicleId: record.vehicleId, data: record.data, version: record.version, archived: true, actor, reason: `Restore archive: ${reason}`, internal: ['report', 'attachment'].includes(record.kind), maintenance: 'restore' }); changed++ }
     for (const record of ordered.filter(record => record.kind === 'vehicle' && record.archived)) {
       const current = business.get(record.id)

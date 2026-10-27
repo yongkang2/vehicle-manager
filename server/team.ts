@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { Binding, ConnectionCheck, Identity, Member, Role, TeamDocument } from '../shared/types.js'
+import { appVersion } from '../shared/version.js'
 
 export class AppError extends Error {
   constructor(public code: string, public status = 400) { super(code) }
@@ -29,8 +30,16 @@ async function readDocument(directory: string): Promise<TeamDocument> {
   if (file.length > 2 * 1024 * 1024) throw new AppError('UNSUPPORTED_TEAM')
   let team: TeamDocument
   try { team = JSON.parse(file.toString('utf8')) as TeamDocument } catch { throw new AppError('UNSUPPORTED_TEAM') }
-  if (team.application !== application || team.protocol !== 1 || typeof team.id !== 'string' || typeof team.name !== 'string' || !Number.isSafeInteger(team.revision) || !Array.isArray(team.members) || !Array.isArray(team.bindings) || !Array.isArray(team.requests) || !Array.isArray(team.events)) throw new AppError('UNSUPPORTED_TEAM')
+  if (team.application !== application || ![1, 2].includes(team.protocol) || (team.protocol === 2 && !validVersion(team.minWritableVersion)) || typeof team.id !== 'string' || typeof team.name !== 'string' || !Number.isSafeInteger(team.revision) || !Array.isArray(team.members) || !Array.isArray(team.bindings) || !Array.isArray(team.requests) || !Array.isArray(team.events)) throw new AppError('UNSUPPORTED_TEAM')
   return team
+}
+
+function validVersion(value: unknown): value is string { return typeof value === 'string' && /^\d+\.\d+\.\d+$/.test(value) }
+
+function compareVersions(left: string, right: string): number {
+  const a = left.split('.').map(Number), b = right.split('.').map(Number)
+  for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index] - b[index]
+  return 0
 }
 
 async function atomicDocument(directory: string, team: TeamDocument): Promise<void> {
@@ -85,7 +94,7 @@ async function locked<T>(directory: string, work: () => Promise<T>): Promise<T> 
 
 export class TeamDirectory {
   private readonly observed = new Map<string, { revision: number; content: string }>()
-  constructor(initial?: TeamDocument | null) { if (initial) this.observe(initial) }
+  constructor(initial?: TeamDocument | null, private readonly version = appVersion) { if (initial) this.observe(initial) }
 
   observe(team: TeamDocument): void {
     const previous = this.observed.get(team.id)
@@ -98,6 +107,7 @@ export class TeamDirectory {
     try {
       const team = await readDocument(directory)
       if (expectedId && team.id !== expectedId) throw new AppError('WRONG_TEAM', 409)
+      if (team.protocol === 2 && compareVersions(this.version, team.minWritableVersion!) < 0) throw new AppError('CLIENT_UPGRADE_REQUIRED', 409)
       this.observe(team)
       return team
     } catch (error) { return mapFileError(error) }
@@ -148,6 +158,20 @@ export class TeamDirectory {
         requests: [], events: [],
       }
       event(team, member.id, 'team.created', team.id, 'Explicit team initialization')
+      await atomicDocument(directory, team)
+      return team
+    })
+  }
+
+  async enableUpgradeGate(directory: string, teamId: string, actor: Identity, reason: string): Promise<TeamDocument> {
+    return locked(directory, async () => {
+      const team = await this.read(directory, teamId)
+      const admin = requireAdmin(team, actor)
+      if (team.protocol === 2 && compareVersions(this.version, team.minWritableVersion!) <= 0) return team
+      if (effectiveAdmins(team) < 2) throw new AppError('TWO_ADMINS_REQUIRED', 409)
+      team.protocol = 2
+      team.minWritableVersion = this.version
+      event(team, admin.id, 'team.upgrade-gate.advanced', team.id, reason)
       await atomicDocument(directory, team)
       return team
     })

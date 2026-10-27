@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 data/
+data.migrated-backup-*/
 data-backups/
 dist-server/
 test/test-data-*/

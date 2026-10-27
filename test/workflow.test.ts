@@ -128,7 +128,9 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     const current = pulled.find(record => record.id === car.id)!
     assert.equal((await request(admin, `/business/records/${car.id}`, 'PUT', { data: { ...current.data, owner: 'Changed after backup' }, version: current.version, reason: 'Change owner' })).status, 200)
     await request(admin, '/business/sync', 'POST')
-    const restore = upload(backup.data as Buffer, 'backup.zip'); restore.append('confirmation', 'RESTORE'); restore.append('reason', 'Restore verified backup')
+    const preview = await request(admin, '/business/restore/preview', 'POST', upload(backup.data as Buffer, 'backup.zip'))
+    assert.equal(preview.status, 200)
+    const restore = upload(backup.data as Buffer, 'backup.zip'); restore.append('confirmation', 'RESTORE'); restore.append('reason', 'Restore verified backup'); restore.append('previewFingerprint', preview.data.fingerprint); restore.append('archiveRecordIds', JSON.stringify([]))
     response = await request(admin, '/business/restore', 'POST', restore)
     assert.equal(response.status, 200); assert.ok(response.data.changed > 0)
     await request(admin, '/business/sync', 'POST')
@@ -152,7 +154,9 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     const archivedCar = (await request(admin, '/business/records')).data.find((record: BusinessRecord) => record.id === car.id) as BusinessRecord
     assert.equal((await request(admin, `/business/records/${car.id}/archive`, 'POST', { version: archivedCar.version, archived: false, reason: 'Restore temporarily' })).status, 200)
     await request(admin, '/business/sync', 'POST')
-    const restoreArchived = upload(archivedBackup.data, 'archived.zip'); restoreArchived.append('confirmation', 'RESTORE'); restoreArchived.append('reason', 'Restore archived vehicle and retained child records')
+    const archivedPreview = await request(admin, '/business/restore/preview', 'POST', upload(archivedBackup.data, 'archived.zip'))
+    assert.equal(archivedPreview.status, 200)
+    const restoreArchived = upload(archivedBackup.data, 'archived.zip'); restoreArchived.append('confirmation', 'RESTORE'); restoreArchived.append('reason', 'Restore archived vehicle and retained child records'); restoreArchived.append('previewFingerprint', archivedPreview.data.fingerprint); restoreArchived.append('archiveRecordIds', JSON.stringify([]))
     assert.equal((await request(admin, '/business/restore', 'POST', restoreArchived)).status, 200)
     const finalSync = await request(admin, '/business/sync', 'POST')
     assert.equal(finalSync.data.pending, 0, JSON.stringify(finalSync.data))

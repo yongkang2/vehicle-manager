@@ -13,6 +13,20 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const digest = /^[a-f0-9]{64}$/
 const markerSchema = 'CREATE TABLE IF NOT EXISTS vehicle_deletions(vehicle_id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,payload TEXT NOT NULL)'
 const corrupt = () => new AppError('SHARE_CORRUPTED', 409)
+async function pruneSnapshots(directory: string, currentRevision: string): Promise<void> {
+  const root = path.join(directory, 'snapshots'), files: { name: string; modified: number }[] = []
+  for (const name of await fs.readdir(root)) if (name.endsWith('.sqlite')) files.push({ name, modified: (await fs.stat(path.join(root, name))).mtimeMs })
+  files.sort((left, right) => right.modified - left.modified || right.name.localeCompare(left.name))
+  const keep = new Set(files.slice(0, 30).map(file => file.name))
+  keep.add(`${currentRevision}.sqlite`)
+  const daily = new Set<string>(), cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000
+  for (const file of files) {
+    if (file.modified < cutoff) continue
+    const day = new Date(file.modified).toISOString().slice(0, 10)
+    if (!daily.has(day)) { daily.add(day); keep.add(file.name) }
+  }
+  for (const file of files) if (!keep.has(file.name)) await fs.rm(path.join(root, file.name), { force: true }).catch(() => {})
+}
 export function validateVehicleDeletion(value: unknown): VehicleDeletion {
   const marker = value as VehicleDeletion
   if (!marker || !uuid.test(marker.id) || !uuid.test(marker.vehicleId) || !uuid.test(marker.requestId) || typeof marker.vin !== 'string' || !Array.isArray(marker.recordIds) || !marker.recordIds.includes(marker.vehicleId) || marker.recordIds.some(id => typeof id !== 'string' || !id || id.length > 120) || new Set(marker.recordIds).size !== marker.recordIds.length || !Array.isArray(marker.fileKeys) || marker.fileKeys.some(key => !digest.test(key)) || !marker.actor || marker.actor.role !== 'admin' || typeof marker.actor.id !== 'string' || typeof marker.actor.deviceId !== 'string' || typeof marker.reason !== 'string' || !marker.reason.trim() || !Number.isFinite(Date.parse(marker.deletedAt)) || !uuid.test(marker.revision) || !Number.isSafeInteger(marker.sequence) || marker.sequence < 1) throw corrupt()
@@ -93,6 +107,7 @@ export class SharedBusinessSnapshot {
     this.head = head
     this.master = new DatabaseSync(this.work)
     this.master.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;')
+    await pruneSnapshots(this.directory, revision).catch(() => {})
     return head
   }
   async close(): Promise<void> { this.master?.close(); this.master = null; await fs.rm(this.work, { force: true }).catch(() => {}) }
