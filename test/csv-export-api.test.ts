@@ -196,7 +196,7 @@ test('personal templates support save, copy, rename, update, delete and restart 
     assert.equal((await request('/business/export/csv', { method: 'POST', body: csvRequest([car.id, next.id], revised) })).status, 200, 'A saved filter must apply to current matching identities, not an old vehicle ID list')
     const backup = await request('/business/backup'), archive = await unzipper.Open.buffer(backup.data as Buffer)
     const manifest = JSON.parse((await archive.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
-    assert.equal(manifest.format, 2)
+    assert.equal(manifest.format, 3)
     assert.doesNotMatch(JSON.stringify(manifest), /Renamed selection|My selection|csvExportTemplates/)
     assert.equal(context.client.workspaces.get(team.id).store.db.prepare('PRAGMA user_version').get()!.user_version, 4)
     assert.deepEqual((await request(`/business/export-templates/${copied.data.id}`, { method: 'DELETE' })).data, { ok: true })

@@ -189,6 +189,14 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       res.json(team)
     } catch (error) { next(error) }
   })
+  app.post('/api/team/upgrade-gate', async (req: AuthRequest, res, next) => {
+    try {
+      const { teams, cache } = current(req), config = configuration(req)
+      const reason = text(req.body?.reason)
+      const team = await teams.enableUpgradeGate(config.sharedPath, config.teamId, identity(req), reason)
+      cache(team); res.json(team)
+    } catch (error) { next(error) }
+  })
   app.post('/api/team/requests/:id/approve', async (req: AuthRequest, res, next) => {
     try {
       const { teams, cache } = current(req), config = configuration(req)

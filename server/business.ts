@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
-import { batteryLifeStatuses, complianceLevels, controllerTypes, entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
+import { batteryLifeStatuses, businessFieldRegistry, complianceLevels, controllerTypes, entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
 import { parsePhotoAttachmentId, PHOTO_MAX_BYTES, PHOTO_MAX_DIMENSION, PHOTO_MAX_PIXELS } from '../shared/vehicle-photo.js'
 
@@ -18,10 +18,17 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('INVALID_INPUT')
   const source = input as Fields
   const names = kind === 'vehicle' ? vehicleFields : kind === 'part' ? partFields : kind === 'modification' || kind === 'equipment' ? entryFields : null
+  const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : businessFieldRegistry.entry.legacy
   if (!names) throw new AppError('INVALID_INPUT')
   const data: Fields = {}
   for (const field of names) {
     const value = source[field] ?? ''
+    if (typeof value !== 'string' || value.length > 4000) throw new AppError('INVALID_INPUT')
+    data[field] = value.trim()
+  }
+  for (const field of legacyNames) {
+    if (!Object.hasOwn(source, field)) continue
+    const value = source[field]
     if (typeof value !== 'string' || value.length > 4000) throw new AppError('INVALID_INPUT')
     data[field] = value.trim()
   }
@@ -109,6 +116,13 @@ export class Business {
       const row = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
       const before = row ? fromRow(row) : null
       if (before && (before.kind !== kind || before.vehicleId !== vehicleId || before.version !== version)) throw new AppError('VERSION_CONFLICT', 409)
+      if (before) {
+        const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : businessFieldRegistry.entry.legacy
+        if (!internal && maintenance !== 'restore') for (const field of legacyNames) {
+          if (Object.hasOwn(before.data, field)) normalized[field] = before.data[field]
+          else delete normalized[field]
+        }
+      }
       if (kind === 'vehicle') {
         if (photoAttachmentId !== undefined) {
           if (photoAttachmentId) {
