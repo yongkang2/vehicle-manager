@@ -189,6 +189,14 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       res.json(team)
     } catch (error) { next(error) }
   })
+  app.post('/api/team/upgrade-gate', async (req: AuthRequest, res, next) => {
+    try {
+      const { teams, cache } = current(req), config = configuration(req)
+      const reason = text(req.body?.reason)
+      const team = await teams.enableUpgradeGate(config.sharedPath, config.teamId, identity(req), reason)
+      cache(team); res.json(team)
+    } catch (error) { next(error) }
+  })
   app.post('/api/team/requests/:id/approve', async (req: AuthRequest, res, next) => {
     try {
       const { teams, cache } = current(req), config = configuration(req)
@@ -200,7 +208,8 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     try {
       if (typeof req.body?.enabled !== 'boolean') throw new AppError('INVALID_INPUT')
       const { teams, cache } = current(req), config = configuration(req)
-      const team = await teams.changeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body.enabled, text(req.body?.reason))
+      const profile = req.body?.name !== undefined || req.body?.nickname !== undefined ? { name: text(req.body?.name, 1, 60), nickname: text(req.body?.nickname ?? '', 0, 60) } : undefined
+      const team = await teams.changeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body.enabled, text(req.body?.reason), profile)
       cache(team); res.json(team)
     } catch (error) { next(error) }
   })

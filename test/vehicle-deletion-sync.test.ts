@@ -7,9 +7,25 @@ import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { Business } from '../server/business.js'
 import { LocalStore } from '../server/store.js'
-import { BusinessSync } from '../server/sync.js'
+import { BusinessSync, atomicFile } from '../server/sync.js'
+import { SharedBusinessSnapshot } from '../server/deletions.js'
 import { TeamDirectory } from '../server/team.js'
 import type { Actor, BusinessRecord, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeletion } from '../shared/business.js'
+
+test('snapshot publishing retains the latest thirty and never removes the current head', async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), 'vehicle-snapshot-retention-')), shared = path.join(directory, 'shared')
+  await fs.mkdir(shared)
+  const store = new LocalStore(path.join(directory, 'local')), business = new Business(store)
+  let snapshot: SharedBusinessSnapshot | null = null
+  try {
+    snapshot = await SharedBusinessSnapshot.open(business, shared, 'retention-team', atomicFile)
+    for (let index = 0; index < 35; index++) await snapshot.publish('retention-team', 1)
+    const files = await fs.readdir(path.join(shared, 'business', 'snapshots'))
+    const head = JSON.parse(await fs.readFile(path.join(shared, 'business', 'HEAD.json'), 'utf8')) as { revision: string }
+    assert.equal(files.length, 30)
+    assert.ok(files.includes(`${head.revision}.sqlite`))
+  } finally { await snapshot?.close(); store.db.close(); await fs.rm(directory, { recursive: true, force: true }) }
+})
 
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(tmpdir(), 'vehicle-deletion-sync-')), shared = path.join(directory, 'shared')

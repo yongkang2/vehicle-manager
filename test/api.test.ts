@@ -42,6 +42,17 @@ test('separate local accounts join one team, require approval and never expose c
     const approved = (await request(beta, '/api/status')).data as Status
     assert.equal(approved.access, 'approved'); assert.equal(approved.member!.role, 'member')
     assert.equal((await request(beta, `/api/team/members/${approved.member!.id}`, 'POST', { role: 'admin', enabled: true, reason: 'Self promotion' })).status, 403)
+    const profileBody = { role: 'member', enabled: true, name: 'Real Name', nickname: 'Team Nickname', reason: 'Correct team profile' }
+    assert.equal((await request(beta, `/api/team/members/${approved.member!.id}`, 'POST', profileBody)).status, 403)
+    assert.equal((await request(alpha, `/api/team/members/${approved.member!.id}`, 'POST', { ...profileBody, name: ' ' })).status, 400)
+    assert.equal((await request(alpha, `/api/team/members/${approved.member!.id}`, 'POST', { ...profileBody, nickname: 'x'.repeat(61) })).status, 400)
+    const renamed = await request(alpha, `/api/team/members/${approved.member!.id}`, 'POST', profileBody)
+    assert.equal(renamed.status, 200)
+    assert.equal(renamed.data.members.find((item: { id: string }) => item.id === approved.member!.id).nickname, 'Team Nickname')
+    const refreshed = (await request(beta, '/api/status')).data as Status
+    assert.equal(refreshed.member!.name, 'Real Name')
+    assert.equal(refreshed.member!.nickname, 'Team Nickname')
+    assert.equal(refreshed.user!.displayName, 'Member')
     const sharedText = await fs.readFile(path.join(shared, 'team.json'), 'utf8')
     assert.ok(!sharedText.includes('setup-test-password')); assert.ok(!sharedText.includes('"hash"')); assert.ok(!sharedText.includes('"salt"'))
     await fs.rename(shared, `${shared}-offline`)

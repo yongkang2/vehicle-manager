@@ -13,6 +13,7 @@ export type VehicleDeletePreview = { vehicleId: string; vin: string; version: nu
 export type VehicleDeleteRequest = { previewToken: string; version: number; vin: string; confirmation: string; reason: string; requestId: string }
 export type QuarantinedOperation = { id: string; vehicleId: string; reason: 'VEHICLE_DELETED'; quarantinedAt: string; operation: Operation }
 export type RestoreResult = { changed: number; skippedVehicles: number; skippedRecords: number; skippedVehicleIds: string[]; syncError?: string }
+export type RestorePreview = { appVersion: string | null; records: number; additions: number; changes: number; archiveCandidates: { id: string; kind: RecordKind; name: string; parentName: string | null; relatedRecords: number }[]; droppedFields: { recordId: string; fields: string[] }[]; conflicts: string[]; fingerprint: string }
 export const vehicleFields = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'thermal', 'complianceLevel', 'notes'] as const
 export const thermalSystemTypes = ['Indirect Heat Pump', 'Direct Heat Pump', 'No Heat Pump'] as const
 export const complianceLevels = ['Eu7', 'CN6', 'Eu6', 'PL8'] as const
@@ -50,6 +51,11 @@ export function doveRecordedTime(value: unknown): number {
 	return Date.parse(String(value ?? '').trim().replace(/^(\d{4}-\d{2}-\d{2})[ T](\d{2})h(\d{2})$/, '$1T$2:$3:00'))
 }
 export const entryFields = ['name', 'description', 'installedAt', 'removedAt', 'notes'] as const
+export const businessFieldRegistry = {
+	vehicle: { active: vehicleFields, legacy: ['coolingArchitecture'], removed: [] as string[] },
+	part: { active: partFields, legacy: [] as string[], removed: [] as string[] },
+	entry: { active: entryFields, legacy: [] as string[], removed: [] as string[] },
+} as const
 export type Controller = { name: string; description: string; network: string; supplier: string; functionalPart: string; productPart: string; software: string; calibrationPart: string; calibrationVersion: string; flashingDate: string; productionDate: string; serial: string }
 export type Fault = { controller: string; code: string; status: string; statusByte: string; description: string; context: string }
 export type DoveData = { vin: string; rawVin: string; vehicleId: string; recordedAt: string; software: string; mileage: number | null; soc: number | null; vehicleMode: string; controllers: Controller[]; faults: Fault[]; warnings: string[]; sheets: string[] }

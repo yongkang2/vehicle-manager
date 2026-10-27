@@ -1,0 +1,87 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { resolveDataDirectory } from '../shared/data-directory.js'
+
+test('local data migration refuses a running old service and preserves files after it stops', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-data-dir-'))
+  const local = path.join(root, 'local'), project = path.join(root, 'release')
+  const previousLocal = process.env.LOCALAPPDATA, previousOverride = process.env.VEHICLE_MANAGER_DATA_DIR
+  process.env.LOCALAPPDATA = local
+  delete process.env.VEHICLE_MANAGER_DATA_DIR
+  try {
+    const legacy = path.join(project, 'data')
+    await fs.mkdir(legacy, { recursive: true })
+    await fs.writeFile(path.join(legacy, 'local.sqlite'), 'database bytes')
+    await fs.writeFile(path.join(legacy, 'identity.json'), '{"deviceId":"stable-device"}')
+    const launchLock = path.join(legacy, '.launch-lock'); await fs.mkdir(launchLock)
+    await fs.writeFile(path.join(launchLock, 'owner.json'), JSON.stringify({ pid: process.pid }))
+    await assert.rejects(resolveDataDirectory(project), /old application is starting/)
+    await fs.rm(launchLock, { recursive: true, force: true })
+    await fs.writeFile(path.join(legacy, 'service.json'), JSON.stringify({ pid: process.pid, port: 4410 }))
+    await assert.rejects(resolveDataDirectory(project), /old application is still running/)
+    await fs.writeFile(path.join(legacy, 'service.json'), JSON.stringify({ pid: 2147483647, port: 4410 }))
+    const destination = await resolveDataDirectory(project)
+    assert.equal(await fs.readFile(path.join(destination, 'local.sqlite'), 'utf8'), 'database bytes')
+    assert.equal(await fs.readFile(path.join(destination, 'identity.json'), 'utf8'), '{"deviceId":"stable-device"}')
+    assert.equal(await fs.stat(path.join(destination, 'service.json')).then(() => true, () => false), false)
+    await assert.rejects(fs.stat(legacy), { code: 'ENOENT' })
+    const archived = (await fs.readdir(project)).find(name => name.startsWith('data.migrated-backup-'))!
+    assert.equal(await fs.readFile(path.join(project, archived, 'local.sqlite'), 'utf8'), 'database bytes')
+    assert.ok((await fs.readdir(destination)).includes('.data-migrated'))
+    assert.equal(await resolveDataDirectory(project), destination)
+  } finally {
+    if (previousLocal === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = previousLocal
+    if (previousOverride === undefined) delete process.env.VEHICLE_MANAGER_DATA_DIR
+    else process.env.VEHICLE_MANAGER_DATA_DIR = previousOverride
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('first portable launch finds one adjacent older release data directory', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-data-sibling-'))
+  const local = path.join(root, 'local'), parent = path.join(root, 'releases')
+  const previousLocal = process.env.LOCALAPPDATA, previousOverride = process.env.VEHICLE_MANAGER_DATA_DIR
+  process.env.LOCALAPPDATA = local
+  delete process.env.VEHICLE_MANAGER_DATA_DIR
+  try {
+    const oldRelease = path.join(parent, 'vehicle-manager-1.0.3-win-x64-old'), newRelease = path.join(parent, 'vehicle-manager-1.1.0-win-x64-new')
+    await fs.mkdir(path.join(oldRelease, 'data'), { recursive: true }); await fs.mkdir(newRelease, { recursive: true })
+    await fs.writeFile(path.join(oldRelease, 'data', 'local.sqlite'), 'previous release db')
+    const destination = await resolveDataDirectory(newRelease)
+    assert.equal(await fs.readFile(path.join(destination, 'local.sqlite'), 'utf8'), 'previous release db')
+    assert.ok((await fs.readdir(oldRelease)).some(name => name.startsWith('data.migrated-backup-')))
+  } finally {
+    if (previousLocal === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = previousLocal
+    if (previousOverride === undefined) delete process.env.VEHICLE_MANAGER_DATA_DIR
+    else process.env.VEHICLE_MANAGER_DATA_DIR = previousOverride
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('first portable launch refuses to choose between multiple old data directories', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-data-ambiguous-'))
+  const local = path.join(root, 'local'), parent = path.join(root, 'releases')
+  const previousLocal = process.env.LOCALAPPDATA, previousOverride = process.env.VEHICLE_MANAGER_DATA_DIR
+  process.env.LOCALAPPDATA = local
+  delete process.env.VEHICLE_MANAGER_DATA_DIR
+  try {
+    const newRelease = path.join(parent, 'vehicle-manager-1.1.0-win-x64-new')
+    await fs.mkdir(newRelease, { recursive: true })
+    for (const name of ['vehicle-manager-1.0.1-win-x64-first', 'vehicle-manager-1.0.2-win-x64-second']) {
+      const data = path.join(parent, name, 'data'); await fs.mkdir(data, { recursive: true }); await fs.writeFile(path.join(data, 'local.sqlite'), name)
+    }
+    await assert.rejects(resolveDataDirectory(newRelease), /Multiple previous release data directories were found/)
+    await assert.rejects(fs.stat(path.join(local, 'VehicleManager', 'data')), { code: 'ENOENT' })
+  } finally {
+    if (previousLocal === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = previousLocal
+    if (previousOverride === undefined) delete process.env.VEHICLE_MANAGER_DATA_DIR
+    else process.env.VEHICLE_MANAGER_DATA_DIR = previousOverride
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
