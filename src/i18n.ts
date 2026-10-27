@@ -1,7 +1,7 @@
 export type Language = 'en' | 'zh'
 const en = {
   product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
-  username: 'Username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
+  username: 'Username', recentUsernameHint: 'Choose a previous account or enter a username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
   local: 'Local device', online: 'Connected', offline: 'Offline', refresh: 'Refresh', setupTitle: 'Connect your workspace', path: 'Shared folder path', test: 'Test connection', later: 'Set up later',
   notConfigured: 'Shared folder not configured', emptyFolder: 'Empty folder verified', existingTeam: 'Existing team found', checks: 'Read, write and rename checks passed',
   teamName: 'Team name', create: 'Create team', join: 'Request to join', confirmCreate: 'Create a new team in this empty folder and make this account its first administrator.',
@@ -18,7 +18,7 @@ const en = {
   withdrawWarning: 'Withdraw this account’s pending request from the original team? This requires a reachable shared folder. If unavailable, you can disconnect this session, but the remote request remains.', reloadPage: 'Reload page',
 }
 const zh: Record<keyof typeof en, string> = {
-  product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', displayName: '姓名', password: '密码',
+  product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', recentUsernameHint: '选择历史账号，或输入用户名', displayName: '姓名', password: '密码',
   account: '本地账号', developer: '开发者', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
   path: '共享文件夹路径', test: '测试连接', later: '稍后配置', notConfigured: '尚未配置共享目录', emptyFolder: '已验证为空目录', existingTeam: '发现已有团队', checks: '读取、写入和重命名检查通过',
   teamName: '团队名称', create: '创建团队', join: '申请加入', confirmCreate: '确认在此空目录创建新团队，并将当前账号设为首位管理员。', pending: '待审批', pendingTitle: '账号和设备正在等待管理员审批',
