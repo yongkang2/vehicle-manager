@@ -128,13 +128,15 @@ test('failed refresh does not unlock uncertain files and does not undo known sav
   f.queue.dispose()
 })
 
-for (const code of ['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'WORKSPACE_CHANGED', 'PARENT_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND']) {
+for (const code of ['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'WORKSPACE_CHANGED', 'PARENT_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND']) {
   test(`${code} stops unsent files without removing earlier successful uploads`, async () => {
     const f = fixture({ upload: async name => { if (name === 'stop.pdf') throw new ApiError(code); return saved(name) } })
     f.queue.add([file('one.pdf'), file('stop.pdf'), file('unsent.pdf')]); await f.queue.run('pending')
     assert.deepEqual(f.calls.map(call => call.filename), ['one.pdf', 'stop.pdf'])
     assert.deepEqual(f.queue.getSnapshot().rows.map(row => row.status), ['uploaded', 'failed', 'pending'])
+    assert.equal(f.queue.getSnapshot().rows[0].savedId, 'saved-one.pdf')
     assert.equal(f.queue.getSnapshot().rows[1].error, code)
+    assert.equal(f.queue.getSnapshot().inspectionRequired, false, 'A definite rejection must not require inspection for an unknown save')
     f.queue.dispose()
   })
 }

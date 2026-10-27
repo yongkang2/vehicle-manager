@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from 'react'
-import { App as AntApp, Alert, Button, Checkbox, ConfigProvider, Form, Input, Segmented, Spin, Tabs, Tag, Tooltip } from 'antd'
+import { App as AntApp, Alert, AutoComplete, Button, Checkbox, ConfigProvider, Form, Input, Segmented, Spin, Tabs, Tag, Tooltip } from 'antd'
 import enUS from 'antd/locale/en_US'
 import zhCN from 'antd/locale/zh_CN'
 import { ArrowRight, CarFront, Check, ChevronUp, Clock3, FileSpreadsheet, Files, FolderCog, FolderOpen, FolderSync, HardDrive, History, RefreshCw, ShieldCheck, UserRound, UsersRound, WifiOff } from 'lucide-react'
 import type { ConnectionCheck, LocalUser, Status } from '../shared/types'
+import { appVersion } from '../shared/version'
 import { api, ApiError } from './api'
 import { trackBrowserPresence } from './browser-presence'
 import { dictionaries, errorText } from './i18n'
@@ -19,20 +20,39 @@ const businessNavigation = [{ view: 'vehicles', icon: CarFront }, { view: 'dove'
 type WorkspaceView = 'workspace' | 'settings' | 'team' | BusinessView
 type BaseProps = { text: Dictionary; language: Language; onError: (error: unknown) => void }
 const glyph = (Icon: typeof Check) => <Icon size={17} aria-hidden="true" />
+const recentUsernamesKey = 'vehicle-manager.recent-usernames'
+function readRecentUsernames(): string[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(recentUsernamesKey) || '[]')
+    return Array.isArray(stored) ? [...new Set(stored.filter((value): value is string => typeof value === 'string' && value.length >= 2 && value.length <= 24))].slice(0, 5) : []
+  } catch { return [] }
+}
+function rememberRecentUsername(username: string) {
+  try { localStorage.setItem(recentUsernamesKey, JSON.stringify([username, ...readRecentUsernames().filter(value => value !== username)].slice(0, 5))) } catch { }
+}
 
 function Authentication({ text, onError, onLogin }: BaseProps & { onLogin: (user: LocalUser) => void }) {
   const [mode, setMode] = useState('login'), [busy, setBusy] = useState(false)
+  const [recentUsernames] = useState(readRecentUsernames)
   const [form] = Form.useForm()
   async function submit(values: { username: string; displayName?: string; password: string }) {
     setBusy(true)
-    try { onLogin(await api<LocalUser>(`/api/${mode === 'login' ? 'login' : 'register'}`, { method: 'POST', body: values })) }
+    try {
+      const user = await api<LocalUser>(`/api/${mode === 'login' ? 'login' : 'register'}`, { method: 'POST', body: values })
+      if (mode === 'login') rememberRecentUsername(user.username)
+      onLogin(user)
+    }
     catch (error) { onError(error) } finally { setBusy(false) }
   }
+  const usernameInput = <Input autoComplete="username" prefix={glyph(UserRound)} maxLength={24} placeholder={mode === 'login' && recentUsernames.length > 0 ? text.recentUsernameHint : undefined} />
+  const accountInput = mode === 'login' && recentUsernames.length > 0
+    ? <AutoComplete options={recentUsernames.map(value => ({ value }))} style={{ width: '100%' }}>{usernameInput}</AutoComplete>
+    : usernameInput
   return <main className="auth-screen"><div className="auth-content"><img src="/stellantis.svg" className="auth-logo" alt="STELLANTIS" /><h1>{text.product}</h1>
     <Tabs activeKey={mode} onChange={value => { setMode(value); form.resetFields() }} items={[{ key: 'login', label: text.signIn }, { key: 'register', label: text.register }]} />
     <Form form={form} layout="vertical" onFinish={submit} requiredMark={false}>
       {mode === 'register' && <Form.Item label={text.displayName} name="displayName" rules={[{ required: true, whitespace: true, message: text.required }, { max: 60 }]}><Input autoComplete="name" maxLength={60} /></Form.Item>}
-      <Form.Item label={text.username} name="username" rules={[{ required: true, message: text.required }, { min: 2, max: 24 }]}><Input autoComplete="username" prefix={glyph(UserRound)} maxLength={24} /></Form.Item>
+      <Form.Item label={text.username} name="username" rules={[{ required: true, message: text.required }, { min: 2, max: 24 }]}>{accountInput}</Form.Item>
       <Form.Item label={text.password} name="password" rules={[{ required: true, message: text.required }, ...(mode === 'register' ? [{ min: 10, max: 128, message: text.passwordHint }] : [])]}><Input.Password autoComplete={mode === 'login' ? 'current-password' : 'new-password'} maxLength={128} placeholder={mode === 'register' ? text.passwordHint : undefined} /></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} block className="auth-submit" icon={glyph(ArrowRight)} iconPlacement="end">{mode === 'login' ? text.signIn : text.register}</Button>
     </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main>
@@ -84,7 +104,7 @@ function Workspace({ text, language, onError, user, onLogout }: BaseProps & { us
   return <div className="workspace-layout"><aside className="sidebar"><div className="sidebar-brand"><img src="/stellantis.svg" alt="STELLANTIS" /><span>{text.product}</span></div><nav>
     {status.access === 'approved' && businessNavigation.filter(item => item.view !== 'audit' || admin).map(item => <button key={item.view} className={view === item.view && !setup ? 'active' : ''} onClick={() => setView(item.view)}>{glyph(item.icon)}{businessText(item.view)}</button>)}
     {admin && <button className={view === 'team' ? 'active' : ''} disabled={!status.online} onClick={() => setView('team')}>{glyph(UsersRound)}{text.team}</button>}
-  </nav><div className="sidebar-bottom"><span className="build-label">{text.foundation} · 1.0.1</span><button className="account-row personal-trigger" aria-label={text.personal} onClick={() => setPersonalOpen(true)}><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><small>{admin ? text.firstAdmin : status.access === 'approved' ? text.member : text.account}</small></div>{glyph(ChevronUp)}</button></div></aside>
+  </nav><div className="sidebar-bottom"><span className="build-label">{text.foundation} · {appVersion}</span><button className="account-row personal-trigger" aria-label={text.personal} onClick={() => setPersonalOpen(true)}><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><small>{admin ? text.firstAdmin : status.access === 'approved' ? text.member : text.account}</small></div>{glyph(ChevronUp)}</button></div></aside>
     {personalOpen && <PersonalWorkspaces open text={text} status={status} onClose={() => setPersonalOpen(false)} onConnect={() => setView('settings')} onSelected={selected} onLogout={() => void logout()} onError={onError} />}
     <main className="workspace-main"><header className="workspace-topbar"><span className="current-team-label" title={status.sharedPath || undefined}>{status.teamName || text.workspace} <b>/</b> {setup ? text.settings : view === 'team' ? text.team : businessView ? businessText(view) : text.accessTitle}</span><div><Tag variant="filled" color={status.online ? 'success' : 'default'} icon={status.online ? glyph(Check) : glyph(WifiOff)}>{status.online ? text.online : text.offline}</Tag><Tooltip title={text.refresh}><Button type="text" loading={refreshing} icon={glyph(RefreshCw)} aria-label={text.refresh} onClick={() => void refresh()} /></Tooltip><Tooltip title={text.personal}><Button className="mobile-logout" type="text" icon={glyph(UserRound)} aria-label={text.personal} onClick={() => setPersonalOpen(true)} /></Tooltip></div></header>
       <div className="page-content" key={status.workspaceToken}>{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={async () => { await reload(); setView('vehicles'); setDeferred(true) }} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} /></Suspense> : <>
@@ -92,7 +112,7 @@ function Workspace({ text, language, onError, user, onLogout }: BaseProps & { us
         <div className={`access-banner ${status.access}`}><span className="access-symbol">{status.access === 'approved' ? glyph(ShieldCheck) : status.access === 'pending' ? glyph(Clock3) : glyph(FolderOpen)}</span><strong>{labels[status.access]}</strong></div>
         {status.error && <Alert className="connection-alert" type="warning" showIcon title={errorText(status.error, language)} />}
         <dl className="workspace-facts"><div><dt>{text.path}</dt><dd className="mono">{status.sharedPath || '—'}</dd></div><div><dt>{text.identity}</dt><dd>{status.member?.name || '—'} {status.member && <Tag>{status.member.role === 'admin' ? text.firstAdmin : text.member}</Tag>}</dd></div><div><dt>{text.device}</dt><dd>{status.deviceName}</dd></div><div><dt>{text.deviceId}</dt><dd className="mono">{status.deviceId}</dd></div><div><dt>{text.lastChecked}</dt><dd>{status.lastChecked ? new Date(status.lastChecked).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-GB') : '—'}</dd></div><div><dt>{text.account}</dt><dd>{user.username}</dd></div></dl>
-      </>}</div><footer className="workspace-footer"><span>{glyph(HardDrive)}{text.local}</span><span>{text.foundation} · 1.0.1</span></footer></main></div>
+      </>}</div><footer className="workspace-footer"><span>{glyph(HardDrive)}{text.local}</span><span>{text.foundation} · {appVersion}</span></footer></main></div>
 }
 
 function Application({ language, text }: { language: Language; text: Dictionary }) {

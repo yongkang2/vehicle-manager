@@ -98,25 +98,34 @@ test('each attachment keeps the 10 MiB boundary without blocking a later valid f
 })
 
 test('approved members upload while paused or offline without implicitly resuming synchronization', async () => {
-  const f = await fixture(), offline = `${f.shared}-offline`
-  let moved = false
+  const f = await fixture()
   try {
-    const head = path.join(f.shared, 'business', 'HEAD.json'), before = await fs.readFile(head)
     f.client.store.db.exec('UPDATE sessions SET sync_enabled=0')
+    await f.client.synchronization.settle()
+    const head = path.join(f.shared, 'business', 'HEAD.json'), before = await fs.readFile(head)
     for (const name of ['paused-one.jfif', 'paused-two.JFIF']) assert.equal((await f.request(f.route, { method: 'POST', body: upload(jpeg, name), session: 'member' })).status, 201)
     assert.equal((await f.request('/status', { session: 'member' })).data.syncPaused, true)
     assert.equal(f.workspace.synchronization.status().pending, 2)
     assert.deepEqual(await fs.readFile(head), before)
-    await fs.rename(f.shared, offline); moved = true
-    f.client.store.db.exec('UPDATE sessions SET sync_enabled=1')
-    const saved = await f.request(f.route, { method: 'POST', body: upload(pdf, 'offline.pdf'), session: 'member' })
-    assert.equal(saved.status, 201, JSON.stringify(saved.data))
-    const status = (await f.request('/status', { session: 'member' })).data
-    assert.equal(status.online, false); assert.equal(status.syncPaused, false)
-    assert.equal(f.workspace.synchronization.status().pending, 3)
-    assert.deepEqual((await f.request(`/business/files/${saved.data.id}`, { session: 'member' })).data, pdf)
-    assert.deepEqual(await fs.readFile(path.join(offline, 'business', 'HEAD.json')), before)
-  } finally { if (moved) await fs.rename(offline, f.shared); await f.close() }
+    const configuration = f.workspace.store.get<{ sharedPath: string; teamId: string }>('configuration')
+    assert(configuration)
+    await f.client.synchronization.settle()
+    f.workspace.store.set('configuration', { ...configuration, sharedPath: path.join(f.shared, 'unavailable-share') })
+    try {
+      f.client.store.db.exec('UPDATE sessions SET sync_enabled=1')
+      const saved = await f.request(f.route, { method: 'POST', body: upload(pdf, 'offline.pdf'), session: 'member' })
+      assert.equal(saved.status, 201, JSON.stringify(saved.data))
+      const status = (await f.request('/status', { session: 'member' })).data
+      assert.equal(status.online, false); assert.equal(status.syncPaused, false)
+      assert.equal(f.workspace.synchronization.status().pending, 3)
+      assert.deepEqual((await f.request(`/business/files/${saved.data.id}`, { session: 'member' })).data, pdf)
+      assert.deepEqual(await fs.readFile(head), before)
+    } finally {
+      f.client.store.db.exec('UPDATE sessions SET sync_enabled=0')
+      await f.client.synchronization.settle()
+      f.workspace.store.set('configuration', configuration)
+    }
+  } finally { await f.close() }
 })
 
 test('attachment sequences preserve authentication, workspace-token and archived-vehicle protections', async () => {

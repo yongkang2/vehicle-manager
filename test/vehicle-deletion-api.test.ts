@@ -102,6 +102,9 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     const restoreForm = new FormData()
     restoreForm.append('file', new Blob([new Uint8Array(backup.data as Buffer)]), 'before-delete.zip')
     restoreForm.append('confirmation', 'RESTORE'); restoreForm.append('reason', 'Restore unrelated state without resurrecting deleted vehicles')
+    const previewForm = new FormData(); previewForm.append('file', new Blob([new Uint8Array(backup.data as Buffer)]), 'before-delete.zip')
+    const backupPreview = await request(admin, '/business/restore/preview', 'POST', previewForm)
+    assert.equal(backupPreview.status, 200); restoreForm.append('previewFingerprint', backupPreview.data.fingerprint); restoreForm.append('archiveRecordIds', JSON.stringify([]))
     const restored = await request(admin, '/business/restore', 'POST', restoreForm)
     assert.equal(restored.status, 200); assert.equal(restored.data.skippedVehicles, 1); assert.equal(restored.data.skippedRecords, 6)
     assert.equal((await request(admin, '/business/records')).data.length, 0)
@@ -109,6 +112,16 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     const replacement = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: car.data.vin, status: 'available', complianceLevel: 'Eu7', physicalLocation: 'New registration' }, reason: 'Reuse VIN under a new identity' })
     assert.equal(replacement.status, 201); assert.notEqual(replacement.data.id, car.id)
     assert.equal(replacement.data.data.physicalLocation, 'New registration')
+    const pendingVehicle = await request(admin, '/business/records', 'POST', { kind: 'vehicle', data: { vin: 'TEST0000000000002', status: 'available', complianceLevel: 'Eu7' }, reason: 'Create pending record for preview test' })
+    assert.equal(pendingVehicle.status, 201)
+    const workspaceStore = admin.workspaces.get(team.id).store
+    const pendingOperation = workspaceStore.db.prepare('SELECT id FROM outbox ORDER BY seq DESC LIMIT 1').get()!.id as string
+    workspaceStore.db.prepare("UPDATE outbox SET state='pending' WHERE id=?").run(pendingOperation)
+    const headBeforePreview = await fs.readFile(path.join(shared, 'business', 'HEAD.json'), 'utf8')
+    const readonlyPreviewForm = new FormData(); readonlyPreviewForm.append('file', new Blob([new Uint8Array(backup.data as Buffer)]), 'before-delete.zip')
+    const blockedPreview = await request(admin, '/business/restore/preview', 'POST', readonlyPreviewForm)
+    assert.equal(blockedPreview.data.error, 'PENDING_BEFORE_RESTORE')
+    assert.equal(await fs.readFile(path.join(shared, 'business', 'HEAD.json'), 'utf8'), headBeforePreview)
     await fs.rename(shared, shared + '-offline')
     try { assert.equal((await request(admin, '/business/vehicles/' + replacement.data.id + '/delete-preview')).status, 503) }
     finally { await fs.rename(shared + '-offline', shared) }

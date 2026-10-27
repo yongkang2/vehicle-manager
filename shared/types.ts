@@ -1,13 +1,14 @@
 export type Role = 'admin' | 'member'
 export type LocalUser = { id: string; username: string; displayName: string }
 export type Identity = { deviceId: string; deviceName: string; localUserId: string; displayName: string }
-export type Member = { id: string; name: string; role: Role; enabled: boolean; created: string }
+export type Member = { id: string; name: string; nickname?: string; role: Role; enabled: boolean; created: string; deletedAt?: string }
 export type Binding = { id: string; deviceId: string; localUserId: string; deviceName: string; memberId: string; enabled: boolean }
 export type JoinRequest = { id: string; identity: Identity; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; created: string }
 export type TeamEvent = { id: string; actorId: string; action: string; targetId: string; reason: string; created: string }
 export type TeamDocument = {
   application: 'stellantis-vehicle-manager'
-  protocol: 1
+  protocol: 1 | 2
+  minWritableVersion?: string
   id: string
   name: string
   revision: number

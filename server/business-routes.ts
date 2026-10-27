@@ -2,11 +2,13 @@ import express from 'express'
 import type { Request, RequestHandler } from 'express'
 import multer from 'multer'
 import path from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
 import { Business, reason, validateManualRecordFields } from './business.js'
-import { BusinessSync } from './sync.js'
+import { BusinessSync, atomicFile } from './sync.js'
+import { SharedBusinessSnapshot } from './deletions.js'
 import { DoveService, compareReports } from './dove.js'
-import { createBackup, restoreBackup } from './backup.js'
+import { createBackupStream, previewBackup, restoreBackup } from './backup.js'
 import { LocalStore } from './store.js'
 import { buildCsvExport } from './csv-export.js'
 import { ExportTemplates } from './export-templates.js'
@@ -326,18 +328,41 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   })
   writeRoute('get', '/backup', async (req: BusinessRequest, res) => {
     const context = await access(req, true)
-    const bytes = await teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async team => createBackup(business, context.configuration.teamId, team))
+    const stream = await teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async team => createBackupStream(business, context.configuration.teamId, team))
     store.event(context.actor.id, 'backup.created', {})
-    res.attachment(`vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).type('application/zip').send(bytes)
+    res.attachment(`vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).type('application/zip')
+    await pipeline(stream, res)
   })
-  const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024, files: 1, fields: 3 } })
+  const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024, files: 1, fields: 5 } })
+  router.post('/restore/preview', backupUpload.single('file'), async (req: BusinessRequest, res, next) => {
+    try {
+      if (!req.file) throw new AppError('FILE_REQUIRED')
+      const context = await store.runWrite(() => access(req, true))
+      const preview = await store.withMaintenance(() => teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async _team => {
+        if (store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get() || store.db.prepare('SELECT record_id FROM conflicts LIMIT 1').get()) throw new AppError('PENDING_BEFORE_RESTORE', 409)
+        const snapshot = await SharedBusinessSnapshot.open(business, context.configuration.sharedPath, context.configuration.teamId, atomicFile)
+        try {
+          if ((snapshot.head?.revision || null) !== store.get<string>('businessRevision')) throw new AppError('RESTORE_SYNC_REQUIRED', 409)
+          return await previewBackup(business, req.file!.buffer, context.configuration.teamId)
+        } finally { await snapshot.close() }
+      }))
+      res.json(preview)
+    } catch (error) { next(error) }
+  })
   router.post('/restore', backupUpload.single('file'), async (req: BusinessRequest, res) => {
     if (!req.file || req.body?.confirmation !== 'RESTORE') throw new AppError('RESTORE_CONFIRMATION_REQUIRED')
+    let archiveRecordIds: string[]
+    try { archiveRecordIds = JSON.parse(String(req.body?.archiveRecordIds || '')) as string[] } catch { throw new AppError('RESTORE_PREVIEW_REQUIRED', 409) }
+    if (!Array.isArray(archiveRecordIds) || typeof req.body?.previewFingerprint !== 'string') throw new AppError('RESTORE_PREVIEW_REQUIRED', 409)
     const context = await store.runWrite(() => access(req, true)), explanation = reason(req.body.reason)
     const result = await store.withMaintenance(() => teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async (team, member) => {
       const state = await synchronization.refreshLocked(context.configuration.sharedPath, team)
       if (state.error) throw new AppError(state.error, 409)
-      const restored = await restoreBackup(business, req.file!.buffer, context.configuration.teamId, { ...context.actor, role: member.role }, explanation)
+      const preview = await previewBackup(business, req.file!.buffer, context.configuration.teamId)
+      if (preview.fingerprint !== req.body.previewFingerprint) throw new AppError('RESTORE_PREVIEW_CHANGED', 409)
+      if (preview.conflicts.length) throw new AppError('RESTORE_CONFLICTS', 409)
+      if (preview.droppedFields.length && req.body.confirmDroppedFields !== 'true') throw new AppError('RESTORE_DROPPED_FIELDS_CONFIRMATION_REQUIRED', 409)
+      const restored = await restoreBackup(business, req.file!.buffer, context.configuration.teamId, { ...context.actor, role: member.role }, explanation, archiveRecordIds)
       // Publish imported deletion markers before releasing the same canonical lock.
       // If publication fails, the durable import queue and ordinary outbox retry it.
       try {

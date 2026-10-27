@@ -32,6 +32,35 @@ async function fixture() {
 }
 const account = { username: 'workspace-user', displayName: 'Workspace user', password: 'workspace-test-password' }
 
+test('shutdown waits for workspace polling, stops overlapping ticks and closes each database only once', async () => {
+  const fixtureData = await fixture(), { client, request, team } = fixtureData
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  try {
+    await request('/register', account)
+    const first = await team('first')
+    await request('/login', account, 'second')
+    const second = await team('second')
+    let entered!: () => void, calls = 0
+    const started = new Promise<void>(resolve => { entered = resolve })
+    for (const id of [first.id, second.id]) client.workspaces.get(id).tick = async () => { calls++; entered(); await gate }
+    const poll = client.tick()
+    await started
+    assert.equal(client.tick(), poll)
+    const closing = client.close()
+    assert.equal(client.close(), closing)
+    assert.equal(client.store.db.prepare('SELECT 1 AS open').get()!.open, 1)
+    await client.tick()
+    assert.equal(calls, 1)
+    release()
+    await Promise.all([poll, closing])
+    await client.tick()
+    await client.close()
+    assert.equal(calls, 1)
+    assert.throws(() => client.store.db.prepare('SELECT 1'), { code: 'ERR_INVALID_STATE' })
+  } finally { release(); await fixtureData.close() }
+})
+
 test('in-flight requests block switching and a new login invalidates old-page tokens even for the same team', async () => {
   const fixtureData = await fixture(), { client, request, team, sessions } = fixtureData
   try {

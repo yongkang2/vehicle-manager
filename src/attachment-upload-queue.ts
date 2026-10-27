@@ -21,7 +21,7 @@ type Options = {
 
 // Only explicit rejection codes are safe to retry: a lost response can follow a save.
 const rejected = new Set(['FILE_TYPE_NOT_ALLOWED', 'FILE_TOO_LARGE', 'FILE_REQUIRED', 'INVALID_INPUT', 'FILE_CORRUPTED', 'MAINTENANCE_IN_PROGRESS', 'SHARE_UNAVAILABLE', 'SHARE_ACCESS_DENIED', 'SHARE_BUSY'])
-const fatal = new Set(['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'ADMIN_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'WORKSPACE_NOT_FOUND', 'NOT_CONFIGURED', 'PARENT_ARCHIVED', 'RECORD_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND', 'NOT_FOUND'])
+const fatal = new Set(['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'ADMIN_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'WORKSPACE_NOT_FOUND', 'NOT_CONFIGURED', 'PARENT_ARCHIVED', 'RECORD_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND', 'NOT_FOUND'])
 const errorCode = (cause: unknown) => cause instanceof ApiError ? cause.message : 'SERVER_ERROR'
 
 /** A queue belongs to one vehicle and one authenticated workspace for its lifetime. */

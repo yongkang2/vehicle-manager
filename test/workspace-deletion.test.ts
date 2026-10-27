@@ -224,8 +224,10 @@ for (const operation of ['preview', 'delete', 'restore']) {
       const workspace = client.workspaces.get(a.id)
       const preview = (await request(`/business/vehicles/${car.id}/delete-preview`)).data as VehicleDeletePreview
       const backup = (await request('/business/backup')).data as Buffer
+      const restorePreview = operation === 'restore' ? (await request('/business/restore/preview', { method: 'POST', body: upload(backup, 'secondary.zip') })).data : null
       const path = operation === 'restore' ? '/business/restore' : `/business/vehicles/${car.id}${operation === 'preview' ? '/delete-preview' : ''}`
       const body = operation === 'restore' ? upload(backup, 'secondary.zip', true) : operation === 'delete' ? { previewToken: preview.token, version: preview.version, vin, confirmation: 'DELETE', reason: 'Finish admitted deletion after disconnect', requestId: randomUUID() } : undefined
+      if (operation === 'restore') { body!.append('previewFingerprint', restorePreview.fingerprint); body!.append('archiveRecordIds', JSON.stringify([])) }
       const method = operation === 'restore' ? 'POST' : operation === 'delete' ? 'DELETE' : 'GET'
       let entered!: () => void, closed!: () => void, maintenanceEntered!: () => void, reads = 0
       const started = new Promise<void>(resolve => { entered = resolve }), readBarrier = new Promise<void>(resolve => { releaseRead = resolve })

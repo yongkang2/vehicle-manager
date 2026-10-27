@@ -10,6 +10,22 @@ const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const release = path.resolve(process.argv[2] || '')
 const executable = path.join(release, 'runtime', 'node.exe'), launcher = path.join(release, 'launcher.mjs')
 if (!existsSync(executable) || !existsSync(launcher)) throw new Error('Pass the generated portable application directory.')
+const appRequire = createRequire(path.join(release, 'app', 'package.json'))
+const readableStream = appRequire('readable-stream')
+assert.equal(typeof readableStream.Readable, 'function')
+for (const [name, specifier, version] of [['process', 'process/', '0.11.10'], ['string_decoder', 'string_decoder/', '1.3.0'], ['safe-buffer', 'safe-buffer', '5.2.1']]) {
+  const resolved = appRequire.resolve(specifier)
+  let directory = path.dirname(resolved), actualVersion
+  while (directory !== path.dirname(directory)) {
+    const packageFile = path.join(directory, 'package.json')
+    if (existsSync(packageFile)) {
+      const pkg = JSON.parse(await fs.readFile(packageFile, 'utf8'))
+      if (pkg.name === name) { actualVersion = pkg.version; break }
+    }
+    directory = path.dirname(directory)
+  }
+  assert.equal(actualVersion, version, `Portable package has the wrong ${name} package`)
+}
 const root = await fs.mkdtemp(path.join(project, 'test', 'test-data-package-')), data = path.join(root, 'local'), shared = path.join(root, 'shared')
 await fs.mkdir(shared)
 const env = { ...process.env, PORT: '0', VEHICLE_MANAGER_DATA_DIR: data }, execute = promisify(execFile)
