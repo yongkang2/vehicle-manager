@@ -72,6 +72,37 @@ test('setup requires an existing empty directory; join and administration use la
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })
 
+test('only administrators can remove non-admin members and all their devices without erasing history', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory()
+  try {
+    const team = await service.create(root, 'Engineering', admin)
+    const request = await service.join(root, team.id, member)
+    const approved = await service.approve(root, team.id, admin, request.requests[0].id, 'member', null, 'Approve member')
+    const target = approved.members.find(item => item.role === 'member')!
+    const secondDevice = { ...member, deviceId: 'extra-member-device' }
+    const extraRequest = await service.join(root, team.id, secondDevice)
+    await service.approve(root, team.id, admin, extraRequest.requests.at(-1)!.id, 'member', target.id, 'Approve second device')
+    await assert.rejects(service.removeMember(root, team.id, member, target.id, 'Self removal'), { code: 'ADMIN_REQUIRED' })
+    await assert.rejects(service.removeMember(root, team.id, admin, team.members[0].id, 'Delete administrator'), { code: 'MEMBER_IS_ADMIN' })
+    await service.changeMember(root, team.id, admin, target.id, 'admin', true, 'Promote before stale deletion')
+    await assert.rejects(service.removeMember(root, team.id, admin, target.id, 'Stale deletion'), { code: 'MEMBER_IS_ADMIN' })
+    await service.changeMember(root, team.id, admin, target.id, 'member', true, 'Restore member role')
+    const removed = await service.removeMember(root, team.id, admin, target.id, 'Remove departed member')
+    assert.equal(removed.members.filter(item => !item.deletedAt).length, 1)
+    assert.equal(removed.members.find(item => item.id === target.id)!.enabled, false)
+    assert.equal(removed.bindings.filter(item => item.memberId === target.id && item.enabled).length, 0)
+    assert.equal(removed.events.at(-1)!.action, 'member.deleted')
+    assert.equal(removed.events.at(-1)!.reason, 'Remove departed member')
+    assert.ok(removed.events.some(item => item.action === 'join.approved'))
+    for (const identity of [member, secondDevice]) await assert.rejects(service.withAccess(root, team.id, identity, false, async () => true), { code: 'ACCESS_DISABLED' })
+    await assert.rejects(service.changeMember(root, team.id, admin, target.id, 'member', true, 'Stale reactivation'), { code: 'MEMBER_UNAVAILABLE' })
+    const retried = await service.removeMember(root, team.id, admin, target.id, 'Retry removal')
+    assert.equal(retried.revision, removed.revision)
+    assert.equal((await service.join(root, team.id, member)).requests.length, removed.requests.length)
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
 test('two independent initializers cannot both create administrators', async () => {
   const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
   const service = new TeamDirectory()

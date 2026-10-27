@@ -161,9 +161,14 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     const finalSync = await request(admin, '/business/sync', 'POST')
     assert.equal(finalSync.data.pending, 0, JSON.stringify(finalSync.data))
     assert.equal((await request(member, '/business/records')).data.find((record: BusinessRecord) => record.id === car.id).archived, true)
-    await fs.rename(shared, `${shared}-offline`)
-    assert.equal((await request(admin, `/business/records/${car.id}/archive`, 'POST', { archived: true, version: current.version, reason: 'Offline admin operation' })).status, 503)
-    await fs.rename(`${shared}-offline`, shared)
+    const onlineConfiguration = admin.store.get<{ sharedPath: string; teamId: string }>('configuration')!
+    admin.store.set('configuration', { ...onlineConfiguration, sharedPath: path.join(root, 'unavailable-share') })
+    try {
+      const offlineOperation = await request(admin, `/business/records/${car.id}/archive`, 'POST', { archived: true, version: current.version, reason: 'Offline admin operation' })
+      assert.equal(offlineOperation.status, 503)
+      assert.equal(offlineOperation.data.error, 'SHARE_UNAVAILABLE')
+    } finally { admin.store.set('configuration', onlineConfiguration) }
+    assert.equal((await request(admin, '/business/records')).status, 200)
   } finally {
     for (const client of clients) { await new Promise<void>(resolve => client.server.close(() => resolve())); await client.synchronization.settle(); client.store.db.close() }
     await fs.rm(root, { recursive: true, force: true })

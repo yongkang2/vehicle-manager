@@ -191,6 +191,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   })
   app.post('/api/team/upgrade-gate', async (req: AuthRequest, res, next) => {
     try {
+      if (req.body?.confirmation !== 'UPGRADE_CLIENTS') throw new AppError('TEAM_CONFIRMATION_REQUIRED', 409)
       const { teams, cache } = current(req), config = configuration(req)
       const reason = text(req.body?.reason)
       const team = await teams.enableUpgradeGate(config.sharedPath, config.teamId, identity(req), reason)
@@ -210,6 +211,14 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       const { teams, cache } = current(req), config = configuration(req)
       const profile = req.body?.name !== undefined || req.body?.nickname !== undefined ? { name: text(req.body?.name, 1, 60), nickname: text(req.body?.nickname ?? '', 0, 60) } : undefined
       const team = await teams.changeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), role(req.body?.role), req.body.enabled, text(req.body?.reason), profile)
+      cache(team); res.json(team)
+    } catch (error) { next(error) }
+  })
+  app.delete('/api/team/members/:id', async (req: AuthRequest, res, next) => {
+    try {
+      if (req.body?.confirmation !== 'DELETE_MEMBER') throw new AppError('TEAM_CONFIRMATION_REQUIRED', 409)
+      const { teams, cache } = current(req), config = configuration(req)
+      const team = await teams.removeMember(config.sharedPath, config.teamId, identity(req), String(req.params.id), text(req.body?.reason))
       cache(team); res.json(team)
     } catch (error) { next(error) }
   })
