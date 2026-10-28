@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { App, Alert, Button, Checkbox, Descriptions, Drawer, Empty, Input, Modal, Pagination, Select, Space, Spin, Table, Tabs, Tag, Timeline, Tooltip, Upload } from 'antd'
 import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
 import { api, ApiError, createWorkspaceScope, download } from './api'
@@ -12,6 +12,8 @@ import DoveImport from './DoveImport'
 import CsvExportDialog from './CsvExportDialog'
 import ResizableVehicleTable from './ResizableVehicleTable'
 import { useVehicleTablePreferences } from './use-vehicle-table-preferences'
+import { useVehicleTableFilterSession } from './vehicle-table-filter-session'
+import { createVehicleFilterValues, findVehicleTableController, sortedVehicleReports } from './vehicle-table-filters'
 import VehiclePhoto from './VehiclePhoto'
 import AttachmentUpload from './AttachmentUpload'
 import './BusinessApp.css'
@@ -28,7 +30,6 @@ type ControllerSlot = { name: KeyControllerName; part: BusinessRecord | null }
 const statuses = ['available', 'testing', 'maintenance', 'inactive']
 const emptySync: SyncStatus = { phase: 'idle', error: null, pending: 0, conflicts: [], quarantined: 0, lastSync: null, revision: null }
 const display = (value: unknown): string => value === null || value === undefined || value === '' ? '—' : typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
-const reportTime = (record: BusinessRecord) => { const date = doveRecordedTime(record.data.recordedAt); return Number.isFinite(date) ? date : Date.parse(String(record.data.savedAt || record.updated)) }
 function controllerSources(report: BusinessRecord) {
   return parsedControllerSources((report.data as unknown as ReportData).parsed.controllers)
 }
@@ -124,7 +125,9 @@ function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel,
 export default function BusinessApp({ view, language, admin, online, syncPaused, onError }: { view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void }) {
   const text = translateBusiness(language), { message } = App.useApp()
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
+  const { filters: vehicleColumnFilters, setFilters: setVehicleColumnFilters } = useVehicleTableFilterSession()
   const [records, setRecords] = useState<BusinessRecord[]>([]), [changes, setChanges] = useState<Change[]>([]), [sync, setSync] = useState<SyncStatus>(emptySync)
+  const vehicleFilterValues = useMemo(() => createVehicleFilterValues(records, language), [records, language])
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [query, setQuery] = useState(''), [filter, setFilter] = useState<string | undefined>(), [archived, setArchived] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [action, setAction] = useState<Action | null>(null), [actionReason, setActionReason] = useState('')
   const [detailTab, setDetailTab] = useState('overview')
@@ -167,7 +170,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const openVehicle = (id: string, tab = 'overview') => { if (id !== selectedId) attachmentCancel.current?.(); setSelectedId(id); setDetailTab(tab); setHistoryPage(1) }
   const activeReport = records.find(record => record.id === reportId) || null
   const cars = records.filter(record => record.kind === 'vehicle')
-  const reports = records.filter(record => record.kind === 'report').sort((left, right) => reportTime(right) - reportTime(left) || right.updated.localeCompare(left.updated))
+  const reports = sortedVehicleReports(records)
   const vehicleName = (id: string | null) => cars.find(car => car.id === id)?.data.name || id || '—'
   const date = (value: string) => value ? new Date(value).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-GB') : '—'
   const statusTag = (value: string) => <Tag color={{ available: 'success', testing: 'processing', maintenance: 'warning', inactive: 'default' }[value]}>{text(value)}</Tag>
@@ -274,7 +277,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     { title: text('savedAt'), width: 170, render: (_, record) => date(String(record.data.savedAt || record.updated)) }, { title: text('actions'), width: 110, render: (_, record) => <Space><Tooltip title={text('download')}><Button type="text" icon={<Download size={16} />} aria-label={text('download')} onClick={() => downloadFile(record)} /></Tooltip>{recordActions(record)}</Space> },
   ]} />
   const matchedReports = (vehicle: BusinessRecord) => reports.filter(report => !report.archived && reportMatchesVehicle(report, vehicle) && controllerSources(report).length > 0)
-  const controllerFor = (vehicleId: string, name: KeyControllerName) => records.find(record => record.kind === 'part' && record.vehicleId === vehicleId && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null
+  const controllerFor = (vehicleId: string, name: KeyControllerName) => findVehicleTableController(records, vehicleId, name)
   const controllerTable = (vehicle: BusinessRecord, editable: boolean) => {
     const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: controllerFor(vehicle.id, name) }))
     const available = matchedReports(vehicle)
@@ -328,7 +331,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   return <section className="business-workspace"><div className="page-heading"><div><span className="eyebrow">{text(view).toUpperCase()}</span><h1>{text(view)}</h1></div><Space wrap><Tooltip title={text('refresh')}><Button icon={<RefreshCw size={16} />} aria-label={text('refresh')} loading={loading} onClick={() => void load()} /></Tooltip>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
-    {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div><div className="section-toolbar"><h3>{text('vehicles')}</h3><Space wrap><Button icon={<FileSpreadsheet size={15} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button><Button type="text" icon={<Download size={15} />} onClick={() => void download('/api/business/export', 'vehicle-data.json').catch(onError)}>{text('export')}</Button>{admin && <><Button icon={<Download size={15} />} disabled={!online} onClick={() => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError)}>{text('backup')}</Button><Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}><Button icon={<RotateCcw size={15} />} disabled={!online || syncPaused} onClick={() => setRestoreOpen(true)}>{text('restoreBackup')}</Button></Tooltip></>}</Space></div>{filters}<ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry} rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
+    {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div><div className="section-toolbar"><h3>{text('vehicles')}</h3><Space wrap><Button icon={<FileSpreadsheet size={15} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button><Button type="text" icon={<Download size={15} />} onClick={() => void download('/api/business/export', 'vehicle-data.json').catch(onError)}>{text('export')}</Button>{admin && <><Button icon={<Download size={15} />} disabled={!online} onClick={() => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError)}>{text('backup')}</Button><Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}><Button icon={<RotateCcw size={15} />} disabled={!online || syncPaused} onClick={() => setRestoreOpen(true)}>{text('restoreBackup')}</Button></Tooltip></>}</Space></div>{filters}
+    <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
+      filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
+      rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
       { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => openVehicle(record.id)}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
       { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
       { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
