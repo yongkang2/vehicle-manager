@@ -13,6 +13,7 @@ import CsvExportDialog from './CsvExportDialog'
 import ResizableVehicleTable from './ResizableVehicleTable'
 import { useVehicleTablePreferences } from './use-vehicle-table-preferences'
 import VehiclePhoto from './VehiclePhoto'
+import AttachmentUpload from './AttachmentUpload'
 import './BusinessApp.css'
 
 const ReportViewer = lazy(() => import('./ReportViewer'))
@@ -131,7 +132,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [csvExportOpen, setCsvExportOpen] = useState(false)
   const [reportSelection, setReportSelection] = useState<string[]>([]), [comparison, setComparison] = useState<Comparison | null>(null), [configuration, setConfiguration] = useState<Configuration | null>(null)
   const [restoreOpen, setRestoreOpen] = useState(false), [restoreFile, setRestoreFile] = useState<File | null>(null), [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null), [archiveRecordIds, setArchiveRecordIds] = useState<string[]>([]), [confirmDroppedFields, setConfirmDroppedFields] = useState(false), [confirmation, setConfirmation] = useState(''), [restoreReason, setRestoreReason] = useState(''), [historyPage, setHistoryPage] = useState(1)
-  const [attachmentFile, setAttachmentFile] = useState<File | null>(null)
+  const attachmentCancel = useRef<(() => void) | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [quarantined, setQuarantined] = useState<QuarantinedOperation[]>([]), [deleteVehicle, setDeleteVehicle] = useState<BusinessRecord | null>(null), [deleteReceipt, setDeleteReceipt] = useState<VehicleDeleteReceipt | null>(null)
   const deletedRecordIds = useRef(new Set<string>())
@@ -146,7 +147,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       acceptWorkspace(await fetchWorkspace(view === 'audit', view === 'sync'))
     } catch (error) { onError(error) } finally { setLoading(false) }
   }
-  async function loadDove(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
+  async function loadScoped(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
     const request: WorkspaceReader = url => scope.request(url, { signal })
     const result = await fetchWorkspace(view === 'audit', view === 'sync', request)
     scope.assertCurrent(signal)
@@ -163,7 +164,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   const selected = records.find(record => record.id === selectedId) || null
-  const openVehicle = (id: string, tab = 'overview') => { setSelectedId(id); setDetailTab(tab); setHistoryPage(1) }
+  const openVehicle = (id: string, tab = 'overview') => { if (id !== selectedId) attachmentCancel.current?.(); setSelectedId(id); setDetailTab(tab); setHistoryPage(1) }
   const activeReport = records.find(record => record.id === reportId) || null
   const cars = records.filter(record => record.kind === 'vehicle')
   const reports = records.filter(record => record.kind === 'report').sort((left, right) => reportTime(right) - reportTime(left) || right.updated.localeCompare(left.updated))
@@ -183,7 +184,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     setAction(current => current && belongs(current.record) ? null : current)
     setComparison(current => current && (belongs(current.left) || belongs(current.right)) ? null : current)
     setConfiguration(current => current && (belongs(current.report) || (current.part && belongs(current.part))) ? null : current)
-    if (selectedId === receipt.vehicleId) setAttachmentFile(null)
+    if (selectedId === receipt.vehicleId) attachmentCancel.current?.()
     setDeleteVehicle(null); setDeleteReceipt(receipt); setHistoryPage(1)
     await load()
     if (receipt.localSynced) void message.success(text('vehicleDeleted'))
@@ -205,13 +206,6 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       await api(`/api/business/records/${record.id}${action.type === 'archive' ? '/archive' : ''}`, { method: action.type === 'archive' ? 'POST' : 'PUT', body: { data: { ...record.data, removedAt: today }, archived: action.archived, version: record.version, reason: actionReason } })
       setAction(null); await load(); void message.success(text('saved'))
     } catch (error) { onError(error) } finally { setBusy(false) }
-  }
-  async function saveFile(vehicleId: string) {
-    if (!attachmentFile) return
-    const form = new FormData(); form.append('file', attachmentFile)
-    setBusy(true)
-    try { await api(`/api/business/vehicles/${vehicleId}/attachments`, { method: 'POST', body: form }); setAttachmentFile(null); await load(); void message.success(text('saved')) }
-    catch (error) { onError(error) } finally { setBusy(false) }
   }
   async function compare() {
     setBusy(true)
@@ -280,8 +274,9 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     { title: text('savedAt'), width: 170, render: (_, record) => date(String(record.data.savedAt || record.updated)) }, { title: text('actions'), width: 110, render: (_, record) => <Space><Tooltip title={text('download')}><Button type="text" icon={<Download size={16} />} aria-label={text('download')} onClick={() => downloadFile(record)} /></Tooltip>{recordActions(record)}</Space> },
   ]} />
   const matchedReports = (vehicle: BusinessRecord) => reports.filter(report => !report.archived && reportMatchesVehicle(report, vehicle) && controllerSources(report).length > 0)
+  const controllerFor = (vehicleId: string, name: KeyControllerName) => records.find(record => record.kind === 'part' && record.vehicleId === vehicleId && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null
   const controllerTable = (vehicle: BusinessRecord, editable: boolean) => {
-    const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: records.find(record => record.kind === 'part' && record.vehicleId === vehicle.id && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null }))
+    const slots: ControllerSlot[] = keyControllerNames.map(name => ({ name, part: controllerFor(vehicle.id, name) }))
     const available = matchedReports(vehicle)
     return <div className="vehicle-controller-section"><div className="section-toolbar"><h3>{text(editable ? 'parts' : 'controllers')}</h3>{editable && <Tooltip title={!available.length ? text('noMatchedReports') : text('updateConfiguration')}><Button icon={<ClipboardCheck size={15} />} disabled={vehicle.archived || !available.length} onClick={() => openConfiguration(available[0])}>{text('updateConfiguration')}</Button></Tooltip>}</div>
       <Table<ControllerSlot> rowKey="name" className="controller-summary-table" dataSource={slots} size="small" pagination={false} scroll={{ x: 875 }} columns={[
@@ -353,8 +348,12 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         const value = activeHvBatteries(records, record.id).map(battery => display(battery.data[field])).join(' / ') || '—'
         return <Tooltip title={value}><span>{value}</span></Tooltip>
       } })),
+      { key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
+        const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
+        return <Tooltip title={value}><span>{value}</span></Tooltip>
+      } },
     ]} /></>}
-    <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadDove} onOpenReport={async (id, scope, signal) => { await loadDove(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
+    <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
     {view === 'history' && history(changes)}
     {view === 'audit' && <><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} value={query} onChange={event => setQuery(event.target.value)} /></div><Table<AuditEntry> rowKey="id" size="small" dataSource={audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase()))} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
@@ -374,13 +373,13 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       ]} />
     </>}
 
-    <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} onClose={() => setSelectedId(null)} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && recordActions(selected)}><Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
+    <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} onClose={() => { attachmentCancel.current?.(); setSelectedId(null) }} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && recordActions(selected)}><Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
       { key: 'overview', label: text('overview'), children: <div className="vehicle-overview"><VehiclePhoto key={selected.id} vehicle={selected} language={language} onChanged={load} onError={onError} onBusyChange={setBusy} /><Descriptions column={{ xs: 1, sm: 2 }} items={[...vehicleFields, ...(selected.data.coolingArchitecture ? ['coolingArchitecture'] : [])].map(key => ({ key, label: text(key === 'name' ? 'nickName' : key), children: <span className="preserve-text">{key === 'status' ? statusTag(String(selected.data[key])) : key === 'thermal' && thermalSystemTypes.some(value => value === selected.data[key]) ? text(String(selected.data[key])) : display(selected.data[key])}</span> }))} /><div className="drawer-version">v{selected.version} · {date(selected.updated)}</div></div> },
       { key: 'parts', label: text('parts'), children: controllerTable(selected, true) },
       { key: 'hvBattery', label: text('hvBattery'), children: hvBatteryTable(selected) },
       { key: 'modifications', label: text('modifications'), children: entryTable('modification', selected) }, { key: 'equipment', label: text('equipment'), children: entryTable('equipment', selected) },
       { key: 'reports', label: text('reports'), children: reportTable(reports.filter(record => record.vehicleId === selected.id && (!record.archived || archived))) },
-      { key: 'attachments', label: text('attachments'), children: <><div className="dove-upload"><Upload accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg" maxCount={1} beforeUpload={value => { setAttachmentFile(value); return false }} onRemove={() => setAttachmentFile(null)}><Button icon={<Plus size={15} />}>{text('chooseFile')}</Button></Upload><Button type="primary" disabled={!attachmentFile || selected.archived} loading={busy} onClick={() => void saveFile(selected.id)}>{text('upload')}</Button></div><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
+      { key: 'attachments', label: text('attachments'), children: <><AttachmentUpload key={selected.id} vehicle={selected} language={language} disabled={busy} onRefresh={loadScoped} onBusyChange={setBusy} onCancelReady={cancel => { attachmentCancel.current = cancel }} onError={onError} /><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
       { key: 'history', label: text('history'), children: history(changes.filter(change => change.vehicleId === selected.id)) },
     ] : []} /></Drawer>
     {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<BusinessRecord[]>('/api/business/export/records'); const available = next.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); setRecords(available); return available }} />}

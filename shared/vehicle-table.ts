@@ -1,4 +1,4 @@
-export const vehicleColumnIds = ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber'] as const
+export const vehicleColumnIds = ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType'] as const
 export type VehicleColumnId = typeof vehicleColumnIds[number]
 export type VehicleTablePreferences = { version: 1; columns: VehicleColumnId[]; widths: Partial<Record<VehicleColumnId, number>> }
 

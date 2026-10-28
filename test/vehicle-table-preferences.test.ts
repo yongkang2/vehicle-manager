@@ -20,15 +20,18 @@ class FakeScope {
   }
 }
 
-test('vehicle table catalog preserves ten defaults, permits all sixteen columns and returns detached layouts', () => {
-  assert.equal(vehicleColumnIds.length, 16); assert.equal(new Set(vehicleColumnIds).size, 16)
+test('vehicle table catalog preserves ten defaults, permits all seventeen columns and returns detached layouts', () => {
+  assert.equal(vehicleColumnIds.length, 17); assert.equal(new Set(vehicleColumnIds).size, 17)
   const first = defaultVehicleTablePreferences(), second = defaultVehicleTablePreferences()
   assert.deepEqual(first.columns, ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions'])
   first.columns.pop(); first.widths.notes = 300; assert.equal(second.columns.length, 10); assert.deepEqual(second.widths, {})
   const all = layout(['vehicle', ...vehicleColumnIds.filter(id => !['vehicle', 'actions'].includes(id)), 'actions'], { notes: 80, actions: 1000 })
   const parsed = parseVehicleTablePreferences(all); assert.deepEqual(parsed, all)
-  parsed!.columns.pop(); parsed!.widths.notes = 500; assert.equal(all.columns.length, 16); assert.equal(all.widths.notes, 80)
-  assert.deepEqual(parseVehicleTablePreferences(layout(['vehicle', 'actions'], { notes: 250 })), layout(['vehicle', 'actions'], { notes: 250 }), 'Hidden columns retain saved widths')
+  parsed!.columns.pop(); parsed!.widths.notes = 500; assert.equal(all.columns.length, 17); assert.equal(all.widths.notes, 80)
+  assert.deepEqual(parseVehicleTablePreferences(layout(['vehicle', 'actions'], { notes: 250, vcuType: 180 })), layout(['vehicle', 'actions'], { notes: 250, vcuType: 180 }), 'Hidden columns retain saved widths')
+  const legacy = layout(['vehicle', ...vehicleColumnIds.filter(id => !['vehicle', 'actions', 'vcuType'].includes(id)), 'actions'], { model: 185, notes: 420 })
+  assert.equal(legacy.columns.length, 16)
+  assert.deepEqual(parseVehicleTablePreferences(legacy), legacy, 'Existing sixteen-column layouts remain valid without automatically enabling VCU Type')
 })
 
 test('vehicle table validation rejects missing/duplicate/unknown columns, invalid bounds and unrecognized fields', () => {
@@ -45,7 +48,7 @@ test('personal vehicle layouts persist by local account/workspace without record
   const second = new LocalStore(path.join(root, 'second'))
   try {
     let preferences = new VehicleTablePreferencesStore(first)
-    const chosen = layout(['vehicle', 'hvBatterySerialNumber', 'model', 'actions'], { model: 185, notes: 420 })
+    const chosen = layout(['vehicle', 'hvBatterySerialNumber', 'vcuType', 'model', 'actions'], { model: 185, vcuType: 210, notes: 420 })
     const beforeSettings = first.db.prepare('SELECT * FROM settings ORDER BY key').all()
     assert.deepEqual(preferences.get('account-a'), defaultVehicleTablePreferences())
     assert.deepEqual(preferences.put('account-a', chosen), chosen)
