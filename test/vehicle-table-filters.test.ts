@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { complianceLevels } from '../shared/business.js'
 import type { BusinessRecord, Fields } from '../shared/business.js'
 import { vehicleColumnIds } from '../shared/vehicle-table.js'
 import { createVehicleFilterValues, findVehicleTableController, matchesVehicleColumnFilters, sortedVehicleReports, vehicleColumnFilterOptions, visibleVehicleColumnFilters } from '../src/vehicle-table-filters.js'
@@ -72,6 +73,55 @@ test('composite keys include secondary values and encode separators without ambi
   assert.notEqual(separated.get('left')!.vehicle.key, separated.get('right')!.vehicle.key)
   assert.equal(createVehicleFilterValues([vehicle('blank', { name: null, vin: '' })], 'en').get('blank')!.vehicle.key, '[]')
   assert.equal(createVehicleFilterValues([vehicle('partial', { name: '', vin: 'VIN' })], 'en').get('partial')!.vehicle.label, '— · VIN')
+})
+
+test('independent nickname, VIN and plate-expiry filters do not inherit composite secondary values', () => {
+  const cars = [
+    vehicle('a', { name: 'Trial', vin: 'VIN-A', plate: '00123', plateExpiry: '2027-01-01' }),
+    vehicle('b', { name: 'Trial', vin: 'VIN-B', plate: '00123', plateExpiry: '2028-01-01' }),
+    vehicle('c', { name: 'Other', vin: 'VIN-C', plate: 'Other plate', plateExpiry: '2027-01-01' }),
+  ]
+  const values = createVehicleFilterValues(cars, 'en')
+  const matching = (filters: VehicleColumnFilters) => cars.filter(car => matchesVehicleColumnFilters(values.get(car.id)!, filters)).map(car => car.id)
+  assert.deepEqual(matching({ name: [key('Trial')] }), ['a', 'b'])
+  assert.deepEqual(matching({ vehicle: [key('Trial', 'VIN-A')] }), ['a'])
+  assert.deepEqual(matching({ vin: [key('VIN-B')] }), ['b'])
+  assert.deepEqual(matching({ plateExpiry: [key('2027-01-01')] }), ['a', 'c'])
+  assert.deepEqual(matching({ plate: [key('00123', '2027-01-01')] }), ['a'])
+  assert.deepEqual(matching({ name: [key('Trial')], plateExpiry: [key('2028-01-01')] }), ['b'])
+  assert.deepEqual(vehicleColumnFilterOptions('name', cars, values, [], 'en').map(value => value.label), ['Other', 'Trial'])
+  assert.deepEqual(vehicleColumnFilterOptions('plateExpiry', cars, values, [], 'en').map(value => value.label), ['2027-01-01', '2028-01-01'])
+  assert.deepEqual(values.get('a')!.vin, { key: key('VIN-A'), label: 'VIN-A' })
+})
+
+test('Compliance Level filters preserve every enum, distinguish legacy blanks and keep language-independent values', () => {
+  const cars = [
+    ...complianceLevels.map(value => vehicle(value, { complianceLevel: value })),
+    vehicle('missing'), vehicle('null', { complianceLevel: null }), vehicle('empty', { complianceLevel: '' }), vehicle('dash', { complianceLevel: '—' }),
+  ]
+  const english = createVehicleFilterValues(cars, 'en'), chinese = createVehicleFilterValues(cars, 'zh')
+  for (const level of complianceLevels) {
+    assert.deepEqual(english.get(level)!.complianceLevel, { key: key(level), label: level })
+    assert.deepEqual(chinese.get(level)!.complianceLevel, english.get(level)!.complianceLevel)
+    assert.deepEqual(cars.filter(car => matchesVehicleColumnFilters(english.get(car.id)!, { complianceLevel: [key(level)] })).map(car => car.id), [level])
+  }
+  assert.deepEqual(cars.filter(car => matchesVehicleColumnFilters(english.get(car.id)!, { complianceLevel: ['[]'] })).map(car => car.id), ['missing', 'null', 'empty'])
+  assert.equal(english.get('missing')!.complianceLevel.label, '(blank)')
+  assert.equal(chinese.get('missing')!.complianceLevel.label, '（空白）')
+  assert.deepEqual(english.get('dash')!.complianceLevel, { key: key('—'), label: '—' })
+  const options = vehicleColumnFilterOptions('complianceLevel', cars, english, [], 'en')
+  assert.equal(options.length, complianceLevels.length + 2)
+  assert.deepEqual(cars.filter(car => matchesVehicleColumnFilters(chinese.get(car.id)!, { complianceLevel: [key('Eu7'), key('CN6')] })).map(car => car.id), ['Eu7', 'CN6'])
+})
+
+test('legacy cooling text is filterable while cover-photo references and arbitrary data never become columns', () => {
+  const legacy = vehicle('legacy', { coolingArchitecture: 'Legacy loop\n历史架构', photoAttachmentId: 'private-image-id', unknownField: 'Hidden value' })
+  const modern = vehicle('modern'), values = createVehicleFilterValues([legacy, modern], 'zh')
+  assert.deepEqual(values.get(legacy.id)!.coolingArchitecture, { key: key('Legacy loop\n历史架构'), label: 'Legacy loop\n历史架构' })
+  assert.equal(values.get(modern.id)!.coolingArchitecture.key, '[]')
+  assert(matchesVehicleColumnFilters(values.get(legacy.id)!, { coolingArchitecture: [key('Legacy loop\n历史架构')] }))
+  assert(!matchesVehicleColumnFilters(values.get(modern.id)!, { coolingArchitecture: [key('Legacy loop\n历史架构')] }))
+  for (const row of values.values()) for (const field of ['photoAttachmentId', 'vehiclePhoto', 'unknownField']) assert(!Object.hasOwn(row, field))
 })
 
 test('battery filters use the whole ordered active-battery summary and omit archived and removed batteries', () => {

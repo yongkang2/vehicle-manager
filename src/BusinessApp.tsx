@@ -14,6 +14,7 @@ import ResizableVehicleTable from './ResizableVehicleTable'
 import { useVehicleTablePreferences } from './use-vehicle-table-preferences'
 import { useVehicleTableFilterSession } from './vehicle-table-filter-session'
 import { createVehicleFilterValues, findVehicleTableController, sortedVehicleReports } from './vehicle-table-filters'
+import { vehicleOverviewColumnIds } from '../shared/vehicle-table'
 import VehiclePhoto from './VehiclePhoto'
 import AttachmentUpload from './AttachmentUpload'
 import './BusinessApp.css'
@@ -358,6 +359,12 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
         return <Tooltip title={value}><span>{value}</span></Tooltip>
       } },
+      ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
+        key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+          const value = display(record.data[field])
+          return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
+        },
+      })),
     ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())), true)}</>}

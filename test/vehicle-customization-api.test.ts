@@ -71,7 +71,7 @@ test('personal column APIs persist across restart without publishing queues, and
     const workspace = f.client.workspaces.get(a.id), current = workspace.business.get(car.id)
     workspace.business.write({ id: car.id, kind: 'vehicle', data: { ...current.data, notes: 'Unpublished local edit' }, version: current.version, actor: { id: 'fixture', name: 'Fixture', deviceId: workspace.store.deviceId, role: 'member' }, reason: 'Leave a pending operation' })
     const before = workspace.synchronization.status().pending, headPath = path.join(a.shared, 'business', 'HEAD.json'), head = await fs.readFile(headPath)
-    const selected = { version: 1, columns: ['vehicle', 'model', 'notes', 'actions'], widths: { model: 333, project: 444 } }
+    const selected = { version: 1, columns: ['vehicle', 'name', 'vin', 'plateExpiry', 'complianceLevel', 'coolingArchitecture', 'model', 'notes', 'actions'], widths: { model: 333, project: 444, name: 180, vin: 230, plateExpiry: 160, complianceLevel: 170, coolingArchitecture: 200 } }
     for (const paused of [0, 1]) {
       f.client.store.db.prepare('UPDATE sessions SET sync_enabled=? WHERE user_id<>?').run(paused, second.id)
       for (const route of ['/business/vehicle-table-preferences', '/business/VEHICLE-TABLE-PREFERENCES/']) {

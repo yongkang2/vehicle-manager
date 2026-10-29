@@ -100,6 +100,11 @@ export function createVehicleFilterValues(records: readonly BusinessRecord[], la
       hvBatteryPartNumber: value('hvBatteryPartNumber', ...batteries.map(battery => battery.data.productPart)),
       hvBatterySerialNumber: value('hvBatterySerialNumber', ...batteries.map(battery => battery.data.serial)),
       vcuType: value('vcuType', findVehicleTableController(parts, vehicle.id, 'VCU')?.data.controllerType),
+      name: value('name', vehicle.data.name),
+      vin: value('vin', vehicle.data.vin),
+      plateExpiry: value('plateExpiry', vehicle.data.plateExpiry),
+      complianceLevel: value('complianceLevel', vehicle.data.complianceLevel),
+      coolingArchitecture: value('coolingArchitecture', vehicle.data.coolingArchitecture),
     })
   }
   return result
