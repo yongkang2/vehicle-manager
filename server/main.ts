@@ -23,7 +23,7 @@ const interval = setInterval(() => { void tick() }, 30000).unref()
 const stateFile = path.join(dataDir, 'service.json')
 const server = app.listen(port, '127.0.0.1', () => {
 	const actualPort = (server.address() as { port: number }).port
-	const state = { pid: process.pid, port: actualPort, instanceId: createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex'), controlToken, version: appVersion }
+	const state = { pid: process.pid, port: actualPort, instanceId: createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex'), controlToken, version: process.env.VEHICLE_MANAGER_RELEASE_VERSION || appVersion }
 	void atomicFile(stateFile, JSON.stringify(state)).then(() => { if (closing) return; browserPresence.start(); console.log(`Vehicle Data Management: http://127.0.0.1:${actualPort}`); process.send?.({ type: 'ready', port: actualPort, instanceId: state.instanceId, pid: process.pid }) }).catch(() => { void shutdown(); process.exitCode = 1 })
 })
 const disposePresence = installBrowserPresence(server, browserPresence, { token: presenceToken })
@@ -31,10 +31,10 @@ async function shutdown() {
 	if (closing) return
 	closing = true; clearInterval(interval); browserPresence.stop(); disposePresence()
 	server.close(() => {
-		void close().finally(async () => {
+		void close().then(async () => {
 			const state = await fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value) as { pid: number }).catch(() => null)
 			if (state?.pid === process.pid) await fs.rm(stateFile, { force: true })
-		})
+		}).catch(error => { console.error('Service shutdown failed:', error); process.exitCode = 1 })
 	})
 }
 process.once('SIGINT', () => { void shutdown() }); process.once('SIGTERM', () => { void shutdown() })

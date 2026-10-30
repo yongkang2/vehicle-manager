@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const root = path.dirname(fileURLToPath(import.meta.url))
 const application = existsSync(path.join(root, 'app', 'dist-server')) ? path.join(root, 'app') : root
 const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
-const appVersion = String(packageInfo.version)
+const appVersion = process.env.VEHICLE_MANAGER_RELEASE_VERSION || String(packageInfo.version)
 const { resolveDataDirectory } = await import(pathToFileURL(path.join(application, 'dist-server', 'shared', 'data-directory.js')).href)
 const dataDir = await resolveDataDirectory(root)
 const stateFile = path.join(dataDir, 'service.json')
@@ -29,6 +29,12 @@ async function stop() {
 }
 async function launch() {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required.')
+  if (existsSync(`${dataDir}.update-lock`)) {
+    const owner = await fs.readFile(`${dataDir}.update-lock`, 'utf8')
+    if (owner !== process.env.VEHICLE_MANAGER_UPDATE_LOCK_OWNER || !alive(Number(owner))) throw new Error('An application update is in progress. Do not start an older release.')
+  }
+  const managed = process.argv.includes('--managed')
+  let managedExit
   await fs.mkdir(dataDir, { recursive: true })
   const lock = path.join(dataDir, '.launch-lock'), token = randomUUID()
   try { await fs.mkdir(lock) } catch (error) {
@@ -65,14 +71,15 @@ async function launch() {
         const log = openSync(path.join(dataDir, 'startup.log'), 'a')
         let child
         try {
-          child = fork(entry, [], { cwd: application, execArgv: [], env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir }, detached: true, windowsHide: true, stdio: ['ignore', log, log, 'ipc'] })
+          child = fork(entry, [], { cwd: application, execArgv: [], env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir }, detached: !managed, windowsHide: true, stdio: ['ignore', log, log, 'ipc'] })
+          if (managed) managedExit = new Promise(resolve => child.once('exit', code => resolve(code ?? 1)))
           port = await new Promise((resolve, reject) => {
             const notice = setTimeout(() => console.log('The application is still starting. A large local database migration may take several minutes; leave this window open.'), 20000)
             child.once('message', message => { clearTimeout(notice); if (message.type === 'ready' && message.instanceId === instanceId) resolve(message.port); else reject(new Error('Port busy or startup failed.')) })
             child.once('error', error => { clearTimeout(notice); reject(error) })
             child.once('exit', () => { clearTimeout(notice); reject(new Error('Application exited during startup.')) })
           })
-          child.disconnect(); child.unref()
+          child.disconnect(); if (!managed) child.unref()
         } catch (error) { child?.kill(); if (attempt === 19 || base === 0) throw error } finally { closeSync(log) }
       }
     }
@@ -87,6 +94,7 @@ async function launch() {
     const owner = await fs.readFile(path.join(lock, 'owner.json'), 'utf8').then(value => JSON.parse(value)).catch(() => null)
     if (owner?.token === token) await fs.rm(lock, { recursive: true })
   }
+  if (managedExit && await managedExit !== 0) throw new Error('The managed service did not exit cleanly.')
 }
 try { if (process.argv.includes('--stop')) await stop(); else await launch() }
 catch (error) { console.error(error.message); process.exitCode = 1 }

@@ -48,7 +48,7 @@ async function legacyDataDirectory(projectRoot: string): Promise<string> {
   return candidates[0] || local
 }
 
-export async function resolveDataDirectory(projectRoot: string): Promise<string> {
+export async function resolveDataDirectory(projectRoot: string, renameLegacy: typeof fs.rename = fs.rename): Promise<string> {
   const override = process.env.VEHICLE_MANAGER_DATA_DIR
   if (override) {
     const resolved = path.resolve(override)
@@ -76,14 +76,21 @@ export async function resolveDataDirectory(projectRoot: string): Promise<string>
   const temporary = `${destination}.migration-${randomUUID()}`
   const legacyBackup = `${legacy}.migrated-backup-${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`
   let legacyArchived = false
+  let sourceRetained = false
   try {
     await fs.cp(legacy, temporary, { recursive: true, errorOnExist: true, force: false })
     const [sourceFiles, copiedFiles] = await Promise.all([fileInventory(legacy), fileInventory(temporary)])
     if (sourceFiles.size !== copiedFiles.size || [...sourceFiles].some(([name, file]) => JSON.stringify(file) !== JSON.stringify(copiedFiles.get(name)))) throw new Error('The local data migration did not verify; the original data was left untouched.')
-    await fs.rename(legacy, legacyBackup); legacyArchived = true
+    try { await renameLegacy(legacy, legacyBackup); legacyArchived = true }
+    catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(code)) throw error
+      sourceRetained = true
+      console.warn('The old data folder could not be renamed. The verified new copy will be used; keep the old folder as a backup and do not start an older release.')
+    }
     await fs.rm(path.join(temporary, 'service.json'), { force: true })
     await fs.rm(path.join(temporary, '.launch-lock'), { recursive: true, force: true })
-    await fs.writeFile(path.join(temporary, '.data-migrated'), JSON.stringify({ source: path.resolve(legacy), backup: path.resolve(legacyBackup), created: new Date().toISOString() }), { flag: 'wx' })
+    await fs.writeFile(path.join(temporary, '.data-migrated'), JSON.stringify({ source: path.resolve(legacy), backup: legacyArchived ? path.resolve(legacyBackup) : null, sourceRetained, created: new Date().toISOString() }), { flag: 'wx' })
     await fs.rename(temporary, destination)
   } catch (error) {
     await fs.rm(temporary, { recursive: true, force: true }).catch(() => {})

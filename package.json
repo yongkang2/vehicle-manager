@@ -12,6 +12,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "package:portable": "npm run build && node scripts/package.mjs",
+    "package:stable": "npm run build && node scripts/package-stable.mjs",
+    "verify:stable": "node scripts/smoke-stable.mjs",
     "version": "node scripts/sync-version.mjs && git add shared/version.ts",
     "verify:portable": "node scripts/verify-portable.mjs"
   },
@@ -34,6 +36,7 @@
     "multer": "^2.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "semver": "^7.8.5",
     "unzipper": "^0.12.5",
     "ws": "8.22.0"
   },

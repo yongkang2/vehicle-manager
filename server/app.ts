@@ -12,6 +12,8 @@ import { Workspaces } from './workspaces.js'
 import { Business } from './business.js'
 import { appVersion } from '../shared/version.js'
 import type { BrowserPresence } from './browser-presence.js'
+import { ApplicationUpdates, installedUpdateBackend } from './updates.js'
+import type { UpdateBackend } from './updates.js'
 
 type Config = { sharedPath: string; teamId: string }
 type Account = { id: string; username: string; display_name: string; salt: string; hash: string }
@@ -25,11 +27,14 @@ function role(value: unknown): Role {
   return value
 }
 
-export function createApp({ dataDir, staticDir, controlToken, onShutdown, browserPresence, presenceToken }: { dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void; browserPresence?: BrowserPresence; presenceToken?: string }) {
+export function createApp({ dataDir, staticDir, controlToken, onShutdown, browserPresence, presenceToken, updateBackend }: { dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void; browserPresence?: BrowserPresence; presenceToken?: string; updateBackend?: UpdateBackend }) {
   const store = new LocalStore(dataDir)
   const teams = new TeamDirectory(store.get<TeamDocument>('cachedTeam'))
   const workspaces = new Workspaces(store)
   const active = new Map<string, number>(), switching = new Set<string>()
+  const updates = new ApplicationUpdates(updateBackend || installedUpdateBackend())
+  let startupChecking = process.env.VEHICLE_MANAGER_STARTUP_CHECK === '1', startupHealthy = false
+  let ordinaryRequests = 0
   const app = express()
   app.disable('x-powered-by')
   app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null, 'img-src': ["'self'", 'data:', 'blob:'] } } }))
@@ -51,6 +56,14 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   app.use('/api', (req, res, next) => {
     res.set('Cache-Control', 'no-store')
     if (!['GET', 'HEAD'].includes(req.method) && req.get('X-App-Request') !== 'vehicle-manager') return next(new AppError('INVALID_REQUEST', 403))
+    if (updates.installing && req.path !== '/local/shutdown') return next(new AppError('MAINTENANCE_IN_PROGRESS', 503))
+    if (startupChecking && !['/bootstrap', '/local/shutdown', '/local/update-health', '/local/update-activate'].includes(req.path)) return next(new AppError('MAINTENANCE_IN_PROGRESS', 503))
+    if (!req.path.startsWith('/updates') && req.path !== '/local/browser-presence-token') {
+      ordinaryRequests++
+      let released = false
+      const release = () => { if (!released) { released = true; ordinaryRequests-- } }
+      res.once('finish', release); res.once('close', release)
+    }
     next()
   })
   const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, legacyHeaders: false, standardHeaders: 'draft-8', message: { error: 'TOO_MANY_ATTEMPTS' } })
@@ -74,13 +87,32 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     next()
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
-  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
+  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: process.env.VEHICLE_MANAGER_RELEASE_VERSION || appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
   if (browserPresence && presenceToken) app.post('/api/local/browser-presence-token', (req, res) => res.json({ token: presenceToken }))
   app.post('/api/local/shutdown', (req, res) => {
     const supplied = req.get('X-Control-Token') || ''
     if (!controlToken || !/^[a-f0-9]{64}$/.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(controlToken))) throw new AppError('INVALID_REQUEST', 403)
     res.once('finish', () => onShutdown?.())
     res.json({ ok: true })
+  })
+  for (const command of ['update-health', 'update-activate']) app.post(`/api/local/${command}`, (req, res, next) => {
+    try {
+      const supplied = req.get('X-Control-Token') || ''
+      if (!controlToken || !/^[a-f0-9]{64}$/.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(controlToken))) throw new AppError('INVALID_REQUEST', 403)
+      if (!startupChecking) throw new AppError('INVALID_REQUEST', 409)
+      if (command === 'update-health') {
+        const stores = new Set([store])
+        for (const row of store.db.prepare('SELECT id FROM workspaces').all()) stores.add(workspaces.get(String(row.id)).store)
+        for (const local of stores) {
+          if (local.db.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || local.db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Local database integrity check failed.')
+        }
+        startupHealthy = true
+      } else {
+        if (!startupHealthy) throw new AppError('INVALID_REQUEST', 409)
+        startupChecking = false
+      }
+      res.json({ ok: true })
+    } catch (error) { next(error) }
   })
   app.post('/api/register', limiter, (req, res, next) => {
     try {
@@ -111,6 +143,33 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     } catch (error) { next(error) }
   })
   app.use('/api', (req: AuthRequest, res, next) => req.localUser ? next() : next(new AppError('LOGIN_REQUIRED', 401)))
+  app.get('/api/updates', (req, res) => res.json(updates.status()))
+  for (const command of ['check', 'download'] as const) app.post(`/api/updates/${command}`, async (req, res, next) => {
+    try { await updates.run(command); res.json(updates.status()) } catch (error) { next(error) }
+  })
+  app.post('/api/updates/install', async (req, res, next) => {
+    try {
+      if (req.body?.confirmed !== true) throw new AppError('UPDATE_CONFIRMATION_REQUIRED', 409)
+      if (!onShutdown) throw new AppError('UPDATE_NOT_INSTALLED', 409)
+      await updates.install(async () => {
+        if (ordinaryRequests) throw new AppError('WORKSPACE_BUSY', 409)
+        await workspaces.settle()
+        const stores = new Set([store])
+        for (const row of store.db.prepare('SELECT id FROM workspaces').all()) stores.add(workspaces.get(String(row.id)).store)
+        for (const local of stores) {
+          const pending = local.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total
+          const conflicts = local.db.prepare('SELECT COUNT(*) AS total FROM conflicts').get()!.total
+          if (pending || conflicts || local.get<unknown[]>('pendingDeletionImports')?.length) throw new AppError('UPDATE_PENDING_CHANGES', 409)
+        }
+      })
+      let shutdownRequested = false
+      const requestShutdown = () => { if (!shutdownRequested) { shutdownRequested = true; onShutdown() } }
+      res.once('finish', requestShutdown)
+      res.once('close', requestShutdown)
+      if (res.destroyed) requestShutdown()
+      else res.json(updates.status())
+    } catch (error) { next(error) }
+  })
   app.post('/api/logout', (req: AuthRequest, res) => {
     store.db.prepare('DELETE FROM sessions WHERE token=?').run(req.sessionToken || '')
     res.clearCookie('vdm_session', { path: '/' }); res.json({ ok: true })
@@ -317,5 +376,5 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     console.error('Request failed:', error instanceof Error ? error.name : 'Unknown error')
     res.status(500).json({ error: 'SERVER_ERROR' })
   })
-  return { app, store, business: new Business(store), workspaces, tick: () => workspaces.tick(), synchronization: { settle: () => workspaces.settle() }, close: () => workspaces.close() }
+  return { app, store, business: new Business(store), workspaces, tick: () => updates.installing || startupChecking ? Promise.resolve() : workspaces.tick(), synchronization: { settle: () => workspaces.settle() }, close: () => workspaces.close() }
 }

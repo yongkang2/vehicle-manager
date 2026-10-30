@@ -1,5 +1,6 @@
 export type Language = 'en' | 'zh'
 const en = {
+  programUpdates: 'Program updates',
   product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
   username: 'Username', recentUsernameHint: 'Choose a previous account or enter a username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
   local: 'Local device', online: 'Connected', offline: 'Offline', refresh: 'Refresh', setupTitle: 'Connect your workspace', path: 'Shared folder path', test: 'Test connection', later: 'Set up later',
@@ -19,6 +20,7 @@ const en = {
   withdrawWarning: 'Withdraw this account’s pending request from the original team? This requires a reachable shared folder. If unavailable, you can disconnect this session, but the remote request remains.', reloadPage: 'Reload page',
 }
 const zh: Record<keyof typeof en, string> = {
+  programUpdates: '程序更新',
   product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', recentUsernameHint: '选择历史账号，或输入用户名', displayName: '姓名', password: '密码',
   account: '本地账号', developer: '开发者', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
   path: '共享文件夹路径', test: '测试连接', later: '稍后配置', notConfigured: '尚未配置共享目录', emptyFolder: '已验证为空目录', existingTeam: '发现已有团队', checks: '读取、写入和重命名检查通过',
@@ -36,6 +38,12 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  UPDATE_NOT_INSTALLED: ['Open the application through its stable launcher to enable updates.', '请从固定启动器打开程序，再使用程序更新。'],
+  UPDATE_BUSY: ['Another update operation is in progress.', '其他更新操作正在进行，请稍后重试。'],
+  UPDATE_SOURCE_UNAVAILABLE: ['The update could not be verified or downloaded. Check the source and launcher log.', '更新校验或下载失败，请检查更新源及启动器日志。'],
+  UPDATE_NOT_READY: ['Download an update before installing.', '请先下载新版，再执行安装。'],
+  UPDATE_CONFIRMATION_REQUIRED: ['Confirm that all application tabs are saved before installing.', '请先确认所有应用标签页的内容均已保存。'],
+  UPDATE_PENDING_CHANGES: ['Finish pending changes and conflicts in every local team before updating.', '请先处理本机所有团队的待同步修改及冲突，再更新。'],
   COMPLIANCE_LEVEL_REQUIRED: ['Choose a compliance level before saving.', '保存前请选择合规等级。'],
   CONTROLLER_TYPE_REQUIRED: ['Choose a controller type before saving.', '保存前请选择控制器类型。'],
   BATTERY_LIFE_STATUS_REQUIRED: ['Choose an HV battery life status before saving.', '保存前请选择高压电池寿命状态。'],

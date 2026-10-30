@@ -1,6 +1,6 @@
 # STELLANTIS Vehicle Data Management
 
-Version 1.0.1, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
+Version 1.1.0, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
 
 ## Current Scope
 
@@ -81,7 +81,7 @@ Archive remains reversible. An online administrator with synchronization enabled
 
 Deletion is published under the shared lock before success is reported. A dropped response can be retried with the same request; a committed deletion awaiting local refresh is not an ordinary failed deletion. Permanent deletion markers prevent stale offline edits, new offline children and old backups from resurrecting the old record IDs. Blocked local operations and their files remain quarantined: inspect/export them in **Shared sync**; there is no keep-local resurrection option. A VIN can be registered again with a new vehicle identity, and a fresh DOVE preview can retain the same original for that new identity without reviving deleted records.
 
-Before the first deletion, stop other installations, independently back up the shared folder and each local data folder, and deploy this deletion-aware version to **all collaborating clients**. Existing local SQLite databases upgrade to schema 4 on first open, including either earlier schema-3 layout; older binaries cannot open the upgraded local folder. The application version remains 1.0.1. Business sync continues using protocol 1 until the first deletion (or an authorized restore imports deletion markers), which atomically publishes protocol 2. Backup format remains 2 and the team roster remains protocol 1. Old separate installations cannot publish to business protocol 2 and may show `SHARE_CORRUPTED`/offline: upgrade them, do not roll back HEAD or delete shared files. Offline cached copies disappear only after an upgraded client reconnects and synchronizes.
+Before the first deletion, stop other installations, independently back up the shared folder and each local data folder, and deploy this deletion-aware version to **all collaborating clients**. Existing local SQLite databases upgrade to schema 4 on first open, including either earlier schema-3 layout; older binaries cannot open the upgraded local folder. The application version remains 1.1.0. Business sync continues using protocol 1 until the first deletion (or an authorized restore imports deletion markers), which atomically publishes protocol 2. Backup format remains 2 and the team roster remains protocol 1. Old separate installations cannot publish to business protocol 2 and may show `SHARE_CORRUPTED`/offline: upgrade them, do not roll back HEAD or delete shared files. Offline cached copies disappear only after an upgraded client reconnects and synchronizes.
 
 The admin APIs are `GET /api/business/vehicles/:id/delete-preview` and `DELETE /api/business/vehicles/:id`; deletion uses an actor-bound preview, current version, exact VIN/confirmation/reason, and an idempotency request ID. Quarantined payloads are read-only at `/api/business/sync/quarantined` and can be exported at `/api/business/sync/quarantined/export`.
 
@@ -103,7 +103,7 @@ Named templates remember filters, enabled categories, ordered columns, archive i
 
 Exports use one local working-copy snapshot. Export, selection refresh and template management do not publish pending operations or resume paused synchronization. Offline/pending/conflicted data is identified in the dialog; synchronize separately if a current shared view is required. Known deleted identities are excluded, and a missing or no-longer-matching selection must be refreshed rather than silently replaced by another vehicle with the same VIN. Switching, logout or closing the export dialog cancels/discards an unfinished download.
 
-CSV files use UTF-8 BOM, comma delimiters, CRLF rows, quoted special characters and spreadsheet-formula protection. Headers are localized; stored values and dates are not reformatted, and missing values are empty cells. For identifiers such as serial numbers with leading zeros or long numeric codes, use Excel **Data → From Text/CSV** and import those columns as **Text**; double-clicking a CSV can let Excel auto-convert them. Each export is limited to 20,000 selected vehicles and 200 MiB of uncompressed CSV or ZIP data; export smaller batches if needed. Application version 1.0.1, local schema 4 and shared/backup formats remain unchanged.
+CSV files use UTF-8 BOM, comma delimiters, CRLF rows, quoted special characters and spreadsheet-formula protection. Headers are localized; stored values and dates are not reformatted, and missing values are empty cells. For identifiers such as serial numbers with leading zeros or long numeric codes, use Excel **Data → From Text/CSV** and import those columns as **Text**; double-clicking a CSV can let Excel auto-convert them. Each export is limited to 20,000 selected vehicles and 200 MiB of uncompressed CSV or ZIP data; export smaller batches if needed. Application version 1.1.0, local schema 4 and shared/backup formats remain unchanged.
 
 ## Portable Distribution
 

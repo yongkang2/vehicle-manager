@@ -85,3 +85,31 @@ test('first portable launch refuses to choose between multiple old data director
     await fs.rm(root, { recursive: true, force: true })
   }
 })
+
+test('Windows rename denial keeps the old folder and starts only from the verified copy', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-data-rename-denied-'))
+  const local = path.join(root, 'local'), project = path.join(root, 'release'), legacy = path.join(project, 'data')
+  const previousLocal = process.env.LOCALAPPDATA, previousOverride = process.env.VEHICLE_MANAGER_DATA_DIR
+  process.env.LOCALAPPDATA = local
+  delete process.env.VEHICLE_MANAGER_DATA_DIR
+  try {
+    await fs.mkdir(legacy, { recursive: true })
+    await fs.writeFile(path.join(legacy, 'local.sqlite'), 'verified identity data')
+    const renameLegacy = async (source: string, destination: string) => {
+      if (source === legacy) throw Object.assign(new Error('directory in use'), { code: 'EPERM' })
+      return fs.rename(source, destination)
+    }
+    const destination = await resolveDataDirectory(project, renameLegacy)
+    assert.equal(await fs.readFile(path.join(destination, 'local.sqlite'), 'utf8'), 'verified identity data')
+    assert.equal(await fs.readFile(path.join(legacy, 'local.sqlite'), 'utf8'), 'verified identity data')
+    const marker = JSON.parse(await fs.readFile(path.join(destination, '.data-migrated'), 'utf8'))
+    assert.equal(marker.sourceRetained, true)
+    assert.equal(marker.backup, null)
+  } finally {
+    if (previousLocal === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = previousLocal
+    if (previousOverride === undefined) delete process.env.VEHICLE_MANAGER_DATA_DIR
+    else process.env.VEHICLE_MANAGER_DATA_DIR = previousOverride
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
