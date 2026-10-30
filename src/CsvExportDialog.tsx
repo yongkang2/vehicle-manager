@@ -2,8 +2,8 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Alert, App, Button, Checkbox, Input, Modal, Select, Space, Table, Tabs, Tag, Tooltip } from 'antd'
 import { ArrowDown, ArrowUp, Download, RefreshCw } from 'lucide-react'
 import { defaultExportConfiguration, exportColumns, exportFilterFields, exportKinds, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration, recordsForExport } from '../shared/csv-export'
-import type { ExportConfiguration, ExportTemplate } from '../shared/csv-export'
-import type { BusinessRecord, RecordKind, SyncStatus } from '../shared/business'
+import type { ExportConfiguration, ExportRecordKind, ExportTemplate } from '../shared/csv-export'
+import type { BusinessRecord, SyncStatus } from '../shared/business'
 import { api, ApiError, download } from './api'
 import { translateBusiness } from './business-i18n'
 import { errorText } from './i18n'
@@ -55,13 +55,13 @@ export default function CsvExportDialog({ records, language, online, syncPaused,
   function applyConfiguration(next: ExportConfiguration) {
     setConfiguration(next); setPage(1); setSelectedIds(records.filter(record => matchesExportVehicle(record, next)).map(record => record.id)); setError(null)
   }
-  function updateColumns(kind: RecordKind, columns: string[] | undefined) {
+  function updateColumns(kind: ExportRecordKind, columns: string[] | undefined) {
     const next = { ...configuration.columns }
     if (columns === undefined) delete next[kind]
     else next[kind] = columns
     setConfiguration({ ...configuration, columns: next }); setError(null)
   }
-  function moveColumn(kind: RecordKind, index: number, offset: number) {
+  function moveColumn(kind: ExportRecordKind, index: number, offset: number) {
     const next = [...(configuration.columns[kind] || [])]
     const target = index + offset
     if (target < 0 || target >= next.length) return

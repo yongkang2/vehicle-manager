@@ -125,7 +125,7 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
     await fs.rename(shared, shared + '-offline')
     try { assert.equal((await request(admin, '/business/vehicles/' + replacement.data.id + '/delete-preview')).status, 503) }
     finally { await fs.rename(shared + '-offline', shared) }
-    assert.equal(admin.store.db.prepare('PRAGMA user_version').get()!.user_version, 4)
+    assert.equal(admin.store.db.prepare('PRAGMA user_version').get()!.user_version, 5)
   } finally {
     for (const client of clients) {
       await new Promise<void>(resolve => client.server.close(() => resolve()))

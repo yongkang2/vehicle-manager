@@ -59,7 +59,7 @@ function inspectSchema(db: DatabaseSync, version: number): { core: boolean; busi
   const deletion = completeGroup(['vehicle_deletions', 'quarantined_operations'])
   const workspace = completeGroup(['workspaces', 'account_workspaces'])
   if (version === 0 ? tables.size !== 0 : !core) throw schemaError()
-  if ((version === 1 && (business || deletion || workspace)) || (version >= 2 && !business) || (version === 3 && !deletion && !workspace) || (version === 4 && (!deletion || !workspace))) throw schemaError()
+  if ((version === 1 && (business || deletion || workspace)) || (version >= 2 && !business) || (version === 3 && !deletion && !workspace) || (version >= 4 && (!deletion || !workspace))) throw schemaError()
   const sessionColumns = core ? db.prepare('PRAGMA table_info(sessions)').all().map(row => String(row.name)) : []
   const addedColumns = workspaceColumns.filter(definition => sessionColumns.includes(definition.split(' ')[0])).length
   if (addedColumns !== (workspace ? workspaceColumns.length : 0)) throw schemaError()
@@ -100,15 +100,15 @@ export class LocalStore {
     try {
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
       const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number
-      if (version > 4) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
+      if (version > 5) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
       const shape = inspectSchema(this.db, version)
       const machine = shape.core ? this.get<string>('machine') : null
       if (machine && machine !== this.deviceName) throw new AppError('COPIED_LOCAL_DATA', 409)
       const selectedDevice = deviceId || (shape.core ? this.get<string>('deviceId') : null) || randomUUID()
       const config = shape.core && !shape.workspace ? this.get<{ teamId: string; sharedPath: string }>('configuration') : null
       if (config && (typeof config.teamId !== 'string' || !config.teamId || typeof config.sharedPath !== 'string' || !config.sharedPath)) throw schemaError()
-      if (version < 4) {
-        if (version > 0) this.backupBeforeSchema4(version)
+      if (version < 5) {
+        if (version > 0) this.backupBeforeUpgrade(version)
         this.transaction(() => {
           if (!shape.core) this.db.exec(coreSql)
           if (!shape.business) this.db.exec(businessSql)
@@ -122,9 +122,9 @@ export class LocalStore {
               this.db.prepare('UPDATE sessions SET workspace_id=?').run(config.teamId)
             }
           }
-          inspectSchema(this.db, 4)
+          inspectSchema(this.db, 5)
           this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
-          this.db.exec('PRAGMA user_version=4')
+          this.db.exec('PRAGMA user_version=5')
         })
       } else {
         this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
@@ -132,11 +132,11 @@ export class LocalStore {
       this.deviceId = selectedDevice
     } catch (error) { this.db.close(); throw error }
   }
-  private backupBeforeSchema4(version: number): void {
+  private backupBeforeUpgrade(version: number): void {
     try {
       const backups = path.join(this.directory, 'migration-backups')
       mkdirSync(backups, { recursive: true })
-      const destination = path.join(backups, `before-schema4-${randomUUID()}.sqlite`)
+      const destination = path.join(backups, `before-schema5-${randomUUID()}.sqlite`)
       this.db.prepare('VACUUM INTO ?').run(destination)
       const snapshot = new DatabaseSync(destination, { readOnly: true })
       try {

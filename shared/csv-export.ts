@@ -1,12 +1,13 @@
 import { entryFields, partFields, vehicleFields } from './business.js'
-import type { BusinessRecord, RecordKind } from './business.js'
+import type { BusinessRecord } from './business.js'
 
 export const MAX_EXPORT_VEHICLES = 20000
 export const MAX_EXPORT_ID_LENGTH = 120
-export const exportKinds: RecordKind[] = ['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment']
+export const exportKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment'] as const
+export type ExportRecordKind = typeof exportKinds[number]
 export const exportFilterFields = ['project', 'model', 'status', 'owner', 'physicalLocation', 'thermal'] as const
 export type VehicleExportFilters = { search: string } & Record<typeof exportFilterFields[number], string[]>
-export type ExportConfiguration = { version: 1; filters: VehicleExportFilters; columns: Partial<Record<RecordKind, string[]>>; includeArchived: boolean; language: 'en' | 'zh' }
+export type ExportConfiguration = { version: 1; filters: VehicleExportFilters; columns: Partial<Record<ExportRecordKind, string[]>>; includeArchived: boolean; language: 'en' | 'zh' }
 export type ExportTemplate = { id: string; name: string; configuration: ExportConfiguration; updated: string }
 export type CsvExportRequest = { vehicleIds: string[]; configuration: ExportConfiguration }
 export type ExportColumn = { id: string; label: [string, string] }
@@ -16,6 +17,7 @@ const labels: Record<string, [string, string]> = {
   name: ['Name', '名称'], project: ['Project code', '项目代号'], model: ['Model', '车型'], vin: ['VIN', 'VIN'], color: ['Color', '颜色'], plate: ['License plate', '车牌'], plateExpiry: ['Plate valid until', '车牌有效期'],
   status: ['Status', '状态'], physicalLocation: ['Physical location', '实际位置'], owner: ['Owner', '负责人'], thermal: ['Thermal System Type', '热管理系统类型'], notes: ['Notes', '其他说明'],
   complianceLevel: ['Compliance Level', '排放合规等级'],
+  configurationRevision: ['Configuration revision', '配置版本'], componentTypeId: ['Component type ID', '组件类型标识'],
   description: ['Description', '说明'], category: ['Category', '部件类别'], position: ['Position / identifier', '位置 / 标识'], supplier: ['Supplier', '供应商'], serial: ['Serial number', '序列号'], type: ['Type', '类型'], hardware: ['Hardware version', '硬件版本'], software: ['Software identifier / version', '软件标识 / 版本'],
   controllerType: ['Controller Type', '控制器类型'], lifeStatus: ['Life Status', '寿命状态'],
   functionalPart: ['Functional part number', '功能零件号'], productPart: ['Product part number', '产品零件号'], calibrationPart: ['Software / calibration part', '软件 / 标定零件号'], calibrationVersion: ['Calibration version', '标定版本'], network: ['Diagnostic network', '诊断网络'],
@@ -27,8 +29,8 @@ const labels: Record<string, [string, string]> = {
 const columns = (fields: readonly string[]): ExportColumn[] => fields.map(id => ({ id, label: labels[id] }))
 const metadata = ['id', 'archived', 'version', 'updated']
 const childMetadata = ['id', 'vehicleId', 'vehicleVin', 'archived', 'version', 'updated']
-export const exportColumns: Record<RecordKind, ExportColumn[]> = {
-  vehicle: [...columns(vehicleFields).map(column => column.id === 'name' ? { ...column, label: ['Nick Name', '昵称'] as [string, string] } : column), ...columns(metadata)],
+export const exportColumns: Record<ExportRecordKind, ExportColumn[]> = {
+  vehicle: [...columns(vehicleFields).map(column => column.id === 'name' ? { ...column, label: ['Nick Name', '昵称'] as [string, string] } : column), ...columns(['configurationRevision']), ...columns(metadata)],
   part: [...columns(partFields), ...columns(childMetadata)],
   modification: [...columns(entryFields), ...columns(childMetadata)],
   equipment: [...columns(entryFields), ...columns(childMetadata)],
@@ -71,7 +73,7 @@ export function matchesExportVehicle(record: BusinessRecord, configuration: Expo
   return !search || vehicleFields.some(field => scalarText(record.data[field]).toLowerCase().includes(search))
 }
 
-export function recordsForExport(records: BusinessRecord[], kind: RecordKind, selectedVehicleIds: ReadonlySet<string>, includeArchived: boolean): BusinessRecord[] {
+export function recordsForExport(records: BusinessRecord[], kind: ExportRecordKind, selectedVehicleIds: ReadonlySet<string>, includeArchived: boolean): BusinessRecord[] {
   const parents = new Set(records.filter(record => record.kind === 'vehicle' && selectedVehicleIds.has(record.id) && (includeArchived || !record.archived)).map(record => record.id))
   return records.filter(record => record.kind === kind && (includeArchived || !record.archived) && (kind === 'vehicle' ? parents.has(record.id) : record.vehicleId !== null && parents.has(record.vehicleId)))
 }

@@ -1,0 +1,13 @@
+.configuration-current-summary{padding:14px 0;margin-bottom:12px;border-bottom:1px solid var(--line,#e6eaf2)}
+.configuration-management-toolbar{display:flex;justify-content:flex-end;margin:12px 0}
+.configuration-current-summary p{margin:8px 0 0}.configuration-revision-toolbar{margin:16px 0}
+.configuration-revisions>.ant-alert{margin-block:12px}
+.configuration-review,.configuration-snapshot{display:grid;gap:18px}
+.configuration-review-modal .ant-modal-body{max-height:70svh;overflow:auto}
+.configuration-input-label{display:grid;gap:7px;font-size:12px}
+.configuration-component+.configuration-component{margin-top:18px;padding-top:12px;border-top:1px solid var(--line,#e6eaf2)}
+.configuration-component h4{margin:2px 0 12px;font-weight:600}
+.configuration-review-field{display:grid;grid-template-columns:minmax(150px,34%) minmax(0,1fr);gap:14px;padding:9px 0;border-bottom:1px solid #f0f1f5;font-size:12px;align-items:start}
+.configuration-review-field>strong{font-weight:500}.configuration-explanation{display:grid;gap:8px;min-width:0}.configuration-explanation>.ant-select{width:100%}
+.configuration-snapshot .ant-descriptions-item-content{overflow-wrap:anywhere}
+@media(max-width:700px){.configuration-review-field{grid-template-columns:1fr;gap:6px}.configuration-review-modal .ant-modal-footer>.ant-space{justify-content:flex-end}.configuration-current-summary .ant-space{gap:8px!important}}

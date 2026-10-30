@@ -2,12 +2,13 @@ import { DatabaseSync } from 'node:sqlite'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { Business, checksum, now } from './business.js'
+import { Business, checksum, fromRow, now } from './business.js'
 import type { RecordRow } from './business.js'
 import { AppError } from './team.js'
 import type { DeleteCounts, VehicleDeletion } from '../shared/business.js'
+import { isProtectedKind, validateConfigurationRecords, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 
-export type BusinessHead = { protocol: 1 | 2; teamId: string; revision: string; sequence: number; checksum: string; created: string }
+export type BusinessHead = { protocol: 1 | 2 | 3; teamId: string; revision: string; sequence: number; checksum: string; created: string }
 type AtomicWriter = (destination: string, bytes: Buffer | string) => Promise<void>
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const digest = /^[a-f0-9]{64}$/
@@ -47,16 +48,16 @@ export class SharedBusinessSnapshot {
       let head: BusinessHead | null = null
       if (bytes) {
         try { head = JSON.parse(bytes.toString()) as BusinessHead } catch { throw corrupt() }
-        if (!head || ![1, 2].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
+        if (!head || ![1, 2, 3].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
         const sequence = business.store.get<number>('businessSequence') || 0
-        if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || (business.store.get<number>('businessProtocol') === 2 && head.protocol !== 2)) throw new AppError('BUSINESS_ROLLBACK', 409)
+        if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || head.protocol < (business.store.get<number>('businessProtocol') || 1)) throw new AppError('BUSINESS_ROLLBACK', 409)
         const snapshot = await fs.readFile(path.join(directory, 'snapshots', `${head.revision}.sqlite`))
         if (checksum(snapshot) !== head.checksum) throw corrupt()
         await fs.writeFile(work, snapshot, { flag: 'wx' })
         master = new DatabaseSync(work)
         master.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;')
         if (master.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || master.prepare("SELECT value FROM metadata WHERE key='teamId'").get()?.value !== teamId || Number(master.prepare("SELECT value FROM metadata WHERE key='sequence'").get()?.value) !== head.sequence || master.prepare('PRAGMA foreign_key_check').all().length) throw corrupt()
-        if (head.protocol === 2 && (master.prepare("SELECT value FROM metadata WHERE key='protocol'").get()?.value !== '2' || !master.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vehicle_deletions'").get())) throw corrupt()
+        if (head.protocol >= 2 && (master.prepare("SELECT value FROM metadata WHERE key='protocol'").get()?.value !== String(head.protocol) || !master.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vehicle_deletions'").get())) throw corrupt()
       } else {
         if (business.store.get('businessRevision') || (await fs.readdir(path.join(directory, 'snapshots'))).some(name => name.endsWith('.sqlite'))) throw corrupt()
         master = new DatabaseSync(work)
@@ -68,6 +69,14 @@ export class SharedBusinessSnapshot {
       const result = new SharedBusinessSnapshot(business, directory, work, master, head, atomic)
       const markers = result.deletions()
       if (head?.protocol === 1 && markers.length) throw corrupt()
+      const records = (result.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)
+      if (head && head.protocol < 3 && records.some(record => isProtectedKind(record.kind) || record.kind === 'part' && record.data.category === 'component')) throw corrupt()
+      if (head?.protocol === 3) {
+        try {
+          validateConfigurationRecords(records)
+          for (const entry of result.db.prepare("SELECT key,value FROM metadata WHERE key LIKE 'configurationRequest:%'").all()) validateConfigurationReceiptEntry({ key: String(entry.key), value: String(entry.value) })
+        } catch { throw corrupt() }
+      }
       return result
     } catch (error) { master?.close(); await fs.rm(work, { force: true }).catch(() => {}); throw error }
   }
@@ -84,13 +93,17 @@ export class SharedBusinessSnapshot {
   graph(vehicleId: string): RecordRow[] { return this.db.prepare('SELECT * FROM records WHERE id=? OR vehicle_id=? ORDER BY kind,id').all(vehicleId, vehicleId) as RecordRow[] }
   counts(graph: RecordRow[]): DeleteCounts {
     const counts: DeleteCounts = { vehicle: 0, part: 0, modification: 0, equipment: 0, report: 0, attachment: 0 }
-    for (const row of graph) { if (!(row.kind in counts)) throw corrupt(); counts[row.kind]++ }
+    for (const row of graph) { if (row.kind === 'configurationRevision') counts.configurationRevision = (counts.configurationRevision || 0) + 1; else if (row.kind in counts) counts[row.kind]++; else throw corrupt() }
     return counts
   }
-  async publish(teamId: string, protocol: 1 | 2, revision = randomUUID(), sequence = (this.head?.sequence || 0) + 1): Promise<BusinessHead> {
+  async publish(teamId: string, requestedProtocol: 1 | 2 | 3, revision = randomUUID(), sequence = (this.head?.sequence || 0) + 1): Promise<BusinessHead> {
+    const protocol = Math.max(requestedProtocol, this.head?.protocol || 1) as 1 | 2 | 3
     this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('teamId', teamId)
     this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('sequence', String(sequence))
-    if (protocol === 2) this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('protocol', '2')
+    if (protocol >= 2) this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('protocol', String(protocol))
+    if (protocol === 3) {
+      try { validateConfigurationRecords((this.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)) } catch { throw corrupt() }
+    }
     if (this.db.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || this.db.prepare('PRAGMA foreign_key_check').all().length) throw corrupt()
     this.master!.close(); this.master = null
     const bytes = await fs.readFile(this.work), destination = path.join(this.directory, 'snapshots', `${revision}.sqlite`)

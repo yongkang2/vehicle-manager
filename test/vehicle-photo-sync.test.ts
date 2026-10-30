@@ -158,7 +158,7 @@ test('format 2 backups preserve the cover reference, original bytes and history,
     source.store.set('vehicleTablePreferences:private-local-account', { privateSentinel: 'DO-NOT-BACKUP-PERSONAL-COLUMNS', visible: ['vehicle', 'owner', 'actions'] })
     const bytes = await createBackup(source.business, 'photo-team'), archive = await unzipper.Open.buffer(bytes)
     const manifest = JSON.parse((await archive.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
-    assert.equal(manifest.format, 3)
+    assert.equal(manifest.format, 4)
     assert.equal(manifest.records.find((record: BusinessRecord) => record.id === car.id).data.photoAttachmentId, photo.attachment.id)
     assert.equal(JSON.stringify(manifest).includes('DO-NOT-BACKUP-PERSONAL-COLUMNS'), false)
     const result = await restoreBackup(target.business, bytes, 'photo-team', context.actor, 'Restore selected photo')

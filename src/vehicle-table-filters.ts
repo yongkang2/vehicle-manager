@@ -1,6 +1,7 @@
 import { activeHvBatteries, doveRecordedTime, keyControllerName, thermalSystemTypes } from '../shared/business.js'
 import type { BusinessRecord, KeyControllerName } from '../shared/business.js'
 import type { VehicleColumnId } from '../shared/vehicle-table.js'
+import type { ConfigurationRevisionSummary } from '../shared/configuration-revisions.js'
 import { translateBusiness } from './business-i18n.js'
 import type { Language } from './i18n.js'
 
@@ -24,6 +25,8 @@ function valueLabel(column: VehicleFilterColumnId, parts: readonly string[], lan
       return parts.map(displayComponent).join(' · ')
     case 'updated':
       return `${parts[0] ? new Date(parts[0]).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-GB') : '—'} · v${parts[1] ?? ''}`
+    case 'configurationRevision':
+      return parts[1] === 'true' ? `${parts[0]} · ${text('unpublishedConfigurationChanges')}` : parts[0]
     case 'status':
       return text(parts[0])
     case 'thermal':
@@ -65,7 +68,8 @@ export function findVehicleTableController(records: readonly BusinessRecord[], v
   return records.find(record => record.kind === 'part' && record.vehicleId === vehicleId && !record.archived && record.data.category === 'controller' && keyControllerName(record.data.name) === name) || null
 }
 
-export function createVehicleFilterValues(records: readonly BusinessRecord[], language: Language): VehicleFilterValues {
+export function createVehicleFilterValues(records: readonly BusinessRecord[], language: Language, summaries: readonly ConfigurationRevisionSummary[] = []): VehicleFilterValues {
+  const revisions = new Map(summaries.map(summary => [summary.vehicleId, summary]))
   const partsByVehicle = new Map<string, BusinessRecord[]>()
   for (const record of records) {
     if (record.kind !== 'part' || record.vehicleId === null) continue
@@ -105,6 +109,7 @@ export function createVehicleFilterValues(records: readonly BusinessRecord[], la
       plateExpiry: value('plateExpiry', vehicle.data.plateExpiry),
       complianceLevel: value('complianceLevel', vehicle.data.complianceLevel),
       coolingArchitecture: value('coolingArchitecture', vehicle.data.coolingArchitecture),
+      configurationRevision: revisions.has(vehicle.id) ? value('configurationRevision', revisions.get(vehicle.id)!.label, revisions.get(vehicle.id)!.hasChanges) : value('configurationRevision'),
     })
   }
   return result

@@ -21,15 +21,15 @@ class FakeScope {
   }
 }
 
-test('vehicle table catalog preserves ten defaults, permits all twenty-two columns and returns detached layouts', () => {
-  assert.equal(vehicleColumnIds.length, 22); assert.equal(new Set(vehicleColumnIds).size, 22)
+test('vehicle table catalog preserves ten defaults, permits all twenty-three columns and returns detached layouts', () => {
+  assert.equal(vehicleColumnIds.length, 23); assert.equal(new Set(vehicleColumnIds).size, 23)
   const first = defaultVehicleTablePreferences(), second = defaultVehicleTablePreferences()
   assert.deepEqual(first.columns, ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions'])
   first.columns.pop(); first.widths.notes = 300; assert.equal(second.columns.length, 10); assert.deepEqual(second.widths, {})
   const all = layout(['vehicle', ...vehicleColumnIds.filter(id => !['vehicle', 'actions'].includes(id)), 'actions'], { notes: 80, actions: 1000 })
   const parsed = parseVehicleTablePreferences(all); assert.deepEqual(parsed, all)
-  parsed!.columns.pop(); parsed!.widths.notes = 500; assert.equal(all.columns.length, 22); assert.equal(all.widths.notes, 80)
-  const hiddenWidths = { notes: 250, vcuType: 180, name: 180, vin: 230, plateExpiry: 160, complianceLevel: 170, coolingArchitecture: 200 }
+  parsed!.columns.pop(); parsed!.widths.notes = 500; assert.equal(all.columns.length, 23); assert.equal(all.widths.notes, 80)
+  const hiddenWidths = { notes: 250, vcuType: 180, name: 180, vin: 230, plateExpiry: 160, complianceLevel: 170, coolingArchitecture: 200, configurationRevision: 240 }
   assert.deepEqual(parseVehicleTablePreferences(layout(['vehicle', 'actions'], hiddenWidths)), layout(['vehicle', 'actions'], hiddenWidths), 'Hidden columns retain saved widths')
   const legacy = layout(['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'actions'], { model: 185, notes: 420 })
   assert.equal(legacy.columns.length, 16)
@@ -37,6 +37,9 @@ test('vehicle table catalog preserves ten defaults, permits all twenty-two colum
   const previous = layout(['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType', 'actions'], { model: 185, notes: 420, vcuType: 180 })
   assert.equal(previous.columns.length, 17)
   assert.deepEqual(parseVehicleTablePreferences(previous), previous, 'Existing seventeen-column layouts do not automatically enable the additional Overview columns')
+  const overviewLayout = layout(['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType', 'name', 'vin', 'plateExpiry', 'complianceLevel', 'coolingArchitecture', 'actions'], { configurationRevision: 260 })
+  assert.equal(overviewLayout.columns.length, 22)
+  assert.deepEqual(parseVehicleTablePreferences(overviewLayout), overviewLayout, 'Existing Overview layouts keep the new revision column hidden')
 })
 
 test('every active or legacy Overview field has an allowlisted column while vehicle photos remain excluded', () => {
@@ -71,7 +74,7 @@ test('personal vehicle layouts persist by local account/workspace without record
     assert.deepEqual(preferences.get('account-b'), defaultVehicleTablePreferences())
     assert.deepEqual(new VehicleTablePreferencesStore(second).get('account-a'), defaultVehicleTablePreferences())
     for (const table of ['records', 'outbox', 'changes', 'conflicts']) assert.equal(first.db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get()!.total, 0)
-    assert.equal(first.db.prepare('PRAGMA user_version').get()!.user_version, 4)
+    assert.equal(first.db.prepare('PRAGMA user_version').get()!.user_version, 5)
     assert.deepEqual(first.db.prepare("SELECT * FROM settings WHERE key NOT LIKE 'vehicleTablePreferences:%' ORDER BY key").all(), beforeSettings)
     assert.throws(() => preferences.put('account-a', { ...chosen, columns: ['actions'] }), { code: 'INVALID_INPUT' })
     assert.deepEqual(preferences.get('account-a'), chosen)

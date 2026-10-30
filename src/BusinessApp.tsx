@@ -15,6 +15,11 @@ import { useVehicleTablePreferences } from './use-vehicle-table-preferences'
 import { useVehicleTableFilterSession } from './vehicle-table-filter-session'
 import { createVehicleFilterValues, findVehicleTableController, sortedVehicleReports } from './vehicle-table-filters'
 import { vehicleOverviewColumnIds } from '../shared/vehicle-table'
+import { builtinComponentTypes } from '../shared/configuration-revisions'
+import type { ComponentTypeCatalog, ConfigurationRevisionSummary, ConfigurationWorkingView } from '../shared/configuration-revisions'
+import ConfigurationRevisions, { ConfigurationRevisionSummaryPanel } from './ConfigurationRevisions'
+import ComponentSections from './ComponentSections'
+import ComponentTypeManagement from './ComponentTypeManagement'
 import VehiclePhoto from './VehiclePhoto'
 import AttachmentUpload from './AttachmentUpload'
 import './BusinessApp.css'
@@ -36,11 +41,11 @@ function controllerSources(report: BusinessRecord) {
 }
 type WorkspaceReader = <T>(url: string) => Promise<T>
 async function fetchWorkspace(includeAudit = false, includeQuarantined = false, request: WorkspaceReader = api) {
-  const records = await request<BusinessRecord[]>('/api/business/records')
+  const working = await request<ConfigurationWorkingView>('/api/business/working-view')
   const [sync, changes] = await Promise.all([request<SyncStatus>('/api/business/sync'), request<Change[]>('/api/business/history')])
   const audit = includeAudit ? await request<AuditEntry[]>('/api/business/audit') : []
   const quarantined = includeQuarantined ? await request<QuarantinedOperation[]>('/api/business/sync/quarantined') : []
-  return { records, sync, changes, audit, quarantined }
+  return { ...working, sync, changes, audit, quarantined }
 }
 
 function DifferenceValue({ value, fields, text }: { value: unknown; fields: string[]; text: (key: string) => string }) {
@@ -128,7 +133,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
   const { filters: vehicleColumnFilters, setFilters: setVehicleColumnFilters } = useVehicleTableFilterSession()
   const [records, setRecords] = useState<BusinessRecord[]>([]), [changes, setChanges] = useState<Change[]>([]), [sync, setSync] = useState<SyncStatus>(emptySync)
-  const vehicleFilterValues = useMemo(() => createVehicleFilterValues(records, language), [records, language])
+  const [catalog, setCatalog] = useState<ComponentTypeCatalog>({ enabled: false, types: builtinComponentTypes })
+  const [revisionSummaries, setRevisionSummaries] = useState<ConfigurationRevisionSummary[]>([])
+  const [revisionBusy, setRevisionBusy] = useState(false)
+  const vehicleFilterValues = useMemo(() => createVehicleFilterValues(records, language, revisionSummaries), [records, language, revisionSummaries])
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [query, setQuery] = useState(''), [filter, setFilter] = useState<string | undefined>(), [archived, setArchived] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [action, setAction] = useState<Action | null>(null), [actionReason, setActionReason] = useState('')
   const [detailTab, setDetailTab] = useState('overview')
@@ -144,6 +152,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   useEffect(() => { const timer = setInterval(() => setToday(new Date().toISOString().slice(0, 10)), 60000); return () => clearInterval(timer) }, [])
   function acceptWorkspace(result: Awaited<ReturnType<typeof fetchWorkspace>>) {
     setRecords(result.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)))
+    setCatalog(result.catalog); setRevisionSummaries(result.revisionSummaries.filter(summary => !deletedRecordIds.current.has(summary.vehicleId)))
     setSync(result.sync); setChanges(result.changes); setAudit(result.audit); setQuarantined(result.quarantined)
   }
   async function load() {
@@ -181,6 +190,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     for (const id of affected) deletedRecordIds.current.add(id)
     const belongs = (record: BusinessRecord) => affected.has(record.id) || record.vehicleId === receipt.vehicleId
     setRecords(current => current.filter(record => !belongs(record)))
+    setRevisionSummaries(current => current.filter(summary => summary.vehicleId !== receipt.vehicleId))
     setSelectedId(current => current && affected.has(current) ? null : current)
     setReportId(current => current && affected.has(current) ? null : current)
     setReportSelection(current => current.filter(id => !affected.has(id)))
@@ -333,6 +343,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div><div className="section-toolbar"><h3>{text('vehicles')}</h3><Space wrap><Button icon={<FileSpreadsheet size={15} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button><Button type="text" icon={<Download size={15} />} onClick={() => void download('/api/business/export', 'vehicle-data.json').catch(onError)}>{text('export')}</Button>{admin && <><Button icon={<Download size={15} />} disabled={!online} onClick={() => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError)}>{text('backup')}</Button><Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}><Button icon={<RotateCcw size={15} />} disabled={!online || syncPaused} onClick={() => setRestoreOpen(true)}>{text('restoreBackup')}</Button></Tooltip></>}</Space></div>{filters}
+    {admin && <div className="configuration-management-toolbar"><ComponentTypeManagement language={language} online={online} syncPaused={syncPaused} catalog={catalog} onChanged={loadScoped} onBusyChange={setBusy} onError={onError} /></div>}
     <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
       filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
       rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
@@ -365,6 +376,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
           return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
         },
       })),
+      { key: 'configurationRevision', title: text('configurationRevision'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
+        const current = revisionSummaries.find(summary => summary.vehicleId === record.id)
+        return current ? <Space direction="vertical" size={3}><button className="inline-link" onClick={() => openVehicle(record.id, 'configurationRevisions')}>{current.label}</button>{current.hasChanges && <Tag color="warning">{text('unpublishedConfigurationChanges')}</Tag>}</Space> : '—'
+      } },
     ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
@@ -386,16 +401,20 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       ]} />
     </>}
 
-    <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} onClose={() => { attachmentCancel.current?.(); setSelectedId(null) }} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && recordActions(selected)}><Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
-      { key: 'overview', label: text('overview'), children: <div className="vehicle-overview"><VehiclePhoto key={selected.id} vehicle={selected} language={language} onChanged={load} onError={onError} onBusyChange={setBusy} /><Descriptions column={{ xs: 1, sm: 2 }} items={[...vehicleFields, ...(selected.data.coolingArchitecture ? ['coolingArchitecture'] : [])].map(key => ({ key, label: text(key === 'name' ? 'nickName' : key), children: <span className="preserve-text">{key === 'status' ? statusTag(String(selected.data[key])) : key === 'thermal' && thermalSystemTypes.some(value => value === selected.data[key]) ? text(String(selected.data[key])) : display(selected.data[key])}</span> }))} /><div className="drawer-version">v{selected.version} · {date(selected.updated)}</div></div> },
+    <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} closable={!revisionBusy} onClose={() => { if (revisionBusy) return; attachmentCancel.current?.(); setSelectedId(null) }} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && recordActions(selected)}><Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
+      { key: 'overview', label: text('overview'), children: <div className="vehicle-overview"><ConfigurationRevisionSummaryPanel vehicle={selected} language={language} catalog={catalog} current={revisionSummaries.find(summary => summary.vehicleId === selected.id)} onOpen={() => setDetailTab('configurationRevisions')} /><VehiclePhoto key={selected.id} vehicle={selected} language={language} onChanged={load} onError={onError} onBusyChange={setBusy} /><Descriptions column={{ xs: 1, sm: 2 }} items={[...vehicleFields, ...(selected.data.coolingArchitecture ? ['coolingArchitecture'] : [])].map(key => ({ key, label: text(key === 'name' ? 'nickName' : key), children: <span className="preserve-text">{key === 'status' ? statusTag(String(selected.data[key])) : key === 'thermal' && thermalSystemTypes.some(value => value === selected.data[key]) ? text(String(selected.data[key])) : display(selected.data[key])}</span> }))} /><div className="drawer-version">v{selected.version} · {date(selected.updated)}</div></div> },
+      { key: 'configurationRevisions', label: text('configurationRevisions'), children: <ConfigurationRevisions key={selected.id} vehicle={selected} records={records} language={language} online={online} syncPaused={syncPaused} admin={admin} catalog={catalog} current={revisionSummaries.find(summary => summary.vehicleId === selected.id)} onChanged={loadScoped} onBusyChange={value => { setRevisionBusy(value); setBusy(value) }} onError={onError} /> },
       { key: 'parts', label: text('parts'), children: controllerTable(selected, true) },
       { key: 'hvBattery', label: text('hvBattery'), children: hvBatteryTable(selected) },
+      { key: 'emotor', label: text('emotor'), children: <ComponentSections key={`${selected.id}:emotor`} vehicle={selected} records={records} typeId="emotor" language={language} catalog={catalog} disabled={busy} includeArchived={archived} onChanged={loadScoped} onBusyChange={setBusy} onError={onError} /> },
+      { key: 'thermal-management', label: text('thermalManagement'), children: <ComponentSections key={`${selected.id}:thermal`} vehicle={selected} records={records} typeId="thermal-management" language={language} catalog={catalog} disabled={busy} includeArchived={archived} onChanged={loadScoped} onBusyChange={setBusy} onError={onError} onEditThermal={() => setEditor({ kind: 'vehicle', vehicleId: null, record: selected })} /> },
+      ...catalog.types.filter(type => !type.builtin && (!type.disabled || records.some(record => record.kind === 'part' && record.vehicleId === selected.id && record.data.componentTypeId === type.id))).map(type => ({ key: `component:${type.id}`, label: type.label[language === 'zh' ? 1 : 0], children: <ComponentSections key={`${selected.id}:${type.id}`} vehicle={selected} records={records} typeId={type.id} language={language} catalog={catalog} disabled={busy} includeArchived={archived} onChanged={loadScoped} onBusyChange={setBusy} onError={onError} /> })),
       { key: 'modifications', label: text('modifications'), children: entryTable('modification', selected) }, { key: 'equipment', label: text('equipment'), children: entryTable('equipment', selected) },
       { key: 'reports', label: text('reports'), children: reportTable(reports.filter(record => record.vehicleId === selected.id && (!record.archived || archived))) },
       { key: 'attachments', label: text('attachments'), children: <><AttachmentUpload key={selected.id} vehicle={selected} language={language} disabled={busy} onRefresh={loadScoped} onBusyChange={setBusy} onCancelReady={cancel => { attachmentCancel.current = cancel }} onError={onError} /><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
       { key: 'history', label: text('history'), children: history(changes.filter(change => change.vehicleId === selected.id)) },
     ] : []} /></Drawer>
-    {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<BusinessRecord[]>('/api/business/export/records'); const available = next.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); setRecords(available); return available }} />}
+    {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<ConfigurationWorkingView>('/api/business/export/working-view'); const available = next.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); setRecords(available); setCatalog(next.catalog); setRevisionSummaries(next.revisionSummaries.filter(summary => !deletedRecordIds.current.has(summary.vehicleId))); return available }} />}
     {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
     {editor && <RecordEditor record={editor.record} kind={editor.kind} initialName={editor.initialName} initialCategory={editor.initialCategory} language={language} busy={busy} onCancel={() => { if (!busy) setEditor(null) }} onSave={(data, reason) => void saveRecord(data, reason)} />}
     <Modal open={Boolean(action)} title={action ? text(action.type === 'remove' ? 'recordRemoval' : action.archived ? 'archive' : 'restore') : ''} onCancel={() => { if (!busy) setAction(null) }} onOk={() => void applyAction()} confirmLoading={busy} okText={text('save')} cancelText={text('cancel')} okButtonProps={{ disabled: !actionReason.trim() }}><p className="operation-name">{display(action?.record.data.name)}</p><label className="standalone-label">{text('reason')}<Input.TextArea value={actionReason} maxLength={500} rows={3} onChange={event => setActionReason(event.target.value)} /></label></Modal>

@@ -7,7 +7,7 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { LocalStore } from '../server/store.js'
 
-type Variant = 'empty0' | 'legacy1' | 'legacy2' | 'workspace3' | 'deletion3' | 'combined3' | 'combined2' | 'complete4'
+type Variant = 'empty0' | 'legacy1' | 'legacy2' | 'workspace3' | 'deletion3' | 'combined3' | 'combined2' | 'complete4' | 'complete5'
 const core = `CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
   CREATE TABLE accounts(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,salt TEXT NOT NULL,hash TEXT NOT NULL,created TEXT NOT NULL);
   CREATE TABLE sessions(token TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES accounts(id),expires INTEGER NOT NULL);
@@ -24,7 +24,7 @@ const workspaces = `CREATE TABLE workspaces(id TEXT PRIMARY KEY,name TEXT NOT NU
   ALTER TABLE sessions ADD COLUMN sync_enabled INTEGER NOT NULL DEFAULT 0;`
 const deletions = `CREATE TABLE vehicle_deletions(vehicle_id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL,payload TEXT NOT NULL);
   CREATE TABLE quarantined_operations(id TEXT PRIMARY KEY,payload TEXT NOT NULL);`
-const versions: Record<Variant, number> = { empty0: 0, legacy1: 1, legacy2: 2, workspace3: 3, deletion3: 3, combined3: 3, combined2: 2, complete4: 4 }
+const versions: Record<Variant, number> = { empty0: 0, legacy1: 1, legacy2: 2, workspace3: 3, deletion3: 3, combined3: 3, combined2: 2, complete4: 4, complete5: 5 }
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
 function fingerprint(db: DatabaseSync) {
@@ -34,11 +34,11 @@ function fingerprint(db: DatabaseSync) {
 }
 async function backupNames(directory: string) { return fs.readdir(path.join(directory, 'migration-backups')).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }) }
 async function fixture(variant: Variant, options: { configured?: boolean; directory?: string; deviceId?: string } = {}) {
-  const directory = options.directory || await fs.mkdtemp(path.join(tmpdir(), 'vehicle-schema4-'))
+  const directory = options.directory || await fs.mkdtemp(path.join(tmpdir(), 'vehicle-schema5-'))
   await fs.mkdir(directory, { recursive: true })
   const file = path.join(directory, 'local.sqlite'), db = new DatabaseSync(file)
-  const workspace = ['workspace3', 'combined3', 'combined2', 'complete4'].includes(variant)
-  const deletion = ['deletion3', 'combined3', 'combined2', 'complete4'].includes(variant)
+  const workspace = ['workspace3', 'combined3', 'combined2', 'complete4', 'complete5'].includes(variant)
+  const deletion = ['deletion3', 'combined3', 'combined2', 'complete4', 'complete5'].includes(variant)
   const deviceId = options.deviceId || randomUUID(), userId = randomUUID(), secondUser = randomUUID(), teamId = randomUUID(), secondTeam = randomUUID(), carId = randomUUID()
   const bytes = Buffer.from('Preserved legacy original'), blob = createHash('sha256').update(bytes).digest('hex')
   try {
@@ -91,14 +91,14 @@ async function fixture(variant: Variant, options: { configured?: boolean; direct
   return { directory, file, workspace, deletion, deviceId, userId, teamId, secondTeam, carId, blob, bytes, close: () => fs.rm(directory, { recursive: true, force: true }) }
 }
 
-for (const variant of ['empty0', 'legacy1', 'legacy2', 'workspace3', 'deletion3', 'combined3', 'combined2', 'complete4'] as const) {
-  test(`schema4 upgrades ${variant} by capability and preserves existing data, files and identities`, async () => {
+for (const variant of ['empty0', 'legacy1', 'legacy2', 'workspace3', 'deletion3', 'combined3', 'combined2', 'complete4', 'complete5'] as const) {
+  test(`schema5 upgrades ${variant} by capability and preserves existing data, files and identities`, async () => {
     const value = await fixture(variant)
     try {
       const source = new DatabaseSync(value.file), before = fingerprint(source); source.close()
       const upgraded = new LocalStore(value.directory)
       try {
-        assert.equal(upgraded.db.prepare('PRAGMA user_version').get()!.user_version, 4)
+        assert.equal(upgraded.db.prepare('PRAGMA user_version').get()!.user_version, 5)
         if (variant !== 'empty0') assert.equal(upgraded.deviceId, value.deviceId)
         for (const [table, rows] of Object.entries(before.data)) {
           const beforeRows = rows.map(row => JSON.parse(row) as Record<string, unknown>)
@@ -117,14 +117,14 @@ for (const variant of ['empty0', 'legacy1', 'legacy2', 'workspace3', 'deletion3'
         assert.deepEqual(await fs.readFile(path.join(value.directory, 'blobs', value.blob)), value.bytes)
       } finally { upgraded.db.close() }
       const backups = await backupNames(value.directory)
-      assert.equal(backups.length, ['empty0', 'complete4'].includes(variant) ? 0 : 1)
+      assert.equal(backups.length, ['empty0', 'complete5'].includes(variant) ? 0 : 1)
       if (backups.length) {
-        assert.match(backups[0], /^before-schema4-[a-f0-9-]+\.sqlite$/)
+        assert.match(backups[0], /^before-schema5-[a-f0-9-]+\.sqlite$/)
         const snapshot = new DatabaseSync(path.join(value.directory, 'migration-backups', backups[0]), { readOnly: true })
         try { assert.deepEqual(fingerprint(snapshot), before); assert.equal(snapshot.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok') } finally { snapshot.close() }
       }
       const reopened = new LocalStore(value.directory)
-      try { assert.equal(reopened.db.prepare('PRAGMA user_version').get()!.user_version, 4) } finally { reopened.db.close() }
+      try { assert.equal(reopened.db.prepare('PRAGMA user_version').get()!.user_version, 5) } finally { reopened.db.close() }
       assert.deepEqual(await backupNames(value.directory), backups)
     } finally { await value.close() }
   })
@@ -152,7 +152,7 @@ test('nested legacy workspace databases upgrade independently and retain the roo
       try {
         assert.equal(nested.deviceId, parent.deviceId)
         assert.equal(nested.get('deviceId'), parent.deviceId)
-        assert.equal(nested.db.prepare('PRAGMA user_version').get()!.user_version, 4)
+        assert.equal(nested.db.prepare('PRAGMA user_version').get()!.user_version, 5)
         assert.deepEqual(await fs.readFile(path.join(child.directory, 'blobs', child.blob)), child.bytes)
         assert.equal((await backupNames(child.directory)).length, 1)
         assert.equal(parent.db.prepare('SELECT directory FROM workspaces WHERE id=?').get(root.secondTeam)!.directory, path.join('workspaces', 'second'))
@@ -174,9 +174,33 @@ test('backup destination failure leaves the entire original schema/data intact a
     try { assert.deepEqual(fingerprint(unchanged), before) } finally { unchanged.close() }
     await fs.rm(blocked)
     const retry = new LocalStore(value.directory)
-    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 4) } finally { retry.db.close() }
+    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 5) } finally { retry.db.close() }
     assert.equal((await backupNames(value.directory)).length, 1)
   } finally { await value.close() }
+})
+
+test('schema4 compatibility upgrade backs up first and rolls back a failed schema5 stamp before retry', async t => {
+  const value = await fixture('complete4')
+  try {
+    const source = new DatabaseSync(value.file), before = fingerprint(source); source.close()
+    const execute = DatabaseSync.prototype.exec
+    t.mock.method(DatabaseSync.prototype, 'exec', function (sql: string) {
+      if (sql === 'PRAGMA user_version=5') throw new Error('Injected schema5 stamp failure')
+      return execute.call(this, sql)
+    })
+    assert.throws(() => new LocalStore(value.directory), /Injected schema5 stamp failure/)
+    t.mock.restoreAll()
+    const unchanged = new DatabaseSync(value.file)
+    try { assert.deepEqual(fingerprint(unchanged), before) } finally { unchanged.close() }
+    const backup = await backupNames(value.directory)
+    assert.equal(backup.length, 1)
+    assert.match(backup[0], /^before-schema5-/)
+    const preserved = new DatabaseSync(path.join(value.directory, 'migration-backups', backup[0]), { readOnly: true })
+    try { assert.deepEqual(fingerprint(preserved), before) } finally { preserved.close() }
+    const retry = new LocalStore(value.directory)
+    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 5) } finally { retry.db.close() }
+    assert.equal((await backupNames(value.directory)).length, 2)
+  } finally { t.mock.restoreAll(); await value.close() }
 })
 
 test('backup integrity verification failure prevents every schema edit', async t => {
@@ -197,7 +221,7 @@ test('backup integrity verification failure prevents every schema edit', async t
     const unchanged = new DatabaseSync(value.file)
     try { assert.deepEqual(fingerprint(unchanged), before) } finally { unchanged.close() }
     const retry = new LocalStore(value.directory)
-    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 4) } finally { retry.db.close() }
+    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 5) } finally { retry.db.close() }
   } finally { await value.close() }
 })
 
@@ -211,7 +235,7 @@ test('a late backfill failure rolls back all added tables/columns/version and a 
     const unchanged = new DatabaseSync(value.file)
     try { assert.deepEqual(fingerprint(unchanged), before); unchanged.exec('DROP TRIGGER reject_workspace_session') } finally { unchanged.close() }
     const retry = new LocalStore(value.directory)
-    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 4); assert.equal(retry.db.prepare('SELECT workspace_id FROM sessions LIMIT 1').get()!.workspace_id, value.teamId) } finally { retry.db.close() }
+    try { assert.equal(retry.db.prepare('PRAGMA user_version').get()!.user_version, 5); assert.equal(retry.db.prepare('SELECT workspace_id FROM sessions LIMIT 1').get()!.workspace_id, value.teamId) } finally { retry.db.close() }
     assert.equal((await backupNames(value.directory)).length, 2)
   } finally { await value.close() }
 })
@@ -245,7 +269,7 @@ test('newer schemas and copied-machine identities are rejected without migration
     const value = await fixture('combined3')
     try {
       const source = new DatabaseSync(value.file)
-      if (rejected === 'newer') source.exec('PRAGMA user_version=5')
+      if (rejected === 'newer') source.exec('PRAGMA user_version=6')
       else source.prepare('UPDATE settings SET value=? WHERE key=?').run(JSON.stringify('another-host'), 'machine')
       const before = fingerprint(source); source.close()
       assert.throws(() => new LocalStore(value.directory), { code: rejected === 'newer' ? 'LOCAL_VERSION_TOO_NEW' : 'COPIED_LOCAL_DATA' })

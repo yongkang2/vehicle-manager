@@ -14,6 +14,7 @@ import { buildCsvExport } from './csv-export.js'
 import { ExportTemplates } from './export-templates.js'
 import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
 import { VehiclePhotos } from './vehicle-photos.js'
+import { ConfigurationRevisions } from './configuration-revisions.js'
 import { MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration } from '../shared/csv-export.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
 import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, reportMatchesVehicle, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
@@ -26,6 +27,7 @@ const recordKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', '
 export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store, backgroundSyncAllowed = () => true) {
   const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business), exportTemplates = new ExportTemplates(store)
   const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business)
+  const configurationRevisions = new ConfigurationRevisions(business, synchronization, teams)
   function sessionGuard(req: BusinessRequest): () => void {
     const current = () => accounts.db.prepare('SELECT workspace_id,workspace_epoch FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now()) as { workspace_id: string | null; workspace_epoch: number } | undefined
     const before = current()
@@ -62,6 +64,17 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     }
   }
   const sync = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity) : synchronization.status()
+  async function configurationContext(req: BusinessRequest, admin = false) {
+    const assertSession = sessionGuard(req)
+    const context = await store.runWrite(() => access(req, admin))
+    const assertCurrent = () => {
+      assertSession()
+      const session = accounts.db.prepare('SELECT sync_enabled FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now())
+      if (!session?.sync_enabled) throw new AppError('CONFIRM_RESUME', 409)
+    }
+    assertCurrent()
+    return { directory: context.configuration.sharedPath, teamId: context.configuration.teamId, identity: context.identity, actor: context.actor, scopeKey: req.get('X-Workspace-Token') || '', syncEnabled: context.syncEnabled, assertCurrent }
+  }
   const router = express.Router()
   function writeRoute(method: 'post' | 'put' | 'get' | 'delete', route: string, ...handlers: RequestHandler[]) {
     const action = handlers.pop()!
@@ -79,7 +92,8 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
         const localDraftBinding = req.method === 'POST' && /^\/dove\/[^/]+\/vehicle\/?$/.test(localPath)
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
-        const canonicalMaintenance = deletePreview || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
+        const configurationMutation = ['POST', 'PUT'].includes(req.method) && (localPath === '/configuration-revisions/enable' || localPath === '/component-types' || localPath.startsWith('/component-types/') || /^\/vehicles\/[^/]+\/configuration-revisions(?:\/preview)?\/?$/.test(localPath))
+        const canonicalMaintenance = deletePreview || configurationMutation || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
         if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead) {
           const state = await sync(req.businessContext)
@@ -99,8 +113,17 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   router.get('/records', (req, res) => {
     const kind = req.query.kind ? String(req.query.kind) : undefined
     if (kind && !recordKinds.includes(kind)) throw new AppError('INVALID_INPUT')
-    res.json(business.list(kind as RecordKind | undefined, req.query.vehicleId ? String(req.query.vehicleId) : undefined))
+    res.json(business.list(kind as RecordKind | undefined, req.query.vehicleId ? String(req.query.vehicleId) : undefined).filter(record => recordKinds.includes(record.kind)))
   })
+  router.get('/working-view', (_req, res) => res.json(configurationRevisions.workingView()))
+  router.get('/component-types', (_req, res) => res.json(configurationRevisions.catalog()))
+  router.post('/configuration-revisions/enable', async (req: BusinessRequest, res) => res.json(await configurationRevisions.enable(await configurationContext(req, true), req.body)))
+  router.post('/component-types', async (req: BusinessRequest, res) => res.status(201).json(await configurationRevisions.createType(await configurationContext(req, true), req.body)))
+  router.put('/component-types/:id', async (req: BusinessRequest, res) => res.json(await configurationRevisions.updateType(await configurationContext(req, true), String(req.params.id), req.body)))
+  router.get('/vehicles/:id/configuration-revisions', (req, res) => res.json(configurationRevisions.history(String(req.params.id))))
+  router.get('/vehicles/:id/configuration-revisions/:revisionId', (req, res) => res.json(configurationRevisions.detail(String(req.params.id), String(req.params.revisionId))))
+  router.post('/vehicles/:id/configuration-revisions/preview', async (req: BusinessRequest, res) => res.json(await configurationRevisions.preview(await configurationContext(req), String(req.params.id))))
+  router.post('/vehicles/:id/configuration-revisions', async (req: BusinessRequest, res) => res.status(201).json(await configurationRevisions.publish(await configurationContext(req), String(req.params.id), req.body)))
   writeRoute('post', '/records', (req: BusinessRequest, res) => {
     if (!['vehicle', 'part', 'modification', 'equipment'].includes(req.body?.kind)) throw new AppError('INVALID_INPUT')
     validateManualRecordFields(req.body.kind, req.body.data)
@@ -108,6 +131,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   })
   writeRoute('put', '/records/:id', (req: BusinessRequest, res) => {
     const current = business.get(String(req.params.id))
+    if (current.kind === 'configurationRevision' || current.kind === 'componentType') throw new AppError('CONFIGURATION_IMMUTABLE', 409)
     if (['report', 'attachment'].includes(current.kind)) throw new AppError('IMMUTABLE_REPORT', 409)
     validateManualRecordFields(current.kind, req.body.data, current)
     res.json(business.write({ id: current.id, kind: current.kind, vehicleId: current.vehicleId, data: req.body.data, version: req.body.version, actor: req.businessContext!.actor, reason: req.body.reason }))
@@ -289,6 +313,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     res.attachment('vehicle-data.json').json({ exportedAt: new Date().toISOString(), records: business.list() })
   })
   writeRoute('get', '/export/records', (_req, res) => res.json(business.list()))
+  writeRoute('get', '/export/working-view', (_req, res) => res.json(configurationRevisions.workingView()))
   writeRoute('post', '/export/csv', async (req: BusinessRequest, res) => {
     const input = req.body
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['vehicleIds', 'configuration'].includes(key))) throw new AppError('INVALID_INPUT')
@@ -299,7 +324,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const sessionBefore = currentSession()
     if (!sessionBefore) throw new AppError('LOGIN_REQUIRED', 401)
     // Capture once before asynchronous ZIP creation; never resolve selected VINs.
-    const { bytes, counts } = await buildCsvExport(business.list(), { vehicleIds, configuration })
+    const { bytes, counts } = await buildCsvExport(configurationRevisions.exportRecords(), { vehicleIds, configuration })
     if (res.destroyed) return
     const sessionAfter = currentSession()
     if (!sessionAfter) throw new AppError('LOGIN_REQUIRED', 401)
@@ -339,7 +364,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       if (!req.file) throw new AppError('FILE_REQUIRED')
       const context = await store.runWrite(() => access(req, true))
       const preview = await store.withMaintenance(() => teams.withAccess(context.configuration.sharedPath, context.configuration.teamId, context.identity, true, async _team => {
-        if (store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get() || store.db.prepare('SELECT record_id FROM conflicts LIMIT 1').get()) throw new AppError('PENDING_BEFORE_RESTORE', 409)
+        if (store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get() || store.db.prepare('SELECT record_id FROM conflicts LIMIT 1').get() || store.get<unknown[]>('pendingConfigurationImports')?.length) throw new AppError('PENDING_BEFORE_RESTORE', 409)
         const snapshot = await SharedBusinessSnapshot.open(business, context.configuration.sharedPath, context.configuration.teamId, atomicFile)
         try {
           if ((snapshot.head?.revision || null) !== store.get<string>('businessRevision')) throw new AppError('RESTORE_SYNC_REQUIRED', 409)
@@ -382,5 +407,5 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       if (binding) await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' })
     } catch { return }
   }
-  return { business, synchronization, tick }
+  return { business, synchronization, configurationRevisions, tick }
 }
