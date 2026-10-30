@@ -1,9 +1,46 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ApplicationUpdates } from '../server/updates.js'
+import { ApplicationUpdates, installedUpdateBackend } from '../server/updates.js'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { createApp } from '../server/app.js'
+
+test('a packaged launcher supplies check results and starts an isolated apply step', async () => {
+  const home = await fs.mkdtemp(path.join(import.meta.dirname, 'test-home-'))
+  const request = path.join(home, '.updates', 'request.json')
+  const record = path.join(home, 'apply.txt')
+  const previous = { program: process.env.VEHICLE_MANAGER_PROGRAM_DIR, request: process.env.VEHICLE_MANAGER_UPDATE_REQUEST, record: process.env.VEHICLE_MANAGER_TEST_RECORD }
+  process.env.VEHICLE_MANAGER_PROGRAM_DIR = home
+  process.env.VEHICLE_MANAGER_UPDATE_REQUEST = request
+  process.env.VEHICLE_MANAGER_TEST_RECORD = record
+  await fs.writeFile(path.join(home, 'launcher.mjs'), [
+    "import { writeFileSync } from 'node:fs'",
+    "if (process.argv.includes('--check')) console.log(JSON.stringify({ version: '1.2.0', downloaded: null }))",
+    "if (process.argv.includes('--apply')) writeFileSync(process.env.VEHICLE_MANAGER_TEST_RECORD, process.argv[process.argv.indexOf('--apply') + 1])",
+    '',
+  ].join('\n'))
+  try {
+    const backend = installedUpdateBackend()
+    assert.ok(backend)
+    assert.deepEqual(await backend.run('check'), { version: '1.2.0', downloaded: null })
+    await backend.prepare('1.2.0')
+    assert.deepEqual(JSON.parse(await fs.readFile(request, 'utf8')), { version: '1.2.0' })
+    let applied = null
+    for (let attempt = 0; attempt < 100 && !applied; attempt++) {
+      applied = await fs.readFile(record, 'utf8').catch(() => null)
+      if (!applied) await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    assert.equal(applied, '1.2.0')
+  } finally {
+    if (previous.program === undefined) delete process.env.VEHICLE_MANAGER_PROGRAM_DIR
+    else process.env.VEHICLE_MANAGER_PROGRAM_DIR = previous.program
+    if (previous.request === undefined) delete process.env.VEHICLE_MANAGER_UPDATE_REQUEST
+    else process.env.VEHICLE_MANAGER_UPDATE_REQUEST = previous.request
+    if (previous.record === undefined) delete process.env.VEHICLE_MANAGER_TEST_RECORD
+    else process.env.VEHICLE_MANAGER_TEST_RECORD = previous.record
+    await fs.rm(home, { recursive: true, force: true }).catch(() => { })
+  }
+})
 
 test('ordinary portable and development builds cannot install updates', async () => {
   const updates = new ApplicationUpdates()
