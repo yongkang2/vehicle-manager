@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Checkbox, Modal, Space, Spin, Tag } from 'antd'
+import { Alert, Badge, Button, Checkbox, Modal, Space, Spin } from 'antd'
 import { Download, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import type { ApplicationUpdateStatus } from '../shared/application-updates'
 import type { Language } from './i18n'
@@ -12,14 +12,8 @@ export default function ProgramUpdates({ language, open, onOpenChange }: { langu
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [confirmed, setConfirmed] = useState(false)
   useEffect(() => {
     let live = true
-    void api<ApplicationUpdateStatus>('/api/updates').then(async value => {
-      if (!live) return
-      setStatus(value)
-      if (value.supported) {
-        const checked = await api<ApplicationUpdateStatus>('/api/updates/check', { method: 'POST' })
-        if (live) setStatus(checked)
-      }
-    }).catch(failure => { if (live) setError(failure instanceof ApiError ? failure.message : 'SERVER_ERROR') })
+    void api<ApplicationUpdateStatus>('/api/updates').then(value => { if (live) setStatus(value) })
+      .catch(failure => { if (live) setError(failure instanceof ApiError ? failure.message : 'SERVER_ERROR') })
     return () => { live = false }
   }, [])
   async function act(command: 'check' | 'download' | 'install') {
@@ -34,10 +28,9 @@ export default function ProgramUpdates({ language, open, onOpenChange }: { langu
     <Modal title={title} open={open} onCancel={() => { if (!busy && !restarting) onOpenChange(false) }} footer={null} closable={!busy && !restarting} maskClosable={!busy && !restarting} width={480}>
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         {!status && !error && <Spin />}
-        {status?.channel === 'pre' && <Tag color="warning">{zh ? '预发布通道' : 'Pre-release channel'}</Tag>}
         {status && <div>{zh ? '当前版本' : 'Current version'}: <strong>{status.currentVersion}</strong></div>}
         {error && <Alert type="error" showIcon title={errorText(error, language)} />}
-        {status && !status.supported && <Alert type="info" showIcon title={zh ? '请从固定启动器打开程序后再检查更新。原账号和数据目录保持不变。' : 'Open this application through the stable launcher to enable updates. Accounts and data stay in their existing directory.'} />}
+        {status && !status.supported && <Alert type="info" showIcon title={zh ? '当前不是从发布包启动（例如开发模式），更新不可用。请使用解压后的 Start.cmd 打开程序。' : 'This copy was not started from a release package (for example a development run), so updates are unavailable. Open the program with Start.cmd from the extracted package.'} />}
         {status?.supported && !restarting && <>
           <div>{zh ? '可用版本' : 'Available version'}: <strong>{status.availableVersion || status.downloadedVersion || (zh ? '未发现新版' : 'No newer version found')}</strong></div>
           <Button icon={<RefreshCw size={16} />} loading={busy} onClick={() => void act('check')}>{zh ? '检查更新' : 'Check for updates'}</Button>

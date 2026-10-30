@@ -38,7 +38,7 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
-  UPDATE_NOT_INSTALLED: ['Open the application through its stable launcher to enable updates.', '请从固定启动器打开程序，再使用程序更新。'],
+  UPDATE_NOT_INSTALLED: ['This copy was not started from a release package, so updates are unavailable.', '当前不是从发布包启动，更新不可用。'],
   UPDATE_BUSY: ['Another update operation is in progress.', '其他更新操作正在进行，请稍后重试。'],
   UPDATE_SOURCE_UNAVAILABLE: ['The update could not be verified or downloaded. Check the source and launcher log.', '更新校验或下载失败，请检查更新源及启动器日志。'],
   UPDATE_NOT_READY: ['Download an update before installing.', '请先下载新版，再执行安装。'],
