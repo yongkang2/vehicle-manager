@@ -8,17 +8,28 @@ const root = path.dirname(fileURLToPath(import.meta.url))
 const application = existsSync(path.join(root, 'app', 'dist-server')) ? path.join(root, 'app') : root
 const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
 const appVersion = process.env.VEHICLE_MANAGER_RELEASE_VERSION || String(packageInfo.version)
-const { resolveDataDirectory } = await import(pathToFileURL(path.join(application, 'dist-server', 'shared', 'data-directory.js')).href)
-const dataDir = await resolveDataDirectory(root)
-const stateFile = path.join(dataDir, 'service.json')
-const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
-const readState = () => fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value)).catch(() => null)
+const packaged = application !== root
+const updateRequest = path.join(root, '.updates', 'request.json')
+let prepared
+
+function context() {
+  prepared ||= (async () => {
+    const { resolveDataDirectory } = await import(pathToFileURL(path.join(application, 'dist-server', 'shared', 'data-directory.js')).href)
+    const dataDir = process.env.VEHICLE_MANAGER_DATA_DIR ? path.resolve(process.env.VEHICLE_MANAGER_DATA_DIR) : await resolveDataDirectory(root)
+    return { dataDir, stateFile: path.join(dataDir, 'service.json'), instanceId: createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex') }
+  })()
+  return prepared
+}
+
+const readState = stateFile => fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value)).catch(() => null)
 async function probe(port) {
   try { const response = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, { signal: AbortSignal.timeout(1500) }); return response.ok ? await response.json() : null } catch { return null }
 }
 function alive(pid) { try { process.kill(pid, 0); return true } catch { return false } }
+
 async function stop() {
-  const state = await readState()
+  const { dataDir, stateFile, instanceId } = await context()
+  const state = await readState(stateFile)
   if (!state) { console.log('No service is running for this application folder.'); return }
   const current = await probe(state.port)
   if (!current) { if (alive(state.pid)) throw new Error('The recorded process is alive but could not be verified. No process was stopped.'); await fs.rm(stateFile, { force: true }); return }
@@ -27,8 +38,10 @@ async function stop() {
   if (!response.ok) throw new Error('The service rejected the stop request.')
   console.log('Service stop requested. Pending work will finish before the database closes.')
 }
+
 async function launch() {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required.')
+  const { dataDir, stateFile, instanceId } = await context()
   if (existsSync(`${dataDir}.update-lock`)) {
     const owner = await fs.readFile(`${dataDir}.update-lock`, 'utf8')
     if (owner !== process.env.VEHICLE_MANAGER_UPDATE_LOCK_OWNER || !alive(Number(owner))) throw new Error('An application update is in progress. Do not start an older release.')
@@ -46,7 +59,7 @@ async function launch() {
   await fs.writeFile(path.join(lock, 'owner.json'), JSON.stringify({ token, pid: process.pid }), { flag: 'wx' })
   let port
   try {
-    const state = await readState()
+    const state = await readState(stateFile)
     if (state) {
       const current = await probe(state.port)
       if (current?.instanceId === instanceId && current.pid === state.pid) {
@@ -55,8 +68,8 @@ async function launch() {
           const response = await fetch(`http://127.0.0.1:${state.port}/api/local/shutdown`, { method: 'POST', headers: { 'X-App-Request': 'vehicle-manager', 'X-Control-Token': state.controlToken }, signal: AbortSignal.timeout(5000) })
           if (!response.ok) throw new Error('A different application version is using this local data and rejected a safe stop. Stop it with its matching Stop.cmd.')
           const deadline = Date.now() + 60000
-          while ((alive(state.pid) || await readState()) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100))
-          if (alive(state.pid) || await readState()) throw new Error('The previous application version is still shutting down. Retry after it closes.')
+          while ((alive(state.pid) || await readState(stateFile)) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100))
+          if (alive(state.pid) || await readState(stateFile)) throw new Error('The previous application version is still shutting down. Retry after it closes.')
         }
       }
       else if (alive(state.pid)) throw new Error('An existing process could not be verified. Refusing to open this database twice.')
@@ -71,7 +84,11 @@ async function launch() {
         const log = openSync(path.join(dataDir, 'startup.log'), 'a')
         let child
         try {
-          child = fork(entry, [], { cwd: application, execArgv: [], env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir }, detached: !managed, windowsHide: true, stdio: ['ignore', log, log, 'ipc'] })
+          child = fork(entry, [], {
+            cwd: application, execArgv: [], detached: !managed, windowsHide: true, stdio: ['ignore', log, log, 'ipc'],
+            env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir,
+              ...(packaged ? { VEHICLE_MANAGER_PROGRAM_DIR: root, VEHICLE_MANAGER_UPDATE_REQUEST: updateRequest } : {}) },
+          })
           if (managed) managedExit = new Promise(resolve => child.once('exit', code => resolve(code ?? 1)))
           port = await new Promise((resolve, reject) => {
             const notice = setTimeout(() => console.log('The application is still starting. A large local database migration may take several minutes; leave this window open.'), 20000)
@@ -96,5 +113,30 @@ async function launch() {
   }
   if (managedExit && await managedExit !== 0) throw new Error('The managed service did not exit cleanly.')
 }
-try { if (process.argv.includes('--stop')) await stop(); else await launch() }
-catch (error) { console.error(error.message); process.exitCode = 1 }
+
+async function applyUpdate(version) {
+  if (!version) throw new Error('The update version is missing.')
+  await fs.appendFile(path.join(root, 'launcher.log'), `${new Date().toISOString()} Installing ${version}\n`).catch(() => {})
+  const { installUpdate } = await import(pathToFileURL(path.join(root, 'update.mjs')).href)
+  const { dataDir } = await context()
+  const result = await installUpdate(root, dataDir, version)
+  await fs.appendFile(path.join(root, 'launcher.log'), `${new Date().toISOString()} Installed ${result.to}; backup ${result.backup}\n`).catch(() => {})
+}
+
+async function main() {
+  if (process.argv.includes('--check') || process.argv.includes('--download')) {
+    const update = await import(pathToFileURL(path.join(root, 'update.mjs')).href)
+    const result = process.argv.includes('--download') ? await update.downloadUpdate(root) : await update.checkUpdate(root)
+    console.log(JSON.stringify(result))
+    return
+  }
+  if (process.argv.includes('--apply')) return applyUpdate(process.argv[process.argv.indexOf('--apply') + 1])
+  if (process.argv.includes('--stop')) return stop()
+  return launch()
+}
+
+if (path.resolve(process.argv[1] || '') === fileURLToPath(import.meta.url)) main().catch(async error => {
+  console.error(error.message)
+  try { await fs.appendFile(path.join(root, 'launcher.log'), `${new Date().toISOString()} ${error.stack}\n`) } catch { }
+  process.exitCode = 1
+})

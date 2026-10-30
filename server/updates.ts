@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { promisify } from 'node:util'
 import { AppError } from './team.js'
 import { appVersion } from '../shared/version.js'
@@ -9,16 +10,22 @@ const execute = promisify(execFile)
 export type UpdateResult = { version: string | null; downloaded: string | null }
 export type UpdateBackend = { run: (command: 'check' | 'download') => Promise<UpdateResult>; prepare: (version: string) => Promise<void> }
 export function installedUpdateBackend(): UpdateBackend | undefined {
-  const home = process.env.VEHICLE_MANAGER_STABLE_HOME, request = process.env.VEHICLE_MANAGER_UPDATE_REQUEST
+  const home = process.env.VEHICLE_MANAGER_PROGRAM_DIR, request = process.env.VEHICLE_MANAGER_UPDATE_REQUEST
   if (!home || !request) return undefined
+  const launcher = path.join(home, 'launcher.mjs')
   return {
     async run(command) {
-      const { stdout } = await execute(process.execPath, [`${home}/stable-launcher.mjs`, `--${command}`], { env: { ...process.env, VEHICLE_MANAGER_PROGRAM_DIR: home }, windowsHide: true, timeout: 15 * 60 * 1000, maxBuffer: 128 * 1024 })
+      const { stdout } = await execute(process.execPath, [launcher, `--${command}`], { env: { ...process.env, VEHICLE_MANAGER_PROGRAM_DIR: home }, cwd: home, windowsHide: true, timeout: 15 * 60 * 1000, maxBuffer: 128 * 1024 })
       const result = JSON.parse(stdout.trim()) as UpdateResult
       if ((result.version !== null && typeof result.version !== 'string') || (result.downloaded !== null && typeof result.downloaded !== 'string')) throw new Error('Invalid updater response')
       return result
     },
-    async prepare(version) { await fs.writeFile(request, JSON.stringify({ version }), { flag: 'wx' }) },
+    async prepare(version) {
+      await fs.mkdir(path.dirname(request), { recursive: true })
+      await fs.writeFile(request, JSON.stringify({ version }))
+      const child = spawn(process.execPath, [launcher, '--apply', version], { cwd: home, detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, VEHICLE_MANAGER_PROGRAM_DIR: home } })
+      child.unref()
+    },
   }
 }
 
@@ -28,7 +35,7 @@ export class ApplicationUpdates {
   private downloaded: string | null = null
   constructor(private readonly backend?: UpdateBackend) {}
   get installing(): boolean { return this.phase === 'restarting' }
-  status(): ApplicationUpdateStatus { return { supported: Boolean(this.backend), channel: this.backend ? 'pre' : undefined, currentVersion: process.env.VEHICLE_MANAGER_RELEASE_VERSION || appVersion, availableVersion: this.availableVersion, downloadedVersion: this.downloaded, phase: this.phase } }
+  status(): ApplicationUpdateStatus { return { supported: Boolean(this.backend), currentVersion: process.env.VEHICLE_MANAGER_RELEASE_VERSION || appVersion, availableVersion: this.availableVersion, downloadedVersion: this.downloaded, phase: this.phase } }
   async run(command: 'check' | 'download') {
     if (!this.backend) throw new AppError('UPDATE_NOT_INSTALLED', 409)
     if (this.phase !== 'idle' && this.phase !== 'ready') throw new AppError('UPDATE_BUSY', 409)

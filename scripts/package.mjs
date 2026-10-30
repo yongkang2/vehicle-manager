@@ -27,7 +27,7 @@ try {
   for (const folder of ['dist', 'dist-server']) await fs.cp(path.join(project, folder), path.join(application, folder), { recursive: true })
   if (process.env.VEHICLE_MANAGER_PACKAGE_VERSION) await fs.writeFile(path.join(application, 'dist-server', 'shared', 'version.js'), `export const appVersion = ${JSON.stringify(manifest.version)};\n`)
   await fs.cp(path.join(production, 'node_modules'), path.join(application, 'node_modules'), { recursive: true })
-  for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
+  for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs', 'update.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
   if (process.env.VEHICLE_MANAGER_UPDATE_PUBLIC_KEY_FILE) {
     for (const file of ['stable-launcher.mjs', 'stable-update.mjs', 'Install-Launcher.cmd']) await fs.copyFile(path.join(project, file), path.join(release, file))
     await fs.copyFile(process.env.VEHICLE_MANAGER_UPDATE_PUBLIC_KEY_FILE, path.join(release, 'update-public-key.pem'))
