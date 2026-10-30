@@ -33,19 +33,31 @@ async function fileInventory(directory: string): Promise<Map<string, { size: num
   return result
 }
 
-async function legacyDataDirectory(projectRoot: string): Promise<string> {
+type LegacySelection = { directory: string; alternatives: string[] }
+
+async function legacyDataDirectory(projectRoot: string): Promise<LegacySelection> {
   const local = path.join(projectRoot, 'data')
   const localEntries = await fs.readdir(local).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error))
-  if (localEntries?.length || !/^vehicle-manager-/i.test(path.basename(projectRoot))) return local
-  const siblings = await fs.readdir(path.dirname(projectRoot), { withFileTypes: true })
-  const candidates: string[] = []
+  if (localEntries?.length || !/^vehicle-manager-/i.test(path.basename(projectRoot))) return { directory: local, alternatives: [] }
+  const parent = path.dirname(projectRoot)
+  const siblings = await fs.readdir(parent, { withFileTypes: true })
+  const candidates: { directory: string; since: number; release: string }[] = []
   for (const entry of siblings) {
-    if (!entry.isDirectory() || !/^vehicle-manager-/i.test(entry.name) || path.resolve(path.dirname(projectRoot), entry.name) === path.resolve(projectRoot)) continue
-    const candidate = path.join(path.dirname(projectRoot), entry.name, 'data')
-    if (await fs.stat(path.join(candidate, 'local.sqlite')).then(stat => stat.isFile()).catch(() => false)) candidates.push(candidate)
+    if (!entry.isDirectory() || !/^vehicle-manager-/i.test(entry.name) || path.resolve(parent, entry.name) === path.resolve(projectRoot)) continue
+    const candidate = path.join(parent, entry.name, 'data')
+    const stat = await fs.stat(path.join(candidate, 'local.sqlite')).then(value => value.isFile() ? value : null).catch(() => null)
+    if (stat) candidates.push({ directory: candidate, since: stat.mtimeMs, release: entry.name })
   }
-  if (candidates.length > 1) throw new Error('Multiple previous release data directories were found. Stop both versions, then copy the intended data/ folder into this release folder and start again.')
-  return candidates[0] || local
+  if (!candidates.length) return { directory: local, alternatives: [] }
+  candidates.sort((left, right) => right.since - left.since || right.release.localeCompare(left.release))
+  const [chosen, ...rest] = candidates
+  if (rest.length) console.warn([
+    'Several previous release data directories were found. Using the most recently used one instead of stopping:',
+    chosen.directory,
+    ...rest.map(item => `  ignored: ${item.directory}`),
+    'If that is not the intended data, stop the service, move the correct data/ folder here, or set VEHICLE_MANAGER_DATA_DIR to it.'
+  ].join('\n'))
+  return { directory: chosen.directory, alternatives: rest.map(item => item.directory) }
 }
 
 export async function resolveDataDirectory(projectRoot: string, renameLegacy: typeof fs.rename = fs.rename): Promise<string> {
@@ -60,7 +72,7 @@ export async function resolveDataDirectory(projectRoot: string, renameLegacy: ty
   const marker = path.join(destination, '.data-migrated')
   const destinationEntries = await fs.readdir(destination).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error))
   if (destinationEntries?.includes(path.basename(marker))) return destination
-  const legacy = await legacyDataDirectory(projectRoot)
+  const { directory: legacy, alternatives } = await legacyDataDirectory(projectRoot)
   const legacyEntries = await fs.readdir(legacy).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error))
   if (!legacyEntries?.length) {
     await fs.mkdir(destination, { recursive: true })
@@ -90,7 +102,13 @@ export async function resolveDataDirectory(projectRoot: string, renameLegacy: ty
     }
     await fs.rm(path.join(temporary, 'service.json'), { force: true })
     await fs.rm(path.join(temporary, '.launch-lock'), { recursive: true, force: true })
-    await fs.writeFile(path.join(temporary, '.data-migrated'), JSON.stringify({ source: path.resolve(legacy), backup: legacyArchived ? path.resolve(legacyBackup) : null, sourceRetained, created: new Date().toISOString() }), { flag: 'wx' })
+    await fs.writeFile(path.join(temporary, '.data-migrated'), JSON.stringify({
+      source: path.resolve(legacy),
+      otherCandidates: alternatives.map(item => path.resolve(item)),
+      backup: legacyArchived ? path.resolve(legacyBackup) : null,
+      sourceRetained,
+      created: new Date().toISOString()
+    }), { flag: 'wx' })
     await fs.rename(temporary, destination)
   } catch (error) {
     await fs.rm(temporary, { recursive: true, force: true }).catch(() => {})
