@@ -117,6 +117,8 @@ CSV files use UTF-8 BOM, comma delimiters, CRLF rows, quoted special characters 
 
 ## Portable Distribution
 
+The **Version and downloads** panel shows the current application version and links to the [GitHub project](https://github.com/yongkang2/vehicle-manager) and [release downloads](https://github.com/yongkang2/vehicle-manager/releases). In-app automatic update controls are unavailable; this panel does not check, download or install updates automatically. Before manually changing versions, save work, stop the old service, independently back up local data and the shared folder, and upgrade collaborating clients together. Existing launcher/update backend code is unchanged.
+
 ```powershell
 npm run package:portable
 ```

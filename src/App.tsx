@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { App as AntApp, Alert, AutoComplete, Button, Checkbox, ConfigProvider, Form, Input, Segmented, Spin, Tabs, Tag, Tooltip } from 'antd'
 import enUS from 'antd/locale/en_US'
 import zhCN from 'antd/locale/zh_CN'
@@ -20,7 +21,7 @@ import './App.css'
 const BusinessApp = lazy(() => import('./BusinessApp'))
 const businessNavigation = [{ view: 'vehicles', icon: CarFront }, { view: 'dove', icon: FileSpreadsheet }, { view: 'reports', icon: Files }, { view: 'history', icon: History }, { view: 'sync', icon: FolderSync }, { view: 'audit', icon: ShieldCheck }] as const
 type WorkspaceView = 'workspace' | 'settings' | 'team' | BusinessView
-type BaseProps = { text: Dictionary; language: Language; onError: (error: unknown) => void }
+type BaseProps = { text: Dictionary; language: Language; onError: (error: unknown) => void; languageControl?: ReactNode }
 const glyph = (Icon: typeof Check) => <Icon size={17} aria-hidden="true" />
 const recentUsernamesKey = 'vehicle-manager.recent-usernames'
 function readRecentUsernames(): string[] {
@@ -33,7 +34,7 @@ function rememberRecentUsername(username: string) {
   try { localStorage.setItem(recentUsernamesKey, JSON.stringify([username, ...readRecentUsernames().filter(value => value !== username)].slice(0, 5))) } catch { }
 }
 
-function Authentication({ text, onError, onLogin }: BaseProps & { onLogin: (user: LocalUser) => void }) {
+function Authentication({ text, onError, onLogin, languageControl }: BaseProps & { onLogin: (user: LocalUser) => void }) {
   const [mode, setMode] = useState('login'), [busy, setBusy] = useState(false)
   const [recentUsernames] = useState(readRecentUsernames)
   const [form] = Form.useForm()
@@ -50,14 +51,14 @@ function Authentication({ text, onError, onLogin }: BaseProps & { onLogin: (user
   const accountInput = mode === 'login' && recentUsernames.length > 0
     ? <AutoComplete options={recentUsernames.map(value => ({ value }))} style={{ width: '100%' }}>{usernameInput}</AutoComplete>
     : usernameInput
-  return <main className="auth-screen"><div className="auth-content"><img src="/stellantis.svg" className="auth-logo" alt="STELLANTIS" /><h1>{text.product}</h1>
+  return <><div className="auth-language-control">{languageControl}</div><main className="auth-screen"><div className="auth-content"><img src="/stellantis.svg" className="auth-logo" alt="STELLANTIS" /><h1>{text.product}</h1>
     <Tabs activeKey={mode} onChange={value => { setMode(value); form.resetFields() }} items={[{ key: 'login', label: text.signIn }, { key: 'register', label: text.register }]} />
     <Form form={form} layout="vertical" onFinish={submit} requiredMark={false}>
       {mode === 'register' && <Form.Item label={text.displayName} name="displayName" rules={[{ required: true, whitespace: true, message: text.required }, { max: 60 }]}><Input autoComplete="name" maxLength={60} /></Form.Item>}
       <Form.Item label={text.username} name="username" rules={[{ required: true, message: text.required }, { min: 2, max: 24 }]}>{accountInput}</Form.Item>
       <Form.Item label={text.password} name="password" rules={[{ required: true, message: text.required }, ...(mode === 'register' ? [{ min: 10, max: 128, message: text.passwordHint }] : [])]}><Input.Password autoComplete={mode === 'login' ? 'current-password' : 'new-password'} maxLength={128} placeholder={mode === 'register' ? text.passwordHint : undefined} /></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} block className="auth-submit" icon={glyph(ArrowRight)} iconPlacement="end">{mode === 'login' ? text.signIn : text.register}</Button>
-    </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main>
+    </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main></>
 }
 
 function Setup({ text, language, onError, status, onDone, onLater }: BaseProps & { status: Status; onDone: () => Promise<void>; onLater: () => void }) {
@@ -85,7 +86,7 @@ function Setup({ text, language, onError, status, onDone, onLater }: BaseProps &
     {status.error && <Alert title={errorText(status.error, language)} type="warning" showIcon />}</section>
 }
 
-function Workspace({ text, language, onError, user, onLogout }: BaseProps & { user: LocalUser; onLogout: () => void }) {
+function Workspace({ text, language, onError, user, onLogout, languageControl }: BaseProps & { user: LocalUser; onLogout: () => void }) {
   const [status, setStatus] = useState<Status | null>(null), [view, setView] = useState<WorkspaceView>('vehicles')
   const [deferred, setDeferred] = useState(false), [refreshing, setRefreshing] = useState(false)
   const [personalOpen, setPersonalOpen] = useState(false), [updatesOpen, setUpdatesOpen] = useState(false)
@@ -109,7 +110,7 @@ function Workspace({ text, language, onError, user, onLogout }: BaseProps & { us
   </nav><div className="sidebar-bottom"><span className="build-label">{text.foundation} · {appVersion}</span><button className="account-row personal-trigger" aria-label={text.personal} onClick={() => setPersonalOpen(true)}><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><small>{admin ? text.firstAdmin : status.access === 'approved' ? text.member : text.account}</small></div>{glyph(ChevronUp)}</button></div></aside>
     {personalOpen && <PersonalWorkspaces open text={text} status={status} onClose={() => setPersonalOpen(false)} onConnect={() => setView('settings')} onSelected={selected} onLogout={() => void logout()} onUpdates={() => { setPersonalOpen(false); setUpdatesOpen(true) }} onError={onError} />}
     <ProgramUpdates language={language} open={updatesOpen} onOpenChange={setUpdatesOpen} />
-    <main className="workspace-main"><header className="workspace-topbar"><span className="current-team-label" title={status.sharedPath || undefined}>{status.teamName || text.workspace} <b>/</b> {setup ? text.settings : view === 'team' ? text.team : businessView ? businessText(view) : text.accessTitle}</span><div><Tag variant="filled" color={status.online ? 'success' : 'default'} icon={status.online ? glyph(Check) : glyph(WifiOff)}>{status.online ? text.online : text.offline}</Tag><Tooltip title={text.refresh}><Button type="text" loading={refreshing} icon={glyph(RefreshCw)} aria-label={text.refresh} onClick={() => void refresh()} /></Tooltip><Tooltip title={text.personal}><Button className="mobile-logout" type="text" icon={glyph(UserRound)} aria-label={text.personal} onClick={() => setPersonalOpen(true)} /></Tooltip></div></header>
+    <main className="workspace-main"><header className="workspace-topbar"><span className="current-team-label" title={status.sharedPath || undefined}>{status.teamName || text.workspace} <b>/</b> {setup ? text.settings : view === 'team' ? text.team : businessView ? businessText(view) : text.accessTitle}</span><div className="workspace-topbar-tools"><Tag variant="filled" color={status.online ? 'success' : 'default'} icon={status.online ? glyph(Check) : glyph(WifiOff)}>{status.online ? text.online : text.offline}</Tag><Tooltip title={text.refresh}><Button type="text" loading={refreshing} icon={glyph(RefreshCw)} aria-label={text.refresh} onClick={() => void refresh()} /></Tooltip><Tooltip title={text.personal}><Button className="mobile-logout" type="text" icon={glyph(UserRound)} aria-label={text.personal} onClick={() => setPersonalOpen(true)} /></Tooltip><div className="language-control">{languageControl}</div></div></header>
       <VehicleTableFilterProvider key={status.workspaceToken}><div className="page-content">{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={async () => { await reload(); setView('vehicles'); setDeferred(true) }} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} /></Suspense> : <>
         <div className="page-heading"><div><span className="eyebrow">WORKSPACE ACCESS</span><h1>{status.teamName || text.workspace}</h1></div><Button icon={glyph(FolderCog)} onClick={() => setPersonalOpen(true)}>{text.myTeams}</Button></div>
         <div className={`access-banner ${status.access}`}><span className="access-symbol">{status.access === 'approved' ? glyph(ShieldCheck) : status.access === 'pending' ? glyph(Clock3) : glyph(FolderOpen)}</span><strong>{labels[status.access]}</strong></div>
@@ -118,7 +119,7 @@ function Workspace({ text, language, onError, user, onLogout }: BaseProps & { us
       </>}</div></VehicleTableFilterProvider><footer className="workspace-footer"><span>{glyph(HardDrive)}{text.local}</span><span>{text.foundation} · {appVersion}</span></footer></main></div>
 }
 
-function Application({ language, text }: { language: Language; text: Dictionary }) {
+function Application({ language, text, languageControl }: { language: Language; text: Dictionary; languageControl: ReactNode }) {
   const { message, modal } = AntApp.useApp()
   const staleNotice = useRef(false)
   const [user, setUser] = useState<LocalUser | null>(null), [loading, setLoading] = useState(true)
@@ -126,7 +127,7 @@ function Application({ language, text }: { language: Language; text: Dictionary 
   const reportError = useEffectEvent(onError)
   useEffect(() => { void api<{ user: LocalUser | null }>('/api/bootstrap').then(result => setUser(result.user)).catch(error => reportError(error)).finally(() => setLoading(false)) }, [])
   if (loading) return <div className="boot"><Spin /></div>
-  return user ? <Workspace key={user.id} user={user} language={language} text={text} onError={onError} onLogout={() => setUser(null)} /> : <Authentication language={language} text={text} onError={onError} onLogin={setUser} />
+  return user ? <Workspace key={user.id} user={user} language={language} text={text} languageControl={languageControl} onError={onError} onLogout={() => setUser(null)} /> : <Authentication language={language} text={text} languageControl={languageControl} onError={onError} onLogin={setUser} />
 }
 
 export default function App() {
@@ -134,5 +135,6 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(() => localStorage.getItem('vdm-language') === 'zh' ? 'zh' : 'en')
   const text = dictionaries[language]
   useEffect(() => { localStorage.setItem('vdm-language', language); document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en'; document.title = `STELLANTIS · ${text.product}` }, [language, text.product])
-  return <ConfigProvider locale={language === 'zh' ? zhCN : enUS} theme={{ token: { colorPrimary: '#263781', borderRadius: 5, fontFamily: 'Bahnschrift, DengXian, Microsoft YaHei UI, sans-serif', fontSize: 13, controlHeight: 40, motion: false } }}><AntApp><div className="language-control"><Segmented aria-label="Language / 语言" value={language} options={[{ label: 'English', value: 'en' }, { label: '中文', value: 'zh' }]} onChange={value => setLanguage(value as Language)} /></div><Application language={language} text={text} /></AntApp></ConfigProvider>
+  const languageControl = <Segmented aria-label="Language / 语言" value={language} options={[{ label: 'English', value: 'en' }, { label: '中文', value: 'zh' }]} onChange={value => setLanguage(value as Language)} />
+  return <ConfigProvider locale={language === 'zh' ? zhCN : enUS} theme={{ token: { colorPrimary: '#263781', colorText: '#232a35', colorTextSecondary: '#586577', colorBorder: '#d6dde7', borderRadius: 5, fontFamily: 'Bahnschrift, DengXian, Microsoft YaHei UI, sans-serif', fontSize: 14, controlHeight: 40, controlHeightSM: 32, motion: false } }}><AntApp><Application language={language} text={text} languageControl={languageControl} /></AntApp></ConfigProvider>
 }
