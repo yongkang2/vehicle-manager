@@ -10,3 +10,85 @@
 .hv-battery-maturity-link{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hv-battery-table .ant-table-cell{overflow-wrap:anywhere}
 .dove-batch-target{overflow-wrap:anywhere}.dove-batch-target small{display:block;margin-top:6px;font-size:11px;color:var(--muted)}.dove-vehicle-assignment-select{width:100%;min-width:0}.dove-review-vehicle{display:flex;flex-direction:column;align-items:flex-start;gap:12px;margin-bottom:18px;min-width:0}.dove-review-vehicle .ant-alert{align-self:stretch;margin:0}.dove-review-vehicle p{font-size:12px;line-height:1.7;margin:0}.dove-import-review-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.dove-import-review-counts{display:flex;gap:18px;font-size:12px;flex-wrap:wrap}.dove-import-confirm-file>.ant-checkbox-wrapper{margin-top:12px}.dove-single-review-modal .ant-modal-body{min-width:0}.dove-import-confirmation>.ant-alert{margin-bottom:18px}@media(max-width:700px){.dove-import-review-footer>.ant-space{width:100%;justify-content:flex-end}.dove-import-review-counts{gap:12px}}
 .dove-manual-binding-tag{white-space:normal;overflow-wrap:anywhere}
+
+.business-workspace .record-link small,
+.business-workspace .record-title small,
+.business-filters > .ant-checkbox-wrapper,
+.fleet-stats span,
+.dove-batch-target small,
+.vehicle-overview .drawer-version {
+	color: var(--muted);
+	font-size: 12px
+}
+
+.business-workspace .page-heading {
+	margin-bottom: 24px
+}
+
+.business-workspace .section-toolbar .ant-btn,
+.business-workspace .page-heading .ant-btn {
+	font-size: 13px;
+	min-height: 36px
+}
+
+.business-filters {
+	gap: 12px;
+	margin: 16px 0
+}
+
+.business-workspace:has(.vehicle-table-region) {
+	padding-top: 0
+}
+
+.business-workspace:has(.vehicle-table-region) > .page-heading {
+	margin-bottom: 24px
+}
+
+.fleet-stats {
+	padding: 20px 0;
+	margin-bottom: 24px
+}
+
+.fleet-stats > div {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 8px;
+	padding: 0 20px
+}
+
+.fleet-stats strong {
+	font-size: 28px;
+	margin-top: 0
+}
+
+@media(max-width:700px) {
+	.business-workspace:has(.vehicle-table-region) {
+		padding-top: 0
+	}
+
+	.business-workspace:has(.vehicle-table-region) > .page-heading {
+		margin-bottom: 24px
+	}
+
+	.fleet-stats {
+		padding: 18px 0;
+		margin-bottom: 24px;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 16px 0
+	}
+
+	.fleet-stats > div {
+		padding: 0 12px
+	}
+
+	.fleet-stats > div:nth-child(odd) {
+		padding-left: 0
+	}
+
+	.fleet-stats > div:nth-child(even) {
+		border-right: 0;
+		padding-right: 0
+	}
+}
