@@ -314,77 +314,92 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     ]} expandable={{ expandedRowRender: record => <Descriptions column={{ xs: 1, sm: 2 }} size="small" items={Object.entries(record.data).filter(([, value]) => value !== '').map(([key, value]) => ({ key, label: text(key), children: <span className="preserve-text">{display(value)}</span> }))} /> }} /></>
   }
   const history = (items: Change[]) => !items.length ? <Empty description={text('noRecords')} /> : <>
-    <Timeline items={items.slice((historyPage - 1) * 20, historyPage * 20).map(change => ({ color: 'gray', content: <div className="change-entry">
-      <div><strong>{change.actor.name}</strong><span>{text(change.action === 'updated' ? 'updatedAction' : change.action)} · {text(change.kind === 'part' && (change.after.category || change.before?.category) === 'battery' ? 'hvBattery' : change.kind)}</span><time>{date(change.created)}</time></div>
-      <p>{change.reason}</p>
-      {['deleted', 'vehicle.deleted'].includes(change.action) && <p className="mono">VIN: {display(change.after.vin || change.before?.vin)}</p>}
-      <small className="mono">{text('device')}: {change.actor.deviceId.slice(0, 12)}{change.sourceId && <> · {records.some(record => record.id === change.sourceId && record.kind === 'report') ? <button className="inline-link" onClick={() => setReportId(change.sourceId)}>{text('source')}</button> : <span>{text('sourceUnavailable')}</span>}</>}</small>
-      <details><summary>{text('details')}</summary><div className="change-diff">{Object.keys(change.after).filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key])).map(key => <div key={key}><strong>{text(key)}</strong><del>{display(change.before?.[key])}</del><span>→</span><ins>{display(change.after[key])}</ins></div>)}{change.archivedBefore !== change.archivedAfter && <div><strong>{text('status')}</strong><del>{change.archivedBefore ? text('archived') : '—'}</del><span>→</span><ins>{change.archivedAfter ? text('archived') : text('restored')}</ins></div>}</div></details>
-    </div> }))} />
+    <Timeline items={items.slice((historyPage - 1) * 20, historyPage * 20).map(change => ({
+      color: 'gray', content: <div className="change-entry">
+        <div><strong>{change.actor.name}</strong><span>{text(change.action === 'updated' ? 'updatedAction' : change.action)} · {text(change.kind === 'part' && (change.after.category || change.before?.category) === 'battery' ? 'hvBattery' : change.kind)}</span><time>{date(change.created)}</time></div>
+        <p>{change.reason}</p>
+        {['deleted', 'vehicle.deleted'].includes(change.action) && <p className="mono">VIN: {display(change.after.vin || change.before?.vin)}</p>}
+        <small className="mono">{text('device')}: {change.actor.deviceId.slice(0, 12)}{change.sourceId && <> · {records.some(record => record.id === change.sourceId && record.kind === 'report') ? <button className="inline-link" onClick={() => setReportId(change.sourceId)}>{text('source')}</button> : <span>{text('sourceUnavailable')}</span>}</>}</small>
+        <details><summary>{text('details')}</summary><div className="change-diff">{Object.keys(change.after).filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key])).map(key => <div key={key}><strong>{text(key)}</strong><del>{display(change.before?.[key])}</del><span>→</span><ins>{display(change.after[key])}</ins></div>)}{change.archivedBefore !== change.archivedAfter && <div><strong>{text('status')}</strong><del>{change.archivedBefore ? text('archived') : '—'}</del><span>→</span><ins>{change.archivedAfter ? text('archived') : text('restored')}</ins></div>}</div></details>
+      </div>
+    }))} />
     <Pagination current={historyPage} onChange={setHistoryPage} total={items.length} pageSize={20} showSizeChanger={false} hideOnSinglePage />
   </>
 
   const filters = <div className="business-filters"><Input prefix={<Search size={15} />} value={query} onChange={event => setQuery(event.target.value)} placeholder={text('search')} aria-label={text('search')} allowClear />{view === 'vehicles' && <Select allowClear placeholder={text('status')} value={filter} onChange={setFilter} options={statuses.map(value => ({ value, label: text(value) }))} />}<Checkbox checked={archived} onChange={event => setArchived(event.target.checked)}>{text('showArchived')}</Checkbox></div>
+  const visibleReports = view === 'reports' ? reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())) : []
+  const visibleAudit = view === 'audit' ? audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase())) : []
   const selectedController = configuration?.controllerIndex !== null && configuration?.controllerIndex !== undefined ? (configuration.report.data as unknown as ReportData).parsed.controllers[configuration.controllerIndex] : null
   const targetParts = configuration && selectedController ? records.filter(record => record.kind === 'part' && record.vehicleId === configuration.report.vehicleId && record.data.category === 'controller' && !record.archived && keyControllerName(record.data.name) === keyControllerName(selectedController.name)) : []
   const olderReport = Boolean(configuration?.part && doveRecordedTime(configuration.report.data.recordedAt) < doveRecordedTime(configuration.part.data.reportRecordedAt))
   const duplicateTarget = targetParts.length > 1
   const conflictingSources = configuration ? controllerSources(configuration.report).filter(item => keyControllerName(item.controller.name) && controllerSources(configuration.report).filter(other => keyControllerName(other.controller.name) === keyControllerName(item.controller.name)).length > 1) : []
-  return <section className="business-workspace"><div className="page-heading"><div>{view !== 'vehicles' && <span className="eyebrow">{text(view).toUpperCase()}</span>}<h1>{text(view)}</h1></div><Space wrap>{view !== 'vehicles' && <Tooltip title={text('refresh')}><Button icon={<RefreshCw size={16} />} aria-label={text('refresh')} loading={loading} onClick={() => void load({ full: true })} /></Tooltip>}{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
+  return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1><Space wrap>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div>
-    <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
-      toolbarFilters={filters}
-      toolbarActions={<Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button>}
-      toolbarMenu={<Dropdown trigger={['click']} menu={{ items: [
-        { key: 'json', label: text('export'), icon: <Download size={16} />, onClick: () => void download('/api/business/export', 'vehicle-data.json').catch(onError) },
-        ...(admin ? [
-          { type: 'divider' as const },
-          { key: 'backup', label: text('backup'), icon: <Download size={16} />, disabled: !online, onClick: () => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError) },
-          { key: 'restore', label: <span title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}>{text('restoreBackup')}</span>, icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
-        ] : []),
-      ] }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
-      filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
-      rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
-      { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => openVehicle(record.id)}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
-      { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
-      { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
-      { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
-      { key: 'hvBatteryMaturityLevel', title: text('hvBatteryMaturityLevel'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
-        const maturity = activeHvBatteries(records, record.id).map(battery => display(battery.data.maturity)).join(' / ') || '—'
-        return <Tooltip title={maturity}><button className="inline-link hv-battery-maturity-link" aria-label={`${text('hvBatteryMaturityLevel')} ${record.data.vin}`} onClick={() => openVehicle(record.id, 'hvBattery')}>{maturity}</button></Tooltip>
-      } },
-      { key: 'owner', title: text('owner'), width: 130, render: (_, record) => display(record.data.owner) },
-      { key: 'latestDove', title: text('latestDove'), width: 150, render: (_, record) => { const report = reports.find(item => item.vehicleId === record.id && !item.archived); return report ? <button className="inline-link" onClick={() => setReportId(report.id)}>{display(report.data.recordedAt)}</button> : '—' } },
-      { key: 'updated', title: text('updated'), width: 160, render: (_, record) => <div className="record-title">{date(record.updated)}<small>v{record.version}</small></div> }, { key: 'actions', title: text('actions'), width: 100, render: (_, record) => <Button type="text" icon={<ArrowUpRight size={17} />} aria-label={`${text('details')} ${record.data.name}`} onClick={() => openVehicle(record.id)} /> },
-      ...(['model', 'color', 'thermal', 'notes'] as const).map(field => ({ key: field, title: text(field), width: field === 'notes' ? 240 : field === 'thermal' ? 200 : 160, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
-        const value = field === 'thermal' && thermalSystemTypes.some(type => type === record.data[field]) ? text(String(record.data[field])) : display(record.data[field])
-        return <Tooltip title={value}><span>{value}</span></Tooltip>
-      } })),
-      ...([{ key: 'hvBatteryPartNumber', field: 'productPart' }, { key: 'hvBatterySerialNumber', field: 'serial' }] as const).map(({ key, field }) => ({ key, title: text(key), width: 220, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
-        const value = activeHvBatteries(records, record.id).map(battery => display(battery.data[field])).join(' / ') || '—'
-        return <Tooltip title={value}><span>{value}</span></Tooltip>
-      } })),
-      { key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
-        const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
-        return <Tooltip title={value}><span>{value}</span></Tooltip>
-      } },
-      ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
-        key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
-          const value = display(record.data[field])
-          return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
-        },
-      })),
-    ]} /></>}
+      <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
+        toolbarFilters={filters}
+        toolbarActions={<Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button>}
+        toolbarMenu={<Dropdown trigger={['click']} menu={{
+          items: [
+            { key: 'json', label: text('export'), icon: <Download size={16} />, onClick: () => void download('/api/business/export', 'vehicle-data.json').catch(onError) },
+            ...(admin ? [
+              { type: 'divider' as const },
+              { key: 'backup', label: text('backup'), icon: <Download size={16} />, disabled: !online, onClick: () => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError) },
+              { key: 'restore', label: <span title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}>{text('restoreBackup')}</span>, icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
+            ] : []),
+          ]
+        }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
+        filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
+        rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
+          { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => openVehicle(record.id)}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
+          { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
+          { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
+          { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
+          {
+            key: 'hvBatteryMaturityLevel', title: text('hvBatteryMaturityLevel'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
+              const maturity = activeHvBatteries(records, record.id).map(battery => display(battery.data.maturity)).join(' / ') || '—'
+              return <Tooltip title={maturity}><button className="inline-link hv-battery-maturity-link" aria-label={`${text('hvBatteryMaturityLevel')} ${record.data.vin}`} onClick={() => openVehicle(record.id, 'hvBattery')}>{maturity}</button></Tooltip>
+            }
+          },
+          { key: 'owner', title: text('owner'), width: 130, render: (_, record) => display(record.data.owner) },
+          { key: 'latestDove', title: text('latestDove'), width: 150, render: (_, record) => { const report = reports.find(item => item.vehicleId === record.id && !item.archived); return report ? <button className="inline-link" onClick={() => setReportId(report.id)}>{display(report.data.recordedAt)}</button> : '—' } },
+          { key: 'updated', title: text('updated'), width: 160, render: (_, record) => <div className="record-title">{date(record.updated)}<small>v{record.version}</small></div> }, { key: 'actions', title: text('actions'), width: 100, render: (_, record) => <Button type="text" icon={<ArrowUpRight size={17} />} aria-label={`${text('details')} ${record.data.name}`} onClick={() => openVehicle(record.id)} /> },
+          ...(['model', 'color', 'thermal', 'notes'] as const).map(field => ({
+            key: field, title: text(field), width: field === 'notes' ? 240 : field === 'thermal' ? 200 : 160, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+              const value = field === 'thermal' && thermalSystemTypes.some(type => type === record.data[field]) ? text(String(record.data[field])) : display(record.data[field])
+              return <Tooltip title={value}><span>{value}</span></Tooltip>
+            }
+          })),
+          ...([{ key: 'hvBatteryPartNumber', field: 'productPart' }, { key: 'hvBatterySerialNumber', field: 'serial' }] as const).map(({ key, field }) => ({
+            key, title: text(key), width: 220, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+              const value = activeHvBatteries(records, record.id).map(battery => display(battery.data[field])).join(' / ') || '—'
+              return <Tooltip title={value}><span>{value}</span></Tooltip>
+            }
+          })),
+          {
+            key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
+              const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
+              return <Tooltip title={value}><span>{value}</span></Tooltip>
+            }
+          },
+          ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
+            key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+              const value = display(record.data[field])
+              return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
+            },
+          })),
+        ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
-    {view === 'reports' && <>{filters}<div className="section-toolbar"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div>{reportTable(reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())), true)}</>}
-    {view === 'history' && history(changes)}
-    {view === 'audit' && <><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} value={query} onChange={event => setQuery(event.target.value)} /></div><Table<AuditEntry> rowKey="id" size="small" dataSource={audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase()))} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
+    {view === 'reports' && <><div className="business-table-controls">{filters}<div className="business-control-actions"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div></div><div className="business-list-heading"><h3>{text('reports')}</h3><span>{visibleReports.length}</span></div>{reportTable(visibleReports, true)}</>}
+    {view === 'history' && <><div className="business-list-heading"><h3>{text('history')}</h3><span>{changes.length}</span></div>{history(changes)}</>}
+    {view === 'audit' && <><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
     {view === 'sync' && <>
       <Alert type={sync.error || sync.conflicts.length || sync.quarantined ? 'warning' : 'success'} showIcon icon={sync.error ? <CloudOff size={18} /> : undefined} title={sync.error ? errorText(sync.error, language) : text(sync.phase)} />
-      <Descriptions className="sync-summary" column={{ xs: 1, sm: 2 }} items={[{ key: 'pending', label: text('pending'), children: sync.pending }, { key: 'conflicts', label: text('conflicts'), children: sync.conflicts.length }, { key: 'quarantined', label: text('quarantined'), children: sync.quarantined }, { key: 'lastSync', label: text('lastSync'), children: sync.lastSync ? date(sync.lastSync) : '—' }, { key: 'revision', label: text('revision'), children: <span className="mono">{sync.revision || '—'}</span> }]} />
-      <h3 className="sync-title">{text('conflicts')}</h3>
+      <div className="sync-metrics">{[{ key: 'pending', value: sync.pending }, { key: 'conflicts', value: sync.conflicts.length }, { key: 'quarantined', value: sync.quarantined }].map(item => <div key={item.key}><span>{text(item.key)}</span><strong>{item.value}</strong></div>)}</div>
+      <Descriptions className="sync-summary" column={{ xs: 1, sm: 2 }} items={[{ key: 'lastSync', label: text('lastSync'), children: sync.lastSync ? date(sync.lastSync) : '—' }, { key: 'revision', label: text('revision'), children: <span className="mono">{sync.revision || '—'}</span> }]} />
+      <div className="business-list-heading"><h3>{text('conflicts')}</h3><span>{sync.conflicts.length}</span></div>
       {sync.conflicts.length ? sync.conflicts.map(conflict => <ConflictForm key={conflict.token} conflict={conflict} language={language} admin={admin} onResolve={async (item, choices, reason) => { try { setSync(await api<SyncStatus>(`/api/business/sync/${item.recordId}/resolve`, { method: 'POST', body: { token: item.token, choices, reason } })); await load() } catch (error) { onError(error) } }} />) : <Empty description={text('noRecords')} />}
       <div className="section-toolbar"><h3>{text('quarantined')}</h3><Button icon={<Download size={15} />} disabled={!quarantined.length} onClick={() => void download('/api/business/sync/quarantined/export', 'quarantined-operations.json').catch(onError)}>{text('exportQuarantined')}</Button></div>
       {quarantined.length > 0 && <Alert className="business-notice" type="warning" showIcon title={text('quarantinedNotice')} />}

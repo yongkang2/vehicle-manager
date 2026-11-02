@@ -119,18 +119,20 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
         children: <button type="button" className={`vehicle-column-filter-button${activeFilters[filterId]?.length ? ' active' : ''}`} aria-label={`${text('vehicleColumnFilter')}: ${column.title}`} aria-haspopup="true" aria-expanded={openFilter === filterId} title={`${text('vehicleColumnFilter')}: ${column.title}`} onClick={event => event.stopPropagation()}><Filter size={14} aria-hidden="true" /></button>,
       },
     } : {}
-    return { ...column, ...columnFilters, width, align: 'center', onHeaderCell: (current, index) => ({
-      ...column.onHeaderCell?.(current, index),
-      className: [column.onHeaderCell?.(current, index)?.className, filterId ? 'vehicle-column-filter-header' : ''].filter(Boolean).join(' '), title: column.title,
-      columnKey: id, columnWidth: width, resizeLabel: `${text('resizeColumn')}: ${column.title}`, hintId, resizeDisabled: disabled,
-      onColumnResize: (value: number) => setWidths(previous => {
-        const nextWidth = clampColumnWidth(value)
-        return previous[id] === nextWidth ? previous : { ...previous, [id]: nextWidth }
-      }),
-      onColumnResizeEnd: (value: number) => { clearPreview(id); onPreferencesChange({ ...preferences, widths: { ...preferences.widths, [id]: clampColumnWidth(value) } }) },
-      onColumnResizeCancel: () => clearPreview(id),
-      onColumnReset: () => { clearPreview(id); const next = { ...preferences.widths }; delete next[id]; onPreferencesChange({ ...preferences, widths: next }) },
-    }) }
+    return {
+      ...column, ...columnFilters, width, align: 'center', onHeaderCell: (current, index) => ({
+        ...column.onHeaderCell?.(current, index),
+        className: [column.onHeaderCell?.(current, index)?.className, filterId ? 'vehicle-column-filter-header' : ''].filter(Boolean).join(' '), title: column.title,
+        columnKey: id, columnWidth: width, resizeLabel: `${text('resizeColumn')}: ${column.title}`, hintId, resizeDisabled: disabled,
+        onColumnResize: (value: number) => setWidths(previous => {
+          const nextWidth = clampColumnWidth(value)
+          return previous[id] === nextWidth ? previous : { ...previous, [id]: nextWidth }
+        }),
+        onColumnResizeEnd: (value: number) => { clearPreview(id); onPreferencesChange({ ...preferences, widths: { ...preferences.widths, [id]: clampColumnWidth(value) } }) },
+        onColumnResizeCancel: () => clearPreview(id),
+        onColumnReset: () => { clearPreview(id); const next = { ...preferences.widths }; delete next[id]; onPreferencesChange({ ...preferences, widths: next }) },
+      })
+    }
   })
   const totalWidth = resizedColumns.reduce((total, column) => total + Number(column.width), 0)
   function changeLayout(next: VehicleTablePreferences) {
@@ -158,7 +160,7 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
   function moveColumn(id: VehicleColumnId, offset: number) {
     const index = preferences.columns.indexOf(id), target = index + offset
     if (disabled || index < 1 || index >= preferences.columns.length - 1 || target < 1 || target >= preferences.columns.length - 1) return
-    const next = [...preferences.columns]; [next[index], next[target]] = [next[target], next[index]]
+    const next = [...preferences.columns];[next[index], next[target]] = [next[target], next[index]]
     onPreferencesChange({ ...preferences, columns: next })
   }
   const status = <Space className="vehicle-column-save-status" role="status" aria-live="polite"><span>{text(saveStatus === 'loading' ? 'vehicleTableSettingsLoading' : saveStatus === 'saving' ? 'vehicleTableSettingsSaving' : saveStatus === 'error' ? 'vehicleTableSettingsError' : 'vehicleTableSettingsSaved')}</span>{saveStatus === 'error' && retry && <Button size="small" onClick={retry}>{text('vehicleTableSettingsRetry')}</Button>}</Space>
