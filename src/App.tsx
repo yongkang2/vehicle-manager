@@ -14,7 +14,7 @@ import TeamManagement from './TeamManagement'
 import PersonalWorkspaces from './PersonalWorkspaces'
 import ProgramUpdates from './ProgramUpdates'
 import { translateBusiness } from './business-i18n'
-import type { BusinessView } from './BusinessApp'
+import type { BusinessRefreshHandle, BusinessView } from './BusinessApp'
 import { VehicleTableFilterProvider } from './VehicleTableFilterSession'
 import './App.css'
 
@@ -90,12 +90,13 @@ function Workspace({ text, language, onError, user, onLogout, languageControl }:
   const [status, setStatus] = useState<Status | null>(null), [view, setView] = useState<WorkspaceView>('vehicles')
   const [deferred, setDeferred] = useState(false), [refreshing, setRefreshing] = useState(false)
   const [personalOpen, setPersonalOpen] = useState(false), [updatesOpen, setUpdatesOpen] = useState(false)
+  const businessRef = useRef<BusinessRefreshHandle>(null)
   async function reload() { const next = await api<Status>('/api/status'); setStatus(next); if (next.member?.role !== 'admin' || !next.online || next.access !== 'approved') setView(current => current === 'team' ? 'workspace' : current) }
   const reportError = useEffectEvent(onError)
   useEffect(() => { void api<Status>('/api/status').then(setStatus).catch(error => reportError(error)) }, [])
   const periodicReload = useEffectEvent(async () => { try { await reload() } catch (error) { onError(error) } })
   useEffect(() => { const timer = setInterval(() => { void periodicReload() }, 30000); return () => clearInterval(timer) }, [])
-  async function refresh() { setRefreshing(true); try { await reload() } catch (error) { onError(error) } finally { setRefreshing(false) } }
+  async function refresh() { setRefreshing(true); try { await reload(); await businessRef.current?.refresh() } catch (error) { onError(error) } finally { setRefreshing(false) } }
   async function logout() { try { await api('/api/logout', { method: 'POST' }); onLogout() } catch (error) { onError(error) } }
   function selected(next: Status) { setStatus(next); setView(next.access === 'approved' ? 'vehicles' : 'workspace'); setDeferred(true) }
   if (!status) return <div className="boot"><Spin /></div>
@@ -111,7 +112,7 @@ function Workspace({ text, language, onError, user, onLogout, languageControl }:
     {personalOpen && <PersonalWorkspaces open text={text} status={status} onClose={() => setPersonalOpen(false)} onConnect={() => setView('settings')} onSelected={selected} onLogout={() => void logout()} onUpdates={() => { setPersonalOpen(false); setUpdatesOpen(true) }} onError={onError} />}
     <ProgramUpdates language={language} open={updatesOpen} onOpenChange={setUpdatesOpen} />
     <main className="workspace-main"><header className="workspace-topbar"><span className="current-team-label" title={status.sharedPath || undefined}>{status.teamName || text.workspace} <b>/</b> {setup ? text.settings : view === 'team' ? text.team : businessView ? businessText(view) : text.accessTitle}</span><div className="workspace-topbar-tools"><Tag variant="filled" color={status.online ? 'success' : 'default'} icon={status.online ? glyph(Check) : glyph(WifiOff)}>{status.online ? text.online : text.offline}</Tag><Tooltip title={text.refresh}><Button type="text" loading={refreshing} icon={glyph(RefreshCw)} aria-label={text.refresh} onClick={() => void refresh()} /></Tooltip><Tooltip title={text.personal}><Button className="mobile-logout" type="text" icon={glyph(UserRound)} aria-label={text.personal} onClick={() => setPersonalOpen(true)} /></Tooltip><div className="language-control">{languageControl}</div></div></header>
-      <VehicleTableFilterProvider key={status.workspaceToken}><div className="page-content">{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={async () => { await reload(); setView('vehicles'); setDeferred(true) }} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} /></Suspense> : <>
+      <VehicleTableFilterProvider key={status.workspaceToken}><div className="page-content">{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={async () => { await reload(); setView('vehicles'); setDeferred(true) }} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} refreshRef={businessRef} /></Suspense> : <>
         <div className="page-heading"><div><span className="eyebrow">WORKSPACE ACCESS</span><h1>{status.teamName || text.workspace}</h1></div><Button icon={glyph(FolderCog)} onClick={() => setPersonalOpen(true)}>{text.myTeams}</Button></div>
         <div className={`access-banner ${status.access}`}><span className="access-symbol">{status.access === 'approved' ? glyph(ShieldCheck) : status.access === 'pending' ? glyph(Clock3) : glyph(FolderOpen)}</span><strong>{labels[status.access]}</strong></div>
         {status.error && <Alert className="connection-alert" type="warning" showIcon title={errorText(status.error, language)} />}

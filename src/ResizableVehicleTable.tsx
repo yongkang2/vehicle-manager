@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { Dispatch, HTMLAttributes, KeyboardEvent, PointerEvent, SetStateAction } from 'react'
-import { Button, Checkbox, Modal, Space, Table } from 'antd'
+import type { Dispatch, HTMLAttributes, KeyboardEvent, PointerEvent, ReactNode, SetStateAction } from 'react'
+import { Button, Checkbox, Modal, Space, Table, Tooltip } from 'antd'
 import type { ColumnType, TableProps } from 'antd/es/table'
-import { ArrowDown, ArrowUp, Columns3, Filter, RotateCcw } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Columns3, Filter, RotateCcw } from 'lucide-react'
 import type { BusinessRecord } from '../shared/business'
 import { defaultVehicleTablePreferences, vehicleColumnIds } from '../shared/vehicle-table'
 import type { VehicleColumnId, VehicleTablePreferences } from '../shared/vehicle-table'
@@ -18,6 +18,7 @@ export type VehicleTableColumn = ColumnType<BusinessRecord> & { key: string; tit
 type Props = Omit<TableProps<BusinessRecord>, 'columns' | 'components' | 'scroll' | 'className' | 'tableLayout'> & {
   columns: VehicleTableColumn[]; language: Language; preferences: VehicleTablePreferences; onPreferencesChange: (next: VehicleTablePreferences) => void; saveStatus: VehicleTableSaveStatus; retry?: () => void
   filters: VehicleColumnFilters; onFiltersChange: Dispatch<SetStateAction<VehicleColumnFilters>>; filterVehicles: readonly BusinessRecord[]; filterValues: VehicleFilterValues; filterScopeKey: string
+  toolbarFilters?: ReactNode; toolbarActions?: ReactNode; toolbarMenu?: ReactNode
 }
 type HeaderProps = HTMLAttributes<HTMLTableCellElement> & {
   columnKey: string
@@ -72,7 +73,7 @@ function ResizableHeaderCell({ columnKey, columnWidth, resizeLabel, hintId, resi
 
 const components = { header: { cell: ResizableHeaderCell } }
 
-export default function ResizableVehicleTable({ columns, language, preferences, onPreferencesChange, saveStatus, retry, filters, onFiltersChange, filterVehicles, filterValues, filterScopeKey, dataSource, pagination, onChange, locale, ...props }: Props) {
+export default function ResizableVehicleTable({ columns, language, preferences, onPreferencesChange, saveStatus, retry, filters, onFiltersChange, filterVehicles, filterValues, filterScopeKey, toolbarFilters, toolbarActions, toolbarMenu, dataSource, pagination, onChange, locale, ...props }: Props) {
   const [widths, setWidths] = useState<Record<string, number>>({}), [columnsOpen, setColumnsOpen] = useState(false)
   const [openFilter, setOpenFilter] = useState<VehicleFilterColumnId | null>(null)
   const [page, setPage] = useState({ signature: '', current: 1 })
@@ -162,7 +163,16 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
   }
   const status = <Space className="vehicle-column-save-status" role="status" aria-live="polite"><span>{text(saveStatus === 'loading' ? 'vehicleTableSettingsLoading' : saveStatus === 'saving' ? 'vehicleTableSettingsSaving' : saveStatus === 'error' ? 'vehicleTableSettingsError' : 'vehicleTableSettingsSaved')}</span>{saveStatus === 'error' && retry && <Button size="small" onClick={retry}>{text('vehicleTableSettingsRetry')}</Button>}</Space>
   return <div className="vehicle-table-region">
-    <div className="vehicle-column-toolbar"><p id={hintId} className="vehicle-column-resize-hint">{text('vehicleColumnResizeHint')}</p><Space wrap>{!columnsOpen && status}<Button icon={<Columns3 size={15} />} disabled={disabled} onClick={() => setColumnsOpen(true)}>{text('vehicleTableColumns')}</Button></Space></div>
+    <div className="vehicle-column-toolbar">
+      <p id={hintId} className="vehicle-column-resize-hint">{text('vehicleColumnResizeHint')}</p>
+      {toolbarFilters}
+      <div className="vehicle-column-tools">
+        {toolbarActions}
+        <Tooltip title={text('vehicleTableColumns')}><Button className="vehicle-columns-button" icon={<Columns3 size={16} />} aria-label={text('vehicleTableColumns')} disabled={disabled} onClick={() => setColumnsOpen(true)}>{text('vehicleTableColumns')}</Button></Tooltip>
+        {!columnsOpen && (saveStatus === 'saved' ? <Tooltip title={text('vehicleTableSettingsSaved')}><span className="vehicle-column-save-indicator" role="status" aria-label={text('vehicleTableSettingsSaved')}><Check size={14} aria-hidden="true" /></span></Tooltip> : status)}
+        {toolbarMenu}
+      </div>
+    </div>
     {activeCount > 0 && <Space wrap className="vehicle-column-filter-summary"><span role="status" aria-live="polite">{text('vehicleColumnFiltersActive')}: {activeCount}</span><Button size="small" onClick={() => { setOpenFilter(null); onFiltersChange({}) }}>{text('vehicleColumnFiltersClear')}</Button></Space>}
     <Table<BusinessRecord> {...props} dataSource={rows} pagination={pagination === false ? false : { ...pagination, current: currentPage }} onChange={tableChanged} locale={{ ...locale, filterConfirm: text('vehicleColumnFilterApply'), filterReset: text('vehicleColumnFilterReset'), filterSearchPlaceholder: text('vehicleColumnFilterSearch') }} className="vehicles-table" columns={resizedColumns} components={components} tableLayout="fixed" scroll={{ x: totalWidth }} />
     <Modal open={columnsOpen} className="vehicle-column-settings-modal" title={text('vehicleTableColumnsTitle')} onCancel={() => setColumnsOpen(false)} footer={<Button onClick={() => setColumnsOpen(false)}>{text('vehicleTableColumnsClose')}</Button>} width={620} destroyOnHidden>

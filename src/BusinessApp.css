@@ -35,3 +35,41 @@
 	gap: 12px;
 	margin: 16px 0
 }
+
+.fleet-stats {
+	padding: 14px 0;
+	margin-bottom: 20px
+}
+
+.fleet-stats > div {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 0 20px
+}
+
+.fleet-stats strong {
+	font-size: 22px;
+	margin-top: 0
+}
+
+@media(max-width:700px) {
+	.fleet-stats {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 12px 0
+	}
+
+	.fleet-stats > div {
+		padding: 0 12px
+	}
+
+	.fleet-stats > div:nth-child(odd) {
+		padding-left: 0
+	}
+
+	.fleet-stats > div:nth-child(even) {
+		border-right: 0;
+		padding-right: 0
+	}
+}
