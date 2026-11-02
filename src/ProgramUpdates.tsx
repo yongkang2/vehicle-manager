@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Badge, Button, Checkbox, Modal, Space, Spin } from 'antd'
+import { Alert, Button, Checkbox, Modal, Space, Spin } from 'antd'
 import { Download, ExternalLink, RefreshCw, RotateCw } from 'lucide-react'
 import type { ApplicationUpdateStatus } from '../shared/application-updates'
 import type { Language } from './i18n'
@@ -24,8 +24,7 @@ export default function ProgramUpdates({ language, open, onOpenChange }: { langu
   }
   const restarting = status?.phase === 'restarting'
   const title = zh ? '程序更新' : 'Program updates'
-  return <><Button type="text" icon={<Download size={17} />} onClick={() => onOpenChange(true)}><Badge dot={Boolean(status?.availableVersion)} offset={[7, 0]}>{title}</Badge></Button>
-    <Modal title={title} open={open} onCancel={() => { if (!busy && !restarting) onOpenChange(false) }} footer={null} closable={!busy && !restarting} maskClosable={!busy && !restarting} width={480}>
+  return <Modal title={title} open={open} onCancel={() => { if (!busy && !restarting) onOpenChange(false) }} footer={null} closable={!busy && !restarting} maskClosable={!busy && !restarting} width={480}>
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         {!status && !error && <Spin />}
         {status && <div>{zh ? '当前版本' : 'Current version'}: <strong>{status.currentVersion}</strong></div>}
@@ -44,5 +43,5 @@ export default function ProgramUpdates({ language, open, onOpenChange }: { langu
         {restarting && <Alert type="info" showIcon title={zh ? '正在停止服务、备份和安装。完成后将自动打开浏览器，请勿启动旧程序。' : 'Stopping, backing up and installing. The browser will reopen when ready. Do not start the old version.'} />}
         <Button type="link" href="https://github.com/yongkang2/vehicle-manager/releases" target="_blank" rel="noreferrer" icon={<ExternalLink size={16} />}>{zh ? 'GitHub 发布版本' : 'GitHub releases'}</Button>
       </Space>
-    </Modal></>
+    </Modal>
 }
