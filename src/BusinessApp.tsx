@@ -314,13 +314,15 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     ]} expandable={{ expandedRowRender: record => <Descriptions column={{ xs: 1, sm: 2 }} size="small" items={Object.entries(record.data).filter(([, value]) => value !== '').map(([key, value]) => ({ key, label: text(key), children: <span className="preserve-text">{display(value)}</span> }))} /> }} /></>
   }
   const history = (items: Change[]) => !items.length ? <Empty description={text('noRecords')} /> : <>
-    <Timeline items={items.slice((historyPage - 1) * 20, historyPage * 20).map(change => ({ color: 'gray', content: <div className="change-entry">
-      <div><strong>{change.actor.name}</strong><span>{text(change.action === 'updated' ? 'updatedAction' : change.action)} · {text(change.kind === 'part' && (change.after.category || change.before?.category) === 'battery' ? 'hvBattery' : change.kind)}</span><time>{date(change.created)}</time></div>
-      <p>{change.reason}</p>
-      {['deleted', 'vehicle.deleted'].includes(change.action) && <p className="mono">VIN: {display(change.after.vin || change.before?.vin)}</p>}
-      <small className="mono">{text('device')}: {change.actor.deviceId.slice(0, 12)}{change.sourceId && <> · {records.some(record => record.id === change.sourceId && record.kind === 'report') ? <button className="inline-link" onClick={() => setReportId(change.sourceId)}>{text('source')}</button> : <span>{text('sourceUnavailable')}</span>}</>}</small>
-      <details><summary>{text('details')}</summary><div className="change-diff">{Object.keys(change.after).filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key])).map(key => <div key={key}><strong>{text(key)}</strong><del>{display(change.before?.[key])}</del><span>→</span><ins>{display(change.after[key])}</ins></div>)}{change.archivedBefore !== change.archivedAfter && <div><strong>{text('status')}</strong><del>{change.archivedBefore ? text('archived') : '—'}</del><span>→</span><ins>{change.archivedAfter ? text('archived') : text('restored')}</ins></div>}</div></details>
-    </div> }))} />
+    <Timeline items={items.slice((historyPage - 1) * 20, historyPage * 20).map(change => ({
+      color: 'gray', content: <div className="change-entry">
+        <div><strong>{change.actor.name}</strong><span>{text(change.action === 'updated' ? 'updatedAction' : change.action)} · {text(change.kind === 'part' && (change.after.category || change.before?.category) === 'battery' ? 'hvBattery' : change.kind)}</span><time>{date(change.created)}</time></div>
+        <p>{change.reason}</p>
+        {['deleted', 'vehicle.deleted'].includes(change.action) && <p className="mono">VIN: {display(change.after.vin || change.before?.vin)}</p>}
+        <small className="mono">{text('device')}: {change.actor.deviceId.slice(0, 12)}{change.sourceId && <> · {records.some(record => record.id === change.sourceId && record.kind === 'report') ? <button className="inline-link" onClick={() => setReportId(change.sourceId)}>{text('source')}</button> : <span>{text('sourceUnavailable')}</span>}</>}</small>
+        <details><summary>{text('details')}</summary><div className="change-diff">{Object.keys(change.after).filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key])).map(key => <div key={key}><strong>{text(key)}</strong><del>{display(change.before?.[key])}</del><span>→</span><ins>{display(change.after[key])}</ins></div>)}{change.archivedBefore !== change.archivedAfter && <div><strong>{text('status')}</strong><del>{change.archivedBefore ? text('archived') : '—'}</del><span>→</span><ins>{change.archivedAfter ? text('archived') : text('restored')}</ins></div>}</div></details>
+      </div>
+    }))} />
     <Pagination current={historyPage} onChange={setHistoryPage} total={items.length} pageSize={20} showSizeChanger={false} hideOnSinglePage />
   </>
 
@@ -336,49 +338,59 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div>
-    <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
-      toolbarFilters={filters}
-      toolbarActions={<Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button>}
-      toolbarMenu={<Dropdown trigger={['click']} menu={{ items: [
-        { key: 'json', label: text('export'), icon: <Download size={16} />, onClick: () => void download('/api/business/export', 'vehicle-data.json').catch(onError) },
-        ...(admin ? [
-          { type: 'divider' as const },
-          { key: 'backup', label: text('backup'), icon: <Download size={16} />, disabled: !online, onClick: () => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError) },
-          { key: 'restore', label: <span title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}>{text('restoreBackup')}</span>, icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
-        ] : []),
-      ] }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
-      filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
-      rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
-      { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => openVehicle(record.id)}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
-      { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
-      { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
-      { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
-      { key: 'hvBatteryMaturityLevel', title: text('hvBatteryMaturityLevel'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
-        const maturity = activeHvBatteries(records, record.id).map(battery => display(battery.data.maturity)).join(' / ') || '—'
-        return <Tooltip title={maturity}><button className="inline-link hv-battery-maturity-link" aria-label={`${text('hvBatteryMaturityLevel')} ${record.data.vin}`} onClick={() => openVehicle(record.id, 'hvBattery')}>{maturity}</button></Tooltip>
-      } },
-      { key: 'owner', title: text('owner'), width: 130, render: (_, record) => display(record.data.owner) },
-      { key: 'latestDove', title: text('latestDove'), width: 150, render: (_, record) => { const report = reports.find(item => item.vehicleId === record.id && !item.archived); return report ? <button className="inline-link" onClick={() => setReportId(report.id)}>{display(report.data.recordedAt)}</button> : '—' } },
-      { key: 'updated', title: text('updated'), width: 160, render: (_, record) => <div className="record-title">{date(record.updated)}<small>v{record.version}</small></div> }, { key: 'actions', title: text('actions'), width: 100, render: (_, record) => <Button type="text" icon={<ArrowUpRight size={17} />} aria-label={`${text('details')} ${record.data.name}`} onClick={() => openVehicle(record.id)} /> },
-      ...(['model', 'color', 'thermal', 'notes'] as const).map(field => ({ key: field, title: text(field), width: field === 'notes' ? 240 : field === 'thermal' ? 200 : 160, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
-        const value = field === 'thermal' && thermalSystemTypes.some(type => type === record.data[field]) ? text(String(record.data[field])) : display(record.data[field])
-        return <Tooltip title={value}><span>{value}</span></Tooltip>
-      } })),
-      ...([{ key: 'hvBatteryPartNumber', field: 'productPart' }, { key: 'hvBatterySerialNumber', field: 'serial' }] as const).map(({ key, field }) => ({ key, title: text(key), width: 220, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
-        const value = activeHvBatteries(records, record.id).map(battery => display(battery.data[field])).join(' / ') || '—'
-        return <Tooltip title={value}><span>{value}</span></Tooltip>
-      } })),
-      { key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
-        const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
-        return <Tooltip title={value}><span>{value}</span></Tooltip>
-      } },
-      ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
-        key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
-          const value = display(record.data[field])
-          return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
-        },
-      })),
-    ]} /></>}
+      <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
+        toolbarFilters={filters}
+        toolbarActions={<Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button>}
+        toolbarMenu={<Dropdown trigger={['click']} menu={{
+          items: [
+            { key: 'json', label: text('export'), icon: <Download size={16} />, onClick: () => void download('/api/business/export', 'vehicle-data.json').catch(onError) },
+            ...(admin ? [
+              { type: 'divider' as const },
+              { key: 'backup', label: text('backup'), icon: <Download size={16} />, disabled: !online, onClick: () => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError) },
+              { key: 'restore', label: <span title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}>{text('restoreBackup')}</span>, icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
+            ] : []),
+          ]
+        }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
+        filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
+        rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
+          { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => openVehicle(record.id)}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
+          { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
+          { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
+          { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
+          {
+            key: 'hvBatteryMaturityLevel', title: text('hvBatteryMaturityLevel'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
+              const maturity = activeHvBatteries(records, record.id).map(battery => display(battery.data.maturity)).join(' / ') || '—'
+              return <Tooltip title={maturity}><button className="inline-link hv-battery-maturity-link" aria-label={`${text('hvBatteryMaturityLevel')} ${record.data.vin}`} onClick={() => openVehicle(record.id, 'hvBattery')}>{maturity}</button></Tooltip>
+            }
+          },
+          { key: 'owner', title: text('owner'), width: 130, render: (_, record) => display(record.data.owner) },
+          { key: 'latestDove', title: text('latestDove'), width: 150, render: (_, record) => { const report = reports.find(item => item.vehicleId === record.id && !item.archived); return report ? <button className="inline-link" onClick={() => setReportId(report.id)}>{display(report.data.recordedAt)}</button> : '—' } },
+          { key: 'updated', title: text('updated'), width: 160, render: (_, record) => <div className="record-title">{date(record.updated)}<small>v{record.version}</small></div> }, { key: 'actions', title: text('actions'), width: 100, render: (_, record) => <Button type="text" icon={<ArrowUpRight size={17} />} aria-label={`${text('details')} ${record.data.name}`} onClick={() => openVehicle(record.id)} /> },
+          ...(['model', 'color', 'thermal', 'notes'] as const).map(field => ({
+            key: field, title: text(field), width: field === 'notes' ? 240 : field === 'thermal' ? 200 : 160, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+              const value = field === 'thermal' && thermalSystemTypes.some(type => type === record.data[field]) ? text(String(record.data[field])) : display(record.data[field])
+              return <Tooltip title={value}><span>{value}</span></Tooltip>
+            }
+          })),
+          ...([{ key: 'hvBatteryPartNumber', field: 'productPart' }, { key: 'hvBatterySerialNumber', field: 'serial' }] as const).map(({ key, field }) => ({
+            key, title: text(key), width: 220, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+              const value = activeHvBatteries(records, record.id).map(battery => display(battery.data[field])).join(' / ') || '—'
+              return <Tooltip title={value}><span>{value}</span></Tooltip>
+            }
+          })),
+          {
+            key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
+              const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
+              return <Tooltip title={value}><span>{value}</span></Tooltip>
+            }
+          },
+          ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
+            key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
+              const value = display(record.data[field])
+              return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
+            },
+          })),
+        ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <><div className="business-table-controls">{filters}<div className="business-control-actions"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div></div><div className="business-list-heading"><h3>{text('reports')}</h3><span>{visibleReports.length}</span></div>{reportTable(visibleReports, true)}</>}
     {view === 'history' && <><div className="business-list-heading"><h3>{text('history')}</h3><span>{changes.length}</span></div>{history(changes)}</>}

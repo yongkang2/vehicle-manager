@@ -206,9 +206,9 @@ export default function DoveImport({ active, vehicles, language, disabled, onBus
   return <div hidden={!active} className="dove-batch-import">
     <div className="business-table-controls dove-batch-toolbar"><Upload accept=".xlsx" multiple disabled={locked || rows.length >= DOVE_BATCH_LIMIT} showUploadList={false} beforeUpload={beforeUpload}><Button disabled={locked || rows.length >= DOVE_BATCH_LIMIT} icon={<UploadIcon size={16} />}>{text('chooseFiles')} · .xlsx</Button></Upload>
       <div className="business-control-actions">
-      <Button type="primary" icon={<FileSpreadsheet size={16} />} loading={operation === 'parse'} disabled={locked || !pending.length} onClick={() => void parse(pending)}>{text('uploadPreviews')}{pending.length ? ` (${pending.length})` : ''}</Button>
-      <Button icon={<Check size={16} />} loading={operation === 'save'} disabled={locked || !eligible.length} onClick={() => reviewImport(eligible)}>{text('reviewDoveImport')}{eligible.length ? ` (${eligible.length})` : ''}</Button>
-      <Dropdown trigger={['click']} menu={{ items: [{ key: 'clear', label: text('clearBatch'), icon: <Trash2 size={16} />, disabled: locked || !rows.length, onClick: () => { replaceRows([]); replaceReviewIds([]); replaceSelections({}); setPreviewId(null); setSelectionLimited(false) } }] }}><Tooltip title={text('more')}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} /></Tooltip></Dropdown>
+        <Button type="primary" icon={<FileSpreadsheet size={16} />} loading={operation === 'parse'} disabled={locked || !pending.length} onClick={() => void parse(pending)}>{text('uploadPreviews')}{pending.length ? ` (${pending.length})` : ''}</Button>
+        <Button icon={<Check size={16} />} loading={operation === 'save'} disabled={locked || !eligible.length} onClick={() => reviewImport(eligible)}>{text('reviewDoveImport')}{eligible.length ? ` (${eligible.length})` : ''}</Button>
+        <Dropdown trigger={['click']} menu={{ items: [{ key: 'clear', label: text('clearBatch'), icon: <Trash2 size={16} />, disabled: locked || !rows.length, onClick: () => { replaceRows([]); replaceReviewIds([]); replaceSelections({}); setPreviewId(null); setSelectionLimited(false) } }] }}><Tooltip title={text('more')}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} /></Tooltip></Dropdown>
       </div>
     </div>
     <p className="dove-batch-limits">{text('batchLimits')}</p>
@@ -218,13 +218,17 @@ export default function DoveImport({ active, vehicles, language, disabled, onBus
       { title: text('sourceVin'), width: 180, render: (_, row) => <span className="mono">{row.preview?.parsed.vin || '—'}</span> },
       { title: text('vehicle'), width: 180, render: (_, row) => <div className="dove-batch-target">{String(row.preview?.vehicle?.data.name || row.preview?.vehicle?.data.vin || '—')}{row.preview?.manualBinding && <small className="mono">{row.preview.manualBinding.vin}</small>}</div> },
       { title: text('status'), width: 250, render: (_, row) => status(row) },
-      { title: text('actions'), width: 250, render: (_, row) => { const reportId = row.savedId || row.preview?.existingId; const retry = !row.savedId && !fileError(row.file) && (!row.preview || row.error || row.preview.match !== 'matched' || row.preview.expires <= clock); return <Space wrap size={4}>
-        {row.preview && <Button size="small" disabled={locked} onClick={() => setPreviewId(row.uid)}>{text('previewReport')}</Button>}
-        {canReviewDoveRow(row, clock) && <Button size="small" disabled={locked} onClick={() => reviewImport([row])}>{text(row.preview && !row.preview.parsed.vin && !row.preview.manualBinding ? 'chooseVehicle' : 'reviewDoveImport')}</Button>}
-        {reportId && <Button size="small" disabled={locked} onClick={() => void openReport(reportId)}>{text('openReport')}</Button>}
-        {retry && <Button size="small" disabled={locked} icon={<RefreshCw size={13} />} onClick={() => void parse([row])}>{text(row.error || row.preview ? 'retryUpload' : 'upload')}</Button>}
-        <Button size="small" type="text" disabled={locked} icon={<Trash2 size={14} />} aria-label={`${text('removeFile')} ${row.file.name}`} onClick={() => { changeRows(current => current.filter(item => item.uid !== row.uid)); if (previewId === row.uid) setPreviewId(null) }} />
-      </Space> } },
+      {
+        title: text('actions'), width: 250, render: (_, row) => {
+          const reportId = row.savedId || row.preview?.existingId; const retry = !row.savedId && !fileError(row.file) && (!row.preview || row.error || row.preview.match !== 'matched' || row.preview.expires <= clock); return <Space wrap size={4}>
+            {row.preview && <Button size="small" disabled={locked} onClick={() => setPreviewId(row.uid)}>{text('previewReport')}</Button>}
+            {canReviewDoveRow(row, clock) && <Button size="small" disabled={locked} onClick={() => reviewImport([row])}>{text(row.preview && !row.preview.parsed.vin && !row.preview.manualBinding ? 'chooseVehicle' : 'reviewDoveImport')}</Button>}
+            {reportId && <Button size="small" disabled={locked} onClick={() => void openReport(reportId)}>{text('openReport')}</Button>}
+            {retry && <Button size="small" disabled={locked} icon={<RefreshCw size={13} />} onClick={() => void parse([row])}>{text(row.error || row.preview ? 'retryUpload' : 'upload')}</Button>}
+            <Button size="small" type="text" disabled={locked} icon={<Trash2 size={14} />} aria-label={`${text('removeFile')} ${row.file.name}`} onClick={() => { changeRows(current => current.filter(item => item.uid !== row.uid)); if (previewId === row.uid) setPreviewId(null) }} />
+          </Space>
+        }
+      },
     ]} /></> : <Empty description={text('draft')} />}
     <Modal className="dove-single-review-modal" open={active && reviewRows.length > 0} title={text('confirmDoveImport')} width={1050} onCancel={cancelReview} footer={<div className="dove-import-review-footer"><div className="dove-import-review-counts" role="status"><span>{text('doveImportReadyCount')}: {importCount}</span><span>{text('doveImportPendingCount')}: {reviewRows.length - importCount}</span></div><Space><Button disabled={operation !== null && operation !== 'bind'} onClick={cancelReview}>{text('cancel')}</Button><Button type="primary" loading={operation === 'save'} disabled={locked || !readyRows.length || confirmationBlocked} onClick={() => void retain()}>{text('confirmDoveImport')} ({importCount})</Button></Space></div>} destroyOnHidden>
       <div className="dove-import-confirmation"><Alert type="info" showIcon title={text('doveImportFinalNotice')} />{partialFailure && <Alert type="warning" showIcon title={text('doveImportPartialFailure')} />}{reviewRows.map(row => {

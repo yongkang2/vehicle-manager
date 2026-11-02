@@ -674,21 +674,21 @@
     max-width: 100%
 }
 
-.team-toolbar > .muted {
+.team-toolbar>.muted {
     font-size: 12px;
     line-height: 1.7
 }
 
-.team-management > .page-heading {
+.team-management>.page-heading {
     margin-bottom: 24px
 }
 
-.team-management > .page-heading .ant-btn-icon-only {
+.team-management>.page-heading .ant-btn-icon-only {
     width: 40px;
     height: 40px
 }
 
-.team-management > .ant-tabs > .ant-tabs-nav {
+.team-management>.ant-tabs>.ant-tabs-nav {
     margin-bottom: 24px
 }
 
