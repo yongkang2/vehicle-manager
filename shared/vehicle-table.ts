@@ -1,6 +1,17 @@
-export const vehicleColumnIds = ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType'] as const
+import { businessFieldRegistry, vehicleFields } from './business.js'
+
+export const vehicleColumnIds = ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType', 'name', 'vin', 'plateExpiry', 'complianceLevel', 'coolingArchitecture'] as const
 export type VehicleColumnId = typeof vehicleColumnIds[number]
 export type VehicleTablePreferences = { version: 1; columns: VehicleColumnId[]; widths: Partial<Record<VehicleColumnId, number>> }
+
+type VehicleOverviewField = typeof vehicleFields[number] | typeof businessFieldRegistry.vehicle.legacy[number]
+/** Every labeled Overview value has an explicit selectable column; photos are not data fields. */
+export const vehicleOverviewColumnIds = {
+  name: 'name', project: 'project', model: 'model', vin: 'vin', color: 'color',
+  plate: 'plate', plateExpiry: 'plateExpiry', status: 'status', physicalLocation: 'physicalLocation',
+  owner: 'owner', thermal: 'thermal', complianceLevel: 'complianceLevel', notes: 'notes',
+  coolingArchitecture: 'coolingArchitecture',
+} as const satisfies Record<VehicleOverviewField, VehicleColumnId>
 
 export function defaultVehicleTablePreferences(): VehicleTablePreferences {
   return { version: 1, columns: vehicleColumnIds.slice(0, 10), widths: {} }
