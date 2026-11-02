@@ -163,16 +163,18 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
   }
   const status = <Space className="vehicle-column-save-status" role="status" aria-live="polite"><span>{text(saveStatus === 'loading' ? 'vehicleTableSettingsLoading' : saveStatus === 'saving' ? 'vehicleTableSettingsSaving' : saveStatus === 'error' ? 'vehicleTableSettingsError' : 'vehicleTableSettingsSaved')}</span>{saveStatus === 'error' && retry && <Button size="small" onClick={retry}>{text('vehicleTableSettingsRetry')}</Button>}</Space>
   return <div className="vehicle-table-region">
-    {toolbarFilters && <div className="vehicle-table-filter-bar">{toolbarFilters}</div>}
-    <div className="vehicle-column-toolbar">
-      <p id={hintId} className="vehicle-column-resize-hint">{text('vehicleColumnResizeHint')}</p>
-      <div className="vehicle-table-heading"><h3>{text('vehicleList')}</h3><span className="vehicle-table-count">{rows.length}</span></div>
+    <div className="vehicle-table-controls">
+      {toolbarFilters && <div className="vehicle-table-filter-bar">{toolbarFilters}</div>}
       <div className="vehicle-column-tools">
         {toolbarActions}
         <Tooltip title={text('vehicleTableColumns')}><Button className="vehicle-columns-button" icon={<Columns3 size={16} />} aria-label={text('vehicleTableColumns')} disabled={disabled} onClick={() => setColumnsOpen(true)}>{text('vehicleTableColumns')}</Button></Tooltip>
         {!columnsOpen && saveStatus !== 'saved' && status}
         {toolbarMenu}
       </div>
+    </div>
+    <div className="vehicle-column-toolbar">
+      <p id={hintId} className="vehicle-column-resize-hint">{text('vehicleColumnResizeHint')}</p>
+      <div className="vehicle-table-heading"><h3>{text('vehicleList')}</h3><span className="vehicle-table-count">{rows.length}</span></div>
     </div>
     {activeCount > 0 && <Space wrap className="vehicle-column-filter-summary"><span role="status" aria-live="polite">{text('vehicleColumnFiltersActive')}: {activeCount}</span><Button size="small" onClick={() => { setOpenFilter(null); onFiltersChange({}) }}>{text('vehicleColumnFiltersClear')}</Button></Space>}
     <Table<BusinessRecord> {...props} dataSource={rows} pagination={pagination === false ? false : { ...pagination, current: currentPage }} onChange={tableChanged} locale={{ ...locale, filterConfirm: text('vehicleColumnFilterApply'), filterReset: text('vehicleColumnFilterReset'), filterSearchPlaceholder: text('vehicleColumnFilterSearch') }} className="vehicles-table" columns={resizedColumns} components={components} tableLayout="fixed" scroll={{ x: totalWidth }} />
