@@ -36,9 +36,17 @@
 	margin: 16px 0
 }
 
+.business-workspace:has(.vehicle-table-region) {
+	padding-top: 8px
+}
+
+.business-workspace:has(.vehicle-table-region) > .page-heading {
+	margin-bottom: 32px
+}
+
 .fleet-stats {
-	padding: 14px 0;
-	margin-bottom: 20px
+	padding: 22px 0;
+	margin-bottom: 28px
 }
 
 .fleet-stats > div {
@@ -55,9 +63,19 @@
 }
 
 @media(max-width:700px) {
+	.business-workspace:has(.vehicle-table-region) {
+		padding-top: 0
+	}
+
+	.business-workspace:has(.vehicle-table-region) > .page-heading {
+		margin-bottom: 24px
+	}
+
 	.fleet-stats {
+		padding: 18px 0;
+		margin-bottom: 24px;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px 0
+		gap: 16px 0
 	}
 
 	.fleet-stats > div {
