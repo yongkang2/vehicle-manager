@@ -1,11 +1,11 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { App, Alert, Button, Checkbox, Drawer, Empty, Modal, Spin, Tag } from 'antd'
-import { ArrowRightLeft, Check, FolderPlus, FolderSync, LogOut, RefreshCw, Unplug, Undo2 } from 'lucide-react'
+import { ArrowRightLeft, Check, Download, FolderPlus, FolderSync, LogOut, RefreshCw, Unplug, Undo2 } from 'lucide-react'
 import type { Status, WorkspaceSummary } from '../shared/types'
 import type { Dictionary } from './i18n'
 import { api } from './api'
 
-export default function PersonalWorkspaces({ open, text, status, onClose, onConnect, onSelected, onLogout, onError }: { open: boolean; text: Dictionary; status: Status; onClose: () => void; onConnect: () => void; onSelected: (status: Status) => void; onLogout: () => void; onError: (error: unknown) => void }) {
+export default function PersonalWorkspaces({ open, text, status, onClose, onConnect, onSelected, onLogout, onUpdates, onError }: { open: boolean; text: Dictionary; status: Status; onClose: () => void; onConnect: () => void; onSelected: (status: Status) => void; onLogout: () => void; onUpdates: () => void; onError: (error: unknown) => void }) {
   const { modal } = App.useApp()
   const [teams, setTeams] = useState<WorkspaceSummary[]>([]), [busy, setBusy] = useState(true)
   const [target, setTarget] = useState<WorkspaceSummary | 'disconnect' | null>(null), [retain, setRetain] = useState(false)
@@ -40,6 +40,7 @@ export default function PersonalWorkspaces({ open, text, status, onClose, onConn
       {status.access === 'pending' && <Button icon={<Undo2 size={17} />} disabled={busy} onClick={() => confirmAction('cancel-request')}>{text.cancelRequest}</Button>}
       {status.teamId && status.syncPaused && status.access === 'approved' && <><Alert type="warning" showIcon title={text.syncPaused} /><Button icon={<FolderSync size={17} />} disabled={busy} onClick={() => confirmAction('resume')}>{text.resumeSync}</Button></>}
       {status.teamId && <Button icon={<Unplug size={17} />} disabled={busy} onClick={() => { setRetain(false); setTarget('disconnect') }}>{text.disconnect}</Button>}
+      <Button icon={<Download size={17} />} disabled={busy} onClick={onUpdates}>{text.programUpdates}</Button>
       <Button type="text" icon={<LogOut size={17} />} onClick={onLogout}>{text.logout}</Button>
     </div>
   </Drawer><Modal title={text.switchTitle} open={Boolean(target)} onCancel={() => { if (!busy) setTarget(null) }} confirmLoading={busy} cancelButtonProps={{ disabled: busy }} closable={!busy} maskClosable={!busy} okText={text.save} cancelText={text.cancel} okButtonProps={{ disabled: hasPending && !retain }} onOk={() => void choose()}>
