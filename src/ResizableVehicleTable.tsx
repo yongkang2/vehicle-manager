@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { Dispatch, HTMLAttributes, KeyboardEvent, PointerEvent, ReactNode, SetStateAction } from 'react'
 import { Button, Checkbox, Modal, Space, Table, Tooltip } from 'antd'
 import type { ColumnType, TableProps } from 'antd/es/table'
-import { ArrowDown, ArrowUp, Check, Columns3, Filter, RotateCcw } from 'lucide-react'
+import { ArrowDown, ArrowUp, Columns3, Filter, RotateCcw } from 'lucide-react'
 import type { BusinessRecord } from '../shared/business'
 import { defaultVehicleTablePreferences, vehicleColumnIds } from '../shared/vehicle-table'
 import type { VehicleColumnId, VehicleTablePreferences } from '../shared/vehicle-table'
@@ -163,13 +163,14 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
   }
   const status = <Space className="vehicle-column-save-status" role="status" aria-live="polite"><span>{text(saveStatus === 'loading' ? 'vehicleTableSettingsLoading' : saveStatus === 'saving' ? 'vehicleTableSettingsSaving' : saveStatus === 'error' ? 'vehicleTableSettingsError' : 'vehicleTableSettingsSaved')}</span>{saveStatus === 'error' && retry && <Button size="small" onClick={retry}>{text('vehicleTableSettingsRetry')}</Button>}</Space>
   return <div className="vehicle-table-region">
+    {toolbarFilters && <div className="vehicle-table-filter-bar">{toolbarFilters}</div>}
     <div className="vehicle-column-toolbar">
       <p id={hintId} className="vehicle-column-resize-hint">{text('vehicleColumnResizeHint')}</p>
-      {toolbarFilters}
+      <div className="vehicle-table-heading"><h3>{text('vehicleList')}</h3><span className="vehicle-table-count">{rows.length}</span></div>
       <div className="vehicle-column-tools">
         {toolbarActions}
         <Tooltip title={text('vehicleTableColumns')}><Button className="vehicle-columns-button" icon={<Columns3 size={16} />} aria-label={text('vehicleTableColumns')} disabled={disabled} onClick={() => setColumnsOpen(true)}>{text('vehicleTableColumns')}</Button></Tooltip>
-        {!columnsOpen && (saveStatus === 'saved' ? <Tooltip title={text('vehicleTableSettingsSaved')}><span className="vehicle-column-save-indicator" role="status" aria-label={text('vehicleTableSettingsSaved')}><Check size={14} aria-hidden="true" /></span></Tooltip> : status)}
+        {!columnsOpen && saveStatus !== 'saved' && status}
         {toolbarMenu}
       </div>
     </div>
