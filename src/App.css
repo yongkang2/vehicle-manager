@@ -585,9 +585,29 @@
 .personal-commands {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+    gap: 24px;
     margin-top: 24px
+}
+
+.personal-workspace-actions,
+.personal-app-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px
+}
+
+.personal-app-actions {
+    border-top: 1px solid var(--line);
+    padding-top: 20px
+}
+
+.personal-team-heading .ant-tag {
+    flex-shrink: 0;
+    margin-inline-end: 0
+}
+
+.personal-team-state {
+    line-height: 1.7
 }
 
 .personal-commands .ant-btn {
@@ -646,12 +666,35 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin: 4px 0 20px
+    margin: 0 0 24px
 }
 
 .team-toolbar>.ant-input-affix-wrapper {
-    width: 300px;
+    width: 320px;
     max-width: 100%
+}
+
+.team-toolbar > .muted {
+    font-size: 12px;
+    line-height: 1.7
+}
+
+.team-management > .page-heading {
+    margin-bottom: 24px
+}
+
+.team-management > .page-heading .ant-btn-icon-only {
+    width: 40px;
+    height: 40px
+}
+
+.team-management > .ant-tabs > .ant-tabs-nav {
+    margin-bottom: 24px
+}
+
+.team-management .ant-table-cell .row-actions {
+    gap: 8px;
+    flex-wrap: wrap
 }
 
 .team-summary-separator {
