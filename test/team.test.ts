@@ -2,7 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
 import { TeamDirectory } from '../server/team.js'
+import { atomicFile } from '../server/sync.js'
 import { appVersion } from '../shared/version.js'
 import type { Identity } from '../shared/types.js'
 
@@ -101,6 +106,195 @@ test('only administrators can remove non-admin members and all their devices wit
     assert.equal(retried.revision, removed.revision)
     assert.equal((await service.join(root, team.id, member)).requests.length, removed.requests.length)
   } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('abandoned team locks recover automatically, including incomplete and legacy owners', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory()
+  try {
+    const team = await service.create(root, 'Engineering', admin)
+    const lock = path.join(root, '.vehicle-manager-team-lock')
+    for (const owner of [null, '{incomplete', JSON.stringify({ token: 'legacy-owner', process: 12345, created: '2020-01-01T00:00:00.000Z' })]) {
+      await fs.mkdir(lock)
+      if (owner !== null) await fs.writeFile(path.join(lock, 'owner.json'), owner)
+      const stale = new Date(Date.now() - 300000)
+      if (owner !== null) await fs.utimes(path.join(lock, 'owner.json'), stale, stale)
+      await fs.utimes(lock, stale, stale)
+      assert.equal(await service.withAccess(root, team.id, admin, false, async () => 'recovered'), 'recovered')
+      await assert.rejects(fs.stat(lock), { code: 'ENOENT' })
+    }
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('contending clients serialize roster changes and safely retry bounded busy responses', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  try {
+    const team = await new TeamDirectory().create(root, 'Engineering', admin)
+    const results = await Promise.allSettled(Array.from({ length: 20 }, async (_, index) => {
+      const client = new TeamDirectory()
+      for (let attempt = 0; ; attempt++) {
+        try { return await client.join(root, team.id, { ...member, deviceId: `device-${index}` }) }
+        catch (error) { if ((error as { code?: string }).code !== 'SHARE_BUSY' || attempt >= 4) throw error }
+      }
+    }))
+    assert.deepEqual(results.filter(result => result.status === 'rejected'), [])
+    const current = await new TeamDirectory().read(root)
+    assert.equal(current.requests.length, 20)
+    assert.equal(new Set(current.requests.map(request => request.identity.deviceId)).size, 20)
+    assert.equal(current.revision, team.revision + 20)
+    await assert.rejects(fs.stat(path.join(root, '.vehicle-manager-team-lock')), { code: 'ENOENT' })
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('a failed owner write and a failed operation both release only their own lock', async context => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory(), writeFile = fs.writeFile.bind(fs)
+  try {
+    const failing = context.mock.method(fs, 'writeFile', async (...args: Parameters<typeof fs.writeFile>) => {
+      if (String(args[0]).includes(`${path.sep}lease-`)) throw Object.assign(new Error('denied'), { code: 'EACCES' })
+      return writeFile(...args)
+    })
+    await assert.rejects(service.create(root, 'Engineering', admin), { code: 'SHARE_ACCESS_DENIED' })
+    failing.mock.restore()
+    assert.deepEqual(await fs.readdir(root), [])
+    let interrupted = false
+    const transient = context.mock.method(fs, 'writeFile', async (...args: Parameters<typeof fs.writeFile>) => {
+      if (!interrupted && String(args[0]).includes(`${path.sep}lease-`)) {
+        interrupted = true
+        throw Object.assign(new Error('directory delete pending'), { code: 'EPERM' })
+      }
+      return writeFile(...args)
+    })
+    const team = await service.create(root, 'Engineering', admin)
+    transient.mock.restore()
+    assert.equal(interrupted, true)
+    await assert.rejects(service.withAccess(root, team.id, admin, false, async () => { throw new Error('operation failed') }), { code: 'SHARE_IO_ERROR' })
+    assert.equal(await service.withAccess(root, team.id, admin, false, async () => true), true)
+  } finally { context.mock.restoreAll(); await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('a live lease renews and is not stolen by another client', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory()
+  try {
+    const team = await service.create(root, 'Engineering', admin)
+    await service.withAccess(root, team.id, admin, false, async () => {
+      const lock = path.join(root, '.vehicle-manager-team-lock')
+      const [owner] = await fs.readdir(lock), before = await fs.stat(path.join(lock, owner))
+      await delay(10500)
+      assert.ok((await fs.stat(path.join(lock, owner))).mtimeMs > before.mtimeMs)
+      await assert.rejects(new TeamDirectory().join(root, team.id, member), { code: 'SHARE_BUSY' })
+      assert.deepEqual(await fs.readdir(lock), [owner])
+    })
+    assert.equal((await service.read(root)).requests.length, 0)
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('a displaced owner cannot publish business files or remove its successor lock', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory()
+  let releaseSuccessor!: () => void
+  const successorGate = new Promise<void>(resolve => { releaseSuccessor = resolve })
+  let successor: Promise<unknown> | undefined
+  try {
+    const team = await service.create(root, 'Engineering', admin)
+    const destination = path.join(root, 'HEAD.json')
+    await fs.writeFile(destination, 'original')
+    await assert.rejects(service.withAccess(root, team.id, admin, false, async () => {
+      const lock = path.join(root, '.vehicle-manager-team-lock')
+      await fs.rename(lock, `${lock}.saved`)
+      let entered!: () => void
+      const ready = new Promise<void>(resolve => { entered = resolve })
+      successor = new TeamDirectory().withAccess(root, team.id, admin, false, async () => { entered(); await successorGate })
+      await ready
+      await assert.rejects(atomicFile(destination, 'stale publication'), { code: 'SHARE_LOCK_LOST' })
+      assert.equal(await fs.readFile(destination, 'utf8'), 'original')
+    }), { code: 'SHARE_LOCK_LOST' })
+    assert.equal((await fs.readdir(path.join(root, '.vehicle-manager-team-lock'))).length, 1)
+    releaseSuccessor()
+    await successor
+    await assert.rejects(fs.stat(path.join(root, '.vehicle-manager-team-lock')), { code: 'ENOENT' })
+  } finally { releaseSuccessor(); await successor; await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('publication rechecks the lease after preparing either team or business data', async context => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory(), open = fs.open.bind(fs)
+  try {
+    const team = await service.create(root, 'Engineering', admin)
+    for (const kind of ['team', 'business']) {
+      const lock = path.join(root, '.vehicle-manager-team-lock')
+      const destination = path.join(root, kind === 'team' ? 'team.json' : 'HEAD.json')
+      if (kind === 'business') await fs.writeFile(destination, 'original')
+      const original = await fs.readFile(destination, 'utf8')
+      const opening = context.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+        const handle = await open(...args)
+        if (String(args[0]).endsWith('.tmp')) {
+          const sync = handle.sync.bind(handle)
+          context.mock.method(handle, 'sync', async () => {
+            await sync()
+            await fs.rename(lock, `${lock}.saved-${kind}`)
+          })
+        }
+        return handle
+      })
+      await assert.rejects(kind === 'team'
+        ? service.changeMember(root, team.id, admin, team.members[0].id, 'admin', true, 'Interrupted publication', { name: 'Must not publish', nickname: '' })
+        : service.withAccess(root, team.id, admin, false, () => atomicFile(destination, 'must not publish')), { code: 'SHARE_LOCK_LOST' })
+      opening.mock.restore()
+      assert.equal(await fs.readFile(destination, 'utf8'), original)
+      assert.equal((await fs.readdir(root)).filter(name => name.endsWith('.tmp')).length, 0)
+    }
+  } finally { context.mock.restoreAll(); await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('a process resuming after its lease deadline cannot publish even before a takeover', async context => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  const service = new TeamDirectory(), clock = performance.now.bind(performance)
+  try {
+    const team = await service.create(root, 'Engineering', admin), destination = path.join(root, 'HEAD.json')
+    await fs.writeFile(destination, 'original')
+    await assert.rejects(service.withAccess(root, team.id, admin, false, async () => {
+      context.mock.method(performance, 'now', () => clock() + 120001)
+      await assert.rejects(atomicFile(destination, 'expired publication'), { code: 'SHARE_LOCK_LOST' })
+    }), { code: 'SHARE_LOCK_LOST' })
+    context.mock.restoreAll()
+    assert.equal(await fs.readFile(destination, 'utf8'), 'original')
+    assert.equal(await service.withAccess(root, team.id, admin, false, async () => true), true)
+  } finally { context.mock.restoreAll(); await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('a killed process leaves a recoverable lease and concurrent recovery admits only one writer', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  let child: ReturnType<typeof spawn> | undefined
+  try {
+    const service = new TeamDirectory(), team = await service.create(root, 'Engineering', admin)
+    child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
+      import { TeamDirectory } from ${JSON.stringify(new URL('../server/team.ts', import.meta.url).href)};
+      import { setTimeout as delay } from 'node:timers/promises';
+      await new TeamDirectory().withAccess(process.argv[1], process.argv[2], JSON.parse(process.argv[3]), false, async () => {
+        process.stdout.write('locked');
+        await delay(60000);
+      });
+    `, root, team.id, JSON.stringify(admin)], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const exit = once(child, 'exit')
+    const ready = await Promise.race([once(child.stdout!, 'data').then(([bytes]) => String(bytes)), exit.then(() => 'exited')])
+    assert.equal(ready, 'locked')
+    child.kill()
+    await exit
+    const lock = path.join(root, '.vehicle-manager-team-lock'), [owner] = await fs.readdir(lock)
+    const stale = new Date(Date.now() - 300000)
+    await fs.utimes(path.join(lock, owner), stale, stale)
+    let active = 0, maximum = 0
+    const results = await Promise.allSettled(Array.from({ length: 12 }, () => new TeamDirectory().withAccess(root, team.id, admin, false, async () => {
+      active++; maximum = Math.max(maximum, active)
+      await delay(10)
+      active--
+    })))
+    assert.deepEqual(results.filter(result => result.status === 'rejected'), [])
+    assert.equal(maximum, 1)
+    await assert.rejects(fs.stat(lock), { code: 'ENOENT' })
+  } finally { if (child && child.exitCode === null && child.signalCode === null) { child.kill(); await once(child, 'exit') }; await fs.rm(root, { recursive: true, force: true }) }
 })
 
 test('two independent initializers cannot both create administrators', async () => {
