@@ -14,11 +14,12 @@ import ResizableVehicleTable from './ResizableVehicleTable'
 import { useVehicleTablePreferences } from './use-vehicle-table-preferences'
 import VehiclePhoto from './VehiclePhoto'
 import AttachmentUpload from './AttachmentUpload'
+import { WorkspaceLoader } from './workspace-loader'
+import type { AuditEntry, WorkspaceSnapshot } from '../shared/workspace'
 import './BusinessApp.css'
 
 const ReportViewer = lazy(() => import('./ReportViewer'))
 export type BusinessView = 'vehicles' | 'dove' | 'reports' | 'history' | 'sync' | 'audit'
-type AuditEntry = { id: string; actor: string; created: string; action: string; detail: Fields }
 type Editor = { kind: RecordKind; record: BusinessRecord | null; vehicleId: string | null; initialName?: string; initialCategory?: 'battery' }
 type Action = { record: BusinessRecord; type: 'archive' | 'remove'; archived?: boolean }
 type Difference = { key: string; status: string; before: unknown; after: unknown; fields: string[] }
@@ -31,14 +32,6 @@ const display = (value: unknown): string => value === null || value === undefine
 const reportTime = (record: BusinessRecord) => { const date = doveRecordedTime(record.data.recordedAt); return Number.isFinite(date) ? date : Date.parse(String(record.data.savedAt || record.updated)) }
 function controllerSources(report: BusinessRecord) {
   return parsedControllerSources((report.data as unknown as ReportData).parsed.controllers)
-}
-type WorkspaceReader = <T>(url: string) => Promise<T>
-async function fetchWorkspace(includeAudit = false, includeQuarantined = false, request: WorkspaceReader = api) {
-  const records = await request<BusinessRecord[]>('/api/business/records')
-  const [sync, changes] = await Promise.all([request<SyncStatus>('/api/business/sync'), request<Change[]>('/api/business/history')])
-  const audit = includeAudit ? await request<AuditEntry[]>('/api/business/audit') : []
-  const quarantined = includeQuarantined ? await request<QuarantinedOperation[]>('/api/business/sync/quarantined') : []
-  return { records, sync, changes, audit, quarantined }
 }
 
 function DifferenceValue({ value, fields, text }: { value: unknown; fields: string[]; text: (key: string) => string }) {
@@ -136,31 +129,36 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [quarantined, setQuarantined] = useState<QuarantinedOperation[]>([]), [deleteVehicle, setDeleteVehicle] = useState<BusinessRecord | null>(null), [deleteReceipt, setDeleteReceipt] = useState<VehicleDeleteReceipt | null>(null)
   const deletedRecordIds = useRef(new Set<string>())
+  const [workspaceLoader] = useState(() => new WorkspaceLoader())
   const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10))
   useEffect(() => { const timer = setInterval(() => setToday(new Date().toISOString().slice(0, 10)), 60000); return () => clearInterval(timer) }, [])
-  function acceptWorkspace(result: Awaited<ReturnType<typeof fetchWorkspace>>) {
-    setRecords(result.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)))
-    setSync(result.sync); setChanges(result.changes); setAudit(result.audit); setQuarantined(result.quarantined)
+  function acceptWorkspace(result: WorkspaceSnapshot) {
+    if (result.data) {
+      const data = result.data
+      setRecords(data.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)))
+      setChanges(data.changes); setAudit(data.audit); setQuarantined(data.quarantined)
+    }
+    setSync(current => JSON.stringify(current) === JSON.stringify(result.sync) ? current : result.sync)
+    setLoading(false)
   }
-  async function load() {
+  async function load(options: { background?: boolean; full?: boolean } = {}) {
     try {
-      acceptWorkspace(await fetchWorkspace(view === 'audit', view === 'sync'))
+      const scope = createWorkspaceScope()
+      await workspaceLoader.load(url => scope.request(url), acceptWorkspace, { audit: view === 'audit', quarantined: view === 'sync', localFirst: !options.background, full: options.full })
     } catch (error) { onError(error) } finally { setLoading(false) }
   }
   async function loadScoped(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
-    const request: WorkspaceReader = url => scope.request(url, { signal })
-    const result = await fetchWorkspace(view === 'audit', view === 'sync', request)
+    await workspaceLoader.load(url => scope.request(url, { signal }), result => { scope.assertCurrent(signal); acceptWorkspace(result) }, { audit: view === 'audit', quarantined: view === 'sync', localOnly: true })
     scope.assertCurrent(signal)
-    acceptWorkspace(result); setLoading(false)
   }
   const reportInitialError = useEffectEvent(onError)
   useEffect(() => {
-    let active = true
-    void fetchWorkspace(view === 'audit', view === 'sync').then(result => { if (active) { acceptWorkspace(result); setLoading(false) } }).catch(error => { if (active) { reportInitialError(error); setLoading(false) } })
-    return () => { active = false }
-  }, [view])
+    const controller = new AbortController(), scope = createWorkspaceScope()
+    void workspaceLoader.load(url => scope.request(url, { signal: controller.signal }), acceptWorkspace, { audit: view === 'audit', quarantined: view === 'sync', localFirst: true }).catch(error => { if (!controller.signal.aborted) { reportInitialError(error); setLoading(false) } })
+    return () => { workspaceLoader.invalidate(); controller.abort() }
+  }, [view, workspaceLoader])
   const periodicLoad = useEffectEvent(async () => {
-    if (!editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load()
+    if (!workspaceLoader.busy && !editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load({ background: true })
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   const selected = records.find(record => record.id === selectedId) || null
@@ -195,7 +193,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     setBusy(true)
     try {
       await api(`/api/business/records${editor.record ? `/${editor.record.id}` : ''}`, { method: editor.record ? 'PUT' : 'POST', body: { kind: editor.kind, vehicleId: editor.vehicleId, data, reason, version: editor.record?.version } })
-      setEditor(null); await load(); void message.success(text('saved'))
+      setEditor(null); void message.success(text('saved')); void load()
     } catch (error) { onError(error) } finally { setBusy(false) }
   }
   async function applyAction() {
@@ -325,7 +323,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const olderReport = Boolean(configuration?.part && doveRecordedTime(configuration.report.data.recordedAt) < doveRecordedTime(configuration.part.data.reportRecordedAt))
   const duplicateTarget = targetParts.length > 1
   const conflictingSources = configuration ? controllerSources(configuration.report).filter(item => keyControllerName(item.controller.name) && controllerSources(configuration.report).filter(other => keyControllerName(other.controller.name) === keyControllerName(item.controller.name)).length > 1) : []
-  return <section className="business-workspace"><div className="page-heading"><div><span className="eyebrow">{text(view).toUpperCase()}</span><h1>{text(view)}</h1></div><Space wrap><Tooltip title={text('refresh')}><Button icon={<RefreshCw size={16} />} aria-label={text('refresh')} loading={loading} onClick={() => void load()} /></Tooltip>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
+  return <section className="business-workspace"><div className="page-heading"><div><span className="eyebrow">{text(view).toUpperCase()}</span><h1>{text(view)}</h1></div><Space wrap><Tooltip title={text('refresh')}><Button icon={<RefreshCw size={16} />} aria-label={text('refresh')} loading={loading} onClick={() => void load({ full: true })} /></Tooltip>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div><div className="section-toolbar"><h3>{text('vehicles')}</h3><Space wrap><Button icon={<FileSpreadsheet size={15} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button><Button type="text" icon={<Download size={15} />} onClick={() => void download('/api/business/export', 'vehicle-data.json').catch(onError)}>{text('export')}</Button>{admin && <><Button icon={<Download size={15} />} disabled={!online} onClick={() => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError)}>{text('backup')}</Button><Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}><Button icon={<RotateCcw size={15} />} disabled={!online || syncPaused} onClick={() => setRestoreOpen(true)}>{text('restoreBackup')}</Button></Tooltip></>}</Space></div>{filters}<ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry} rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
@@ -382,7 +380,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       { key: 'attachments', label: text('attachments'), children: <><AttachmentUpload key={selected.id} vehicle={selected} language={language} disabled={busy} onRefresh={loadScoped} onBusyChange={setBusy} onCancelReady={cancel => { attachmentCancel.current = cancel }} onError={onError} /><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
       { key: 'history', label: text('history'), children: history(changes.filter(change => change.vehicleId === selected.id)) },
     ] : []} /></Drawer>
-    {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<BusinessRecord[]>('/api/business/export/records'); const available = next.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); setRecords(available); return available }} />}
+    {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<BusinessRecord[]>('/api/business/export/records'); const available = next.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); workspaceLoader.invalidate(); setRecords(available); return available }} />}
     {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
     {editor && <RecordEditor record={editor.record} kind={editor.kind} initialName={editor.initialName} initialCategory={editor.initialCategory} language={language} busy={busy} onCancel={() => { if (!busy) setEditor(null) }} onSave={(data, reason) => void saveRecord(data, reason)} />}
     <Modal open={Boolean(action)} title={action ? text(action.type === 'remove' ? 'recordRemoval' : action.archived ? 'archive' : 'restore') : ''} onCancel={() => { if (!busy) setAction(null) }} onOk={() => void applyAction()} confirmLoading={busy} okText={text('save')} cancelText={text('cancel')} okButtonProps={{ disabled: !actionReason.trim() }}><p className="operation-name">{display(action?.record.data.name)}</p><label className="standalone-label">{text('reason')}<Input.TextArea value={actionReason} maxLength={500} rows={3} onChange={event => setActionReason(event.target.value)} /></label></Modal>
