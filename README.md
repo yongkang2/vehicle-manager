@@ -1,6 +1,6 @@
 # STELLANTIS Vehicle Data Management
 
-Version 1.1.0, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
+Version 1.1.1, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
 
 ## Current Scope
 
