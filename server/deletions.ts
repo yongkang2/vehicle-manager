@@ -36,6 +36,19 @@ export function validateVehicleDeletion(value: unknown): VehicleDeletion {
 export class SharedBusinessSnapshot {
   private constructor(readonly business: Business, readonly directory: string, readonly work: string, private master: DatabaseSync | null, public head: BusinessHead | null, private atomic: AtomicWriter) {}
   get db(): DatabaseSync { if (!this.master) throw corrupt(); return this.master }
+  static async readHead(business: Business, shared: string, teamId: string): Promise<BusinessHead | null> {
+    const bytes = await fs.readFile(path.join(shared, 'business', 'HEAD.json')).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+    if (!bytes) {
+      if (business.store.get('businessRevision')) throw corrupt()
+      return null
+    }
+    let head: BusinessHead
+    try { head = JSON.parse(bytes.toString()) as BusinessHead } catch { throw corrupt() }
+    if (!head || ![1, 2].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
+    const sequence = business.store.get<number>('businessSequence') || 0
+    if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || (business.store.get<number>('businessProtocol') === 2 && head.protocol !== 2)) throw new AppError('BUSINESS_ROLLBACK', 409)
+    return head
+  }
   static async open(business: Business, shared: string, teamId: string, atomic: AtomicWriter): Promise<SharedBusinessSnapshot> {
     const directory = path.join(shared, 'business'), local = path.join(business.store.directory, 'sync-work')
     await fs.mkdir(directory, { recursive: true }); await fs.mkdir(local, { recursive: true })
@@ -43,13 +56,8 @@ export class SharedBusinessSnapshot {
     const work = path.join(local, `${randomUUID()}.sqlite`)
     let master: DatabaseSync | null = null
     try {
-      const bytes = await fs.readFile(path.join(directory, 'HEAD.json')).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
-      let head: BusinessHead | null = null
-      if (bytes) {
-        try { head = JSON.parse(bytes.toString()) as BusinessHead } catch { throw corrupt() }
-        if (!head || ![1, 2].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
-        const sequence = business.store.get<number>('businessSequence') || 0
-        if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || (business.store.get<number>('businessProtocol') === 2 && head.protocol !== 2)) throw new AppError('BUSINESS_ROLLBACK', 409)
+      const head = await this.readHead(business, shared, teamId)
+      if (head) {
         const snapshot = await fs.readFile(path.join(directory, 'snapshots', `${head.revision}.sqlite`))
         if (checksum(snapshot) !== head.checksum) throw corrupt()
         await fs.writeFile(work, snapshot, { flag: 'wx' })
