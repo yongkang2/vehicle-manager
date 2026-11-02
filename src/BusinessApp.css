@@ -11,6 +11,174 @@
 .dove-batch-target{overflow-wrap:anywhere}.dove-batch-target small{display:block;margin-top:6px;font-size:11px;color:var(--muted)}.dove-vehicle-assignment-select{width:100%;min-width:0}.dove-review-vehicle{display:flex;flex-direction:column;align-items:flex-start;gap:12px;margin-bottom:18px;min-width:0}.dove-review-vehicle .ant-alert{align-self:stretch;margin:0}.dove-review-vehicle p{font-size:12px;line-height:1.7;margin:0}.dove-import-review-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}.dove-import-review-counts{display:flex;gap:18px;font-size:12px;flex-wrap:wrap}.dove-import-confirm-file>.ant-checkbox-wrapper{margin-top:12px}.dove-single-review-modal .ant-modal-body{min-width:0}.dove-import-confirmation>.ant-alert{margin-bottom:18px}@media(max-width:700px){.dove-import-review-footer>.ant-space{width:100%;justify-content:flex-end}.dove-import-review-counts{gap:12px}}
 .dove-manual-binding-tag{white-space:normal;overflow-wrap:anywhere}
 
+.business-table-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 16px 32px;
+	margin-bottom: 24px
+}
+
+.business-table-controls > .business-filters {
+	flex: 0 1 auto;
+	min-width: 0;
+	margin: 0;
+	gap: 16px
+}
+
+.business-table-controls .business-filters > .ant-input-affix-wrapper {
+	width: 320px;
+	max-width: 100%
+}
+
+.business-table-controls .business-filters > .ant-checkbox-wrapper {
+	margin-left: 0
+}
+
+.business-control-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-left: auto
+}
+
+.business-list-heading {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 0 0 16px
+}
+
+.business-list-heading > span {
+	font-size: 12px;
+	color: var(--muted);
+	font-variant-numeric: tabular-nums
+}
+
+.business-table-controls .ant-btn {
+	min-height: 40px;
+	font-size: 13px
+}
+
+.business-table-controls .ant-btn-icon-only {
+	width: 40px;
+	height: 40px;
+	flex-shrink: 0
+}
+
+.business-table-controls.dove-batch-toolbar {
+	align-items: center;
+	margin-bottom: 12px
+}
+
+.dove-batch-limits {
+	font-size: 12px;
+	line-height: 1.7;
+	color: var(--muted);
+	margin: 0 0 24px
+}
+
+.sync-metrics {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	padding: 20px 0;
+	margin: 24px 0;
+	border-top: 1px solid var(--line);
+	border-bottom: 1px solid var(--line)
+}
+
+.sync-metrics > div {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 0 20px;
+	border-right: 1px solid var(--line)
+}
+
+.sync-metrics > div:first-child { padding-left: 0 }
+.sync-metrics > div:last-child { border-right: 0; padding-right: 0 }
+.sync-metrics span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere }
+.sync-metrics strong { font-size: 28px; font-weight: 500; font-variant-numeric: tabular-nums }
+
+.business-workspace:not(:has(.vehicle-table-region)) > .page-heading .ant-btn {
+	min-height: 40px
+}
+
+.business-workspace .section-toolbar {
+	margin: 24px 0 16px
+}
+
+.business-workspace .section-toolbar .ant-btn {
+	min-height: 40px
+}
+
+.report-viewer > .ant-descriptions {
+	margin-bottom: 24px
+}
+
+.report-viewer .business-table-controls .ant-select {
+	width: 160px;
+	min-width: 120px;
+	max-width: 100%
+}
+
+.report-viewer .ant-table-cell,
+.business-workspace:not(:has(.vehicle-table-region)) .ant-table-cell {
+	line-height: 1.7
+}
+
+.report-actions {
+	gap: 12px;
+	margin-bottom: 24px
+}
+
+.report-actions .ant-btn {
+	min-height: 40px;
+	font-size: 13px
+}
+
+.business-conflict {
+	border-radius: 5px;
+	margin-bottom: 20px
+}
+
+.business-conflict > h3 {
+	margin-bottom: 20px
+}
+
+.business-conflict fieldset {
+	min-width: 0
+}
+
+.business-conflict textarea {
+	width: 100%;
+	border: 1px solid #d6dde7;
+	border-radius: 5px;
+	padding: 10px 12px;
+	font: inherit;
+	resize: vertical
+}
+
+@media(max-width:700px) {
+	.business-table-controls {
+		gap: 16px;
+		margin-bottom: 20px
+	}
+
+	.business-table-controls > .business-filters {
+		flex-basis: 100%;
+		gap: 12px
+	}
+
+	.business-table-controls .business-filters > .ant-input-affix-wrapper {
+		width: 100%
+	}
+}
+
 .business-workspace .record-link small,
 .business-workspace .record-title small,
 .business-filters > .ant-checkbox-wrapper,

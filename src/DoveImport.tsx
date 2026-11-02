@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Checkbox, Descriptions, Empty, Modal, Select, Space, Spin, Table, Tabs, Tag, Upload } from 'antd'
+import { Alert, Button, Checkbox, Descriptions, Dropdown, Empty, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
 import type { UploadProps } from 'antd'
 import type { RcFile } from 'antd/es/upload/interface'
-import { Check, FileSpreadsheet, RefreshCw, Trash2, Upload as UploadIcon } from 'lucide-react'
+import { Check, Ellipsis, FileSpreadsheet, RefreshCw, Trash2, Upload as UploadIcon } from 'lucide-react'
 import { controllerFields, controllerSources, keyControllerName, keyControllerNames, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business'
 import type { BusinessRecord, DoveBatchPreviewResult, DoveBatchSaveResult, DovePreview } from '../shared/business'
 import { createWorkspaceScope } from './api'
@@ -204,13 +204,16 @@ export default function DoveImport({ active, vehicles, language, disabled, onBus
     return row.preview ? <Tag color={row.preview.match === 'matched' ? 'success' : 'warning'}>{text(row.preview.match)}</Tag> : <Tag>{text('queued')}</Tag>
   }
   return <div hidden={!active} className="dove-batch-import">
-    <div className="dove-upload dove-batch-toolbar"><Upload accept=".xlsx" multiple disabled={locked || rows.length >= DOVE_BATCH_LIMIT} showUploadList={false} beforeUpload={beforeUpload}><Button disabled={locked || rows.length >= DOVE_BATCH_LIMIT} icon={<UploadIcon size={16} />}>{text('chooseFiles')} · .xlsx</Button></Upload>
+    <div className="business-table-controls dove-batch-toolbar"><Upload accept=".xlsx" multiple disabled={locked || rows.length >= DOVE_BATCH_LIMIT} showUploadList={false} beforeUpload={beforeUpload}><Button disabled={locked || rows.length >= DOVE_BATCH_LIMIT} icon={<UploadIcon size={16} />}>{text('chooseFiles')} · .xlsx</Button></Upload>
+      <div className="business-control-actions">
       <Button type="primary" icon={<FileSpreadsheet size={16} />} loading={operation === 'parse'} disabled={locked || !pending.length} onClick={() => void parse(pending)}>{text('uploadPreviews')}{pending.length ? ` (${pending.length})` : ''}</Button>
       <Button icon={<Check size={16} />} loading={operation === 'save'} disabled={locked || !eligible.length} onClick={() => reviewImport(eligible)}>{text('reviewDoveImport')}{eligible.length ? ` (${eligible.length})` : ''}</Button>
-      <Button type="text" disabled={locked || !rows.length} onClick={() => { replaceRows([]); replaceReviewIds([]); replaceSelections({}); setPreviewId(null); setSelectionLimited(false) }}>{text('clearBatch')}</Button><span className="muted">{text('batchLimits')}</span>
+      <Dropdown trigger={['click']} menu={{ items: [{ key: 'clear', label: text('clearBatch'), icon: <Trash2 size={16} />, disabled: locked || !rows.length, onClick: () => { replaceRows([]); replaceReviewIds([]); replaceSelections({}); setPreviewId(null); setSelectionLimited(false) } }] }}><Tooltip title={text('more')}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} /></Tooltip></Dropdown>
+      </div>
     </div>
+    <p className="dove-batch-limits">{text('batchLimits')}</p>
     {selectionLimited && <Alert className="business-notice" type="warning" showIcon title={text('batchSelectionLimit')} />}
-    {rows.length ? <><p className="dove-batch-count">{text('selectedFiles')}: {rows.length} / {DOVE_BATCH_LIMIT}</p><Table<ImportRow> className="dove-batch-table" rowKey="uid" dataSource={rows} size="small" pagination={false} scroll={{ x: 1000 }} columns={[
+    {rows.length ? <><div className="business-list-heading"><h3>{text('selectedFiles')}</h3><span>{rows.length} / {DOVE_BATCH_LIMIT}</span></div><Table<ImportRow> className="dove-batch-table" rowKey="uid" dataSource={rows} size="small" pagination={false} scroll={{ x: 1000 }} columns={[
       { title: text('file'), width: 240, render: (_, row) => <div className="record-title"><button className="inline-link" disabled={locked || !row.preview} onClick={() => setPreviewId(row.uid)}>{row.file.name}</button><small>{(row.file.size / 1024 / 1024).toFixed(2)} MB</small></div> },
       { title: text('sourceVin'), width: 180, render: (_, row) => <span className="mono">{row.preview?.parsed.vin || '—'}</span> },
       { title: text('vehicle'), width: 180, render: (_, row) => <div className="dove-batch-target">{String(row.preview?.vehicle?.data.name || row.preview?.vehicle?.data.vin || '—')}{row.preview?.manualBinding && <small className="mono">{row.preview.manualBinding.vin}</small>}</div> },
