@@ -6,7 +6,7 @@ import { Business, checksum, now, reason } from './business.js'
 import { SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
 import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
-import { AppError, TeamDirectory } from './team.js'
+import { AppError, TeamDirectory, assertTeamLock } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
 import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 
@@ -29,10 +29,12 @@ const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'part' THEN 1 ELSE 2 END"
 type PreviewState = { vehicleId: string; actorKey: string; graph: string; version: number; vin: string; expires: number }
 
 export async function atomicFile(destination: string, bytes: Buffer | string): Promise<void> {
+  await assertTeamLock()
   const temporary = `${destination}.${randomUUID()}.tmp`
   try {
     const handle = await fs.open(temporary, 'wx')
     try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+    await assertTeamLock()
     await fs.rename(temporary, destination)
   } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
 }
@@ -69,7 +71,7 @@ export class BusinessSync {
     this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team, options.ifChanged))).catch(error => {
       this.verified = null
       this.error = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
-      this.phase = ['SHARE_BUSY', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
+      this.phase = ['SHARE_BUSY', 'SHARE_LOCK_LOST', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
       return this.status()
     }).finally(() => { this.running = null })
     return this.running

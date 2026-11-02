@@ -89,7 +89,7 @@ function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel,
     catch (cause) {
       const code = cause instanceof ApiError ? cause.message : 'SERVER_ERROR'
       setError(code)
-      if (!['NETWORK_ERROR', 'SERVER_ERROR', 'SHARE_IO_ERROR', 'SHARE_UNAVAILABLE', 'SHARE_BUSY'].includes(code)) {
+      if (!['NETWORK_ERROR', 'SERVER_ERROR', 'SHARE_IO_ERROR', 'SHARE_UNAVAILABLE', 'SHARE_BUSY', 'SHARE_LOCK_LOST'].includes(code)) {
         setSubmitted(null)
         if (['DELETE_PREVIEW_CHANGED', 'DELETE_PREVIEW_EXPIRED', 'VERSION_CONFLICT', 'DELETE_REQUEST_MISMATCH'].includes(code)) { setPreview(null); setVin(''); setConfirmation('') }
       }
