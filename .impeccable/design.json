@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T07:01:42.937206+00:00",
+  "title": "Design System: Stellantis vehicle workspace",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Deep blue",
+        "canonical": "#243882"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Engineering ink",
+        "canonical": "#172642"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Cool muted text",
+        "canonical": "#58677d"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Cool boundary",
+        "canonical": "#dfe5ee"
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Cool canvas",
+        "canonical": "#f3f6fa"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "White surface",
+        "canonical": "#ffffff"
+      },
+      "navy": {
+        "role": "primary",
+        "displayName": "Navigation navy",
+        "canonical": "#18274d"
+      },
+      "success": {
+        "role": "semantic",
+        "displayName": "Success green",
+        "canonical": "#187760"
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Windows body",
+        "purpose": "Local Segoe UI with Chinese Microsoft YaHei UI fallback."
+      },
+      "data": {
+        "displayName": "Identifiers",
+        "purpose": "Monospace identifiers only."
+      }
+    },
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "120ms ease",
+        "purpose": "Authored hover and control color transitions."
+      },
+      {
+        "name": "login-entrance",
+        "value": "180ms ease-out",
+        "purpose": "Login content entrance; disabled with reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-navigation",
+        "value": "1050px"
+      },
+      {
+        "name": "document-flow-navigation",
+        "value": "700px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "description": "Representative static presentation; application interaction remains with existing owners.",
+      "html": "<button class=\"ds-primary\">Save changes</button>",
+      "css": ".ds-primary{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;height:40px;padding:0 20px;border:1px solid var(--brand);border-radius:6px;background:var(--brand);color:var(--surface);transition:background-color 120ms ease}.ds-primary:hover{filter:brightness(1.08)}.ds-primary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}.ds-primary:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "description": "Representative static presentation; application interaction remains with existing owners.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-nav-active\">Vehicles</button><button>Reports</button></nav>",
+      "css": ".ds-nav{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;background:var(--navy);padding:18px;display:grid;gap:6px}.ds-nav button{font:inherit;text-align:left;padding:13px 14px;border:0;border-radius:6px;color:#c0cbe0;background:transparent;transition:background-color 120ms ease}.ds-nav button:hover{background:#29395d;color:white}.ds-nav .ds-nav-active{background:#344b8b;color:white;font-weight:600}.ds-nav button:focus-visible{outline:2px solid #c3d1ff}"
+    },
+    {
+      "name": "Table surface",
+      "kind": "card",
+      "description": "Representative static presentation; application interaction remains with existing owners.",
+      "html": "<section class=\"ds-table-surface\">Vehicle records</section>",
+      "css": ".ds-table-surface{font-family:\"Segoe UI\",\"Microsoft YaHei UI\",sans-serif;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:18px 20px 8px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "",
+    "overview": "Operate mode. Reference: https://www.stellantis.com/en . Deep blue navigation anchors a white, quietly structured engineering workspace. The approved direction is restraint and precision, not a marketing landing page.",
+    "keyCharacteristics": [],
+    "rules": [],
+    "dos": [],
+    "donts": []
+  }
+}
