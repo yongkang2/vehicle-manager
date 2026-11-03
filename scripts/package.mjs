@@ -34,6 +34,7 @@ try {
   await fs.cp(path.join(production, 'node_modules'), path.join(application, 'node_modules'), { recursive: true })
   for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
   await fs.copyFile(path.join(project, 'scripts', 'verify-portable.mjs'), path.join(release, 'verify-portable.mjs'))
+  await fs.copyFile(path.join(project, 'scripts', 'smoke-portable.mjs'), path.join(release, 'smoke-portable.mjs'))
   await fs.writeFile(path.join(application, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', dependencies: manifest.dependencies, overrides: manifest.overrides }, null, 2))
   await fs.copyFile(path.join(project, '使用说明.md'), path.join(release, '使用说明.md'))
   await fs.mkdir(path.join(release, 'runtime'))

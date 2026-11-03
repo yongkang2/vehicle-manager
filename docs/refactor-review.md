@@ -25,4 +25,9 @@ The new behavioral test first failed against the existing updater endpoint (200 
 - Browser authentication checks passed in both locales and both authentication modes at 1440, 390 and 320 pixels, zero locale-induced input-position shift, no browser exceptions.
 - Independent scoped review found no material issues.
 - Protected database/domain/sync/backup/team/workspace/deletion sources have no differences from HEAD. Implementation tests used isolated data. The existing local service was restarted normally for delivery and reports version 1.1.4.
-- Portable ZIP build and extracted acceptance passed: bundled runtime, bootstrap/login page/JavaScript HTTP 200, graceful stop. ZIP contains no retired updater. Artifact: releases/vehicle-manager-1.1.4-win-x64-20261103094348.zip.
+- Portable ZIP build and extracted acceptance passed: bundled runtime, bootstrap/login page/JavaScript HTTP 200, graceful stop. ZIP contains no retired updater. Artifact: releases/vehicle-manager-1.1.4-win-x64-20261103095332.zip.
+
+## Formal release gate
+The previously stale business smoke script is repaired (missing createRequire import and current required vehicle classification). All workbook parsing libraries are loaded from the packaged application, not development dependencies. The harness and child services use the bundled runtime; child PATH contains only that runtime, NODE_PATH is removed and NODE_OPTIONS is cleared. Its data and shared folders are fresh temporary paths containing Unicode and spaces.
+
+Final ZIP acceptance now mandates this workflow check after extracting the archive: first registration, team creation, vehicle creation, isolated DOVE parsing, exact original-byte download, backup manifest records, safe stop/restart and login with persistent vehicle/report records. Failure prevents successful packaging. This supplements, rather than replaces, the full 371-passing / 2-skipped suite. No application/database behavior is changed by these verification-script fixes. Independent review found no material issues; actual colleague endpoint policies and real SMB behavior remain outside local-machine validation.
