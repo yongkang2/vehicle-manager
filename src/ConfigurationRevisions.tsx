@@ -2,13 +2,13 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Alert, App, Button, Card, Descriptions, Empty, Input, Modal, Select, Space, Spin, Table, Tag, Tooltip } from 'antd'
 import { ClipboardCopy, GitCompare, Plus, RefreshCw } from 'lucide-react'
 import type { BusinessRecord } from '../shared/business'
-import { configurationDecisionKey, configurationSections, configurationSnapshot, validateConfigurationRevisionRecord } from '../shared/configuration-revisions'
+import { configurationDecisionKey, configurationReviewScope, configurationSections, configurationSnapshot, validateConfigurationRevisionRecord } from '../shared/configuration-revisions'
 import type { ComponentTypeCatalog, ConfigurationDecisions, ConfigurationPreview, ConfigurationPublicationReceipt, ConfigurationPublishRequest, ConfigurationRevisionData, ConfigurationRevisionRecord, ConfigurationRevisionSummary } from '../shared/configuration-revisions'
 import { ApiError, createWorkspaceScope } from './api'
 import { translateBusiness } from './business-i18n'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
-import { compareConfigurationRevisions, configurationComponentName, configurationRevisionText } from './configuration-revision-view'
+import { compareConfigurationRevisions, configurationComponentName, configurationRevisionText, excludedConfigurationTypes } from './configuration-revision-view'
 import './ConfigurationRevisions.css'
 
 type Scope = ReturnType<typeof createWorkspaceScope>
@@ -18,7 +18,7 @@ export type ConfigurationRevisionsProps = {
 }
 const emptyDecisions = (): ConfigurationDecisions => ({ fields: {}, sections: {} })
 const textValue = (value: unknown) => value === undefined || value === null || value === '' ? '—' : String(value)
-const uncertain = new Set(['NETWORK_ERROR', 'SERVER_ERROR', 'SHARE_IO_ERROR', 'LOCAL_REFRESH_REQUIRED'])
+const uncertain = new Set(['NETWORK_ERROR', 'SERVER_ERROR', 'SHARE_IO_ERROR', 'SHARE_LOCK_LOST', 'LOCAL_REFRESH_REQUIRED'])
 
 export function ConfigurationRevisionSummaryPanel({ vehicle, language, catalog, current, onOpen }: Pick<ConfigurationRevisionsProps, 'vehicle' | 'language' | 'catalog' | 'current'> & { onOpen: () => void }) {
   const text = translateBusiness(language)
@@ -31,7 +31,7 @@ function SnapshotView({ data, language }: { data: ConfigurationRevisionData; lan
     { key: 'vin', label: 'VIN', children: data.vin }, { key: 'revision', label: text('configurationRevision'), children: data.label },
     { key: 'author', label: text('actor'), children: data.actor.name }, { key: 'time', label: text('configurationPublished'), children: new Date(data.publishedAt).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-GB') },
     { key: 'summary', label: text('configurationSummary'), span: 2, children: <span className="preserve-text">{data.summary}</span> },
-  ]} />{data.snapshot.sections.map(section => <Card size="small" key={section.typeId} title={section.label[at]}>{section.state !== 'installed' ? <p>{text(section.state === 'unknown' ? 'configurationUnknown' : 'configurationNotInstalled')} · {section.reason}</p> : section.components.map(component => <div className="configuration-component" key={component.id}><h4>{configurationComponentName(component, language)}</h4><Descriptions size="small" column={{ xs: 1, sm: 2 }} items={component.fields.map(field => ({ key: field.id, label: field.label[at], children: <span className="preserve-text">{field.state === 'known' ? textValue(field.value) : <><Tag>{text(field.state === 'unknown' ? 'configurationUnknown' : 'configurationNotApplicable')}</Tag>{field.reason}</>}</span> }))} /></div>)}</Card>)}</div>
+  ]} />{Boolean(excludedConfigurationTypes(data.snapshot.reviewScope).length) && <Card size="small" title={text('configurationReviewScope')}><p>{text('configurationExcluded')}: {excludedConfigurationTypes(data.snapshot.reviewScope).map(type => type.label[at]).join(' / ')}</p></Card>}{data.snapshot.sections.map(section => <Card size="small" key={section.typeId} title={section.label[at]}>{section.state !== 'installed' ? <p>{text(section.state === 'unknown' ? 'configurationUnknown' : 'configurationNotInstalled')} · {section.reason}</p> : section.components.map(component => <div className="configuration-component" key={component.id}><h4>{configurationComponentName(component, language)}</h4><Descriptions size="small" column={{ xs: 1, sm: 2 }} items={component.fields.map(field => ({ key: field.id, label: field.label[at], children: <span className="preserve-text">{field.state === 'known' ? textValue(field.value) : <><Tag>{text(field.state === 'unknown' ? 'configurationUnknown' : 'configurationNotApplicable')}</Tag>{field.reason}</>}</span> }))} /></div>)}</Card>)}</div>
 }
 
 export default function ConfigurationRevisions({ vehicle, records, language, online, syncPaused, catalog, current, onChanged, onBusyChange, onError }: ConfigurationRevisionsProps) {
@@ -83,7 +83,7 @@ export default function ConfigurationRevisions({ vehicle, records, language, onl
   function openReview() {
     previewSequence.current++; setPreviewBusy(false)
     setTitle(''); setSummary(''); setError(null); setSubmitted(null); setDecisions(emptyDecisions())
-    setReview({ token: '', expires: 0, vehicleId: vehicle.id, vin: String(vehicle.data.vin || ''), previousRevisionId: current?.revisionId || null, previousNumber: current?.number || 0, sections: configurationSections(records, vehicle.id, catalog.types) })
+    setReview({ token: '', expires: 0, vehicleId: vehicle.id, vin: String(vehicle.data.vin || ''), previousRevisionId: current?.revisionId || null, previousNumber: current?.number || 0, sections: configurationSections(records, vehicle.id, catalog.types), ...(catalog.policyEnabled ? { reviewScope: configurationReviewScope(records, vehicle.id, catalog.types) } : {}) })
     if (available) void refreshPreview()
   }
   function cancelReview() {
@@ -91,7 +91,7 @@ export default function ConfigurationRevisions({ vehicle, records, language, onl
     previewSequence.current++; setPreviewBusy(false); setReview(null); setSubmitted(null); setError(null)
   }
   let complete = false
-  if (review) try { configurationSnapshot(review.sections, decisions); complete = Boolean(summary.trim() && summary.length <= 500) } catch { /* Missing values are explained inline. */ }
+  if (review) try { configurationSnapshot(review.sections, decisions, review.reviewScope); complete = Boolean(review.sections.length && summary.trim() && summary.length <= 500) } catch { /* Missing values are explained inline. */ }
   async function publish() {
     if (!review || !available || saving || previewBusy || !submitted && (!review.token || !complete)) return
     const request = submitted || { previewToken: review.token, requestId: crypto.randomUUID(), title: title.trim(), summary: summary.trim(), decisions }
@@ -154,6 +154,8 @@ export default function ConfigurationRevisions({ vehicle, records, language, onl
       {review && <div className="configuration-review"><Alert type="info" showIcon title={`${review.vin} · ${text('configurationPreviousRevision')}: ${review.previousNumber ? `R${String(review.previousNumber).padStart(2, '0')}` : '—'}`} description={text('configurationReviewNotice')} />
         {error && <Alert type="warning" showIcon title={submitted ? text('configurationPublicationUnknown') : errorText(error, language)} />}
         {!available && <Alert type="warning" showIcon title={text('configurationOfflineNotice')} />}
+        {!review.sections.length && !previewBusy && <Alert type="warning" showIcon title={text('configurationEmptyReview')} />}
+        {Boolean(excludedConfigurationTypes(review.reviewScope).length) && <Alert type="info" showIcon title={text('configurationExcluded')} description={excludedConfigurationTypes(review.reviewScope).map(type => type.label[at]).join(' / ')} />}
         <label className="configuration-input-label">{text('configurationTitle')}<Input value={title} disabled={saving || Boolean(submitted)} maxLength={120} onChange={event => setTitle(event.target.value)} /></label>
         <label className="configuration-input-label">{text('configurationSummary')}<Input.TextArea value={summary} disabled={saving || Boolean(submitted)} maxLength={500} rows={2} onChange={event => setSummary(event.target.value)} /></label>
         {previewBusy && <Spin />}{review.sections.map(section => <Card size="small" key={section.typeId} title={section.label[at]}>{!section.components.length ? <div className="configuration-explanation"><p>{text('componentSectionMissing')}</p><Select aria-label={`${section.label[at]} ${text('configurationSelectExplanation')}`} value={decisions.sections[section.typeId]?.state} disabled={saving || Boolean(submitted)} placeholder={text('configurationSelectExplanation')} options={[{ value: 'unknown', label: text('configurationUnknown') }, { value: 'notInstalled', label: text('configurationNotInstalled') }]} onChange={state => setDecisions(previous => ({ ...previous, sections: { ...previous.sections, [section.typeId]: { reason: previous.sections[section.typeId]?.reason || '', state } } }))} /><Input.TextArea aria-label={`${section.label[at]} ${text('configurationMissingReason')}`} placeholder={text('configurationMissingReason')} value={decisions.sections[section.typeId]?.reason || ''} maxLength={500} disabled={saving || Boolean(submitted) || !decisions.sections[section.typeId]?.state} onChange={event => setDecisions(previous => ({ ...previous, sections: { ...previous.sections, [section.typeId]: { state: previous.sections[section.typeId]?.state || 'unknown', reason: event.target.value } } }))} /></div> : section.components.map(component => <div className="configuration-component" key={component.id}><h4>{configurationComponentName(component, language)}</h4>{component.fields.map(field => { const key = configurationDecisionKey(component.id, field.id); return <div className="configuration-review-field" key={field.id}><strong>{field.label[at]}</strong>{field.required && !field.value.trim() ? <div className="configuration-explanation"><Select aria-label={`${configurationComponentName(component, language)} ${field.label[at]} ${text('configurationSelectExplanation')}`} value={decisions.fields[key]?.state} disabled={saving || Boolean(submitted)} placeholder={text('configurationSelectExplanation')} options={[{ value: 'unknown', label: text('configurationUnknown') }, { value: 'notApplicable', label: text('configurationNotApplicable') }]} onChange={state => decisionFields(component.id, field.id, { state })} /><Input.TextArea aria-label={`${configurationComponentName(component, language)} ${field.label[at]} ${text('configurationMissingReason')}`} placeholder={text('configurationMissingReason')} value={decisions.fields[key]?.reason || ''} maxLength={500} disabled={saving || Boolean(submitted) || !decisions.fields[key]?.state} rows={2} onChange={event => decisionFields(component.id, field.id, { reason: event.target.value })} /></div> : <span className="preserve-text">{textValue(field.value)}</span>}</div> })}</div>)}</Card>)}

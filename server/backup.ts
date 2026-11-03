@@ -10,7 +10,7 @@ import type { TeamDocument } from '../shared/types.js'
 import { inspectVehiclePhoto, parsePhotoAttachmentId } from '../shared/vehicle-photo.js'
 import { appVersion } from '../shared/version.js'
 import { randomUUID } from 'node:crypto'
-import { isProtectedKind, validateComponentTypeRecord, validateConfigurationRecords, validateConfigurationRevisionRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
+import { builtinComponentTypes, isProtectedKind, validateComponentTypeRecord, validateConfigurationRecords, validateConfigurationRevisionRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 
 export type ConfigurationReceiptEntry = { key: string; value: string }
 export type PendingConfigurationImport = { id: string; records: BusinessRecord[]; actor: Actor; reason: string; receipts: ConfigurationReceiptEntry[] }
@@ -55,7 +55,7 @@ function protectedRecord(record: BusinessRecord): void {
   } catch { throw new AppError('INVALID_BACKUP', 422) }
 }
 /** Preserve canonical catalog state and immutable history; never use ordinary restore writes. */
-function prepareConfigurationImport(current: BusinessRecord[], incoming: BusinessRecord[], deletedIds: Set<string>, deletedVehicles: Set<string>, receipts: ConfigurationReceiptEntry[], knownReceipts: ConfigurationReceiptEntry[]) {
+function prepareConfigurationImport(current: BusinessRecord[], incoming: BusinessRecord[], deletedIds: Set<string>, deletedVehicles: Set<string>, receipts: ConfigurationReceiptEntry[], knownReceipts: ConfigurationReceiptEntry[], preserveBuiltinDefaults = false) {
   const union = new Map(current.map(record => [record.id, record])), additions: BusinessRecord[] = []
   for (const record of incoming.filter(record => isProtectedKind(record.kind))) {
     protectedRecord(record)
@@ -67,6 +67,9 @@ function prepareConfigurationImport(current: BusinessRecord[], incoming: Busines
       // cannot rename or reactivate a type that administrators changed afterward.
       continue
     }
+    // No stored override means the canonical built-in is Active. A historical
+    // backup cannot replace that current decision with a removed/disabled state.
+    if (preserveBuiltinDefaults && record.kind === 'componentType' && builtinComponentTypes.some(type => type.id === record.id)) continue
     union.set(record.id, record); additions.push(record)
   }
   for (const record of incoming.filter(record => !isProtectedKind(record.kind))) {
@@ -88,6 +91,18 @@ function prepareConfigurationImport(current: BusinessRecord[], incoming: Busines
     if (!known.has(entry.key)) { known.set(entry.key, entry.value); receiptAdditions.push(entry) }
   }
   return { records: additions, receipts: receiptAdditions }
+}
+
+function validateManifestVersion(manifest: Manifest): void {
+  if (manifest.format >= 3 && (typeof manifest.appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.appVersion) || !Number.isSafeInteger(manifest.schemaVersion) || Number(manifest.schemaVersion) > 5 || !Number.isSafeInteger(manifest.fieldVersion) || Number(manifest.fieldVersion) > (manifest.format === 4 ? 3 : 2) || !object(manifest.recordCounts))) throw new AppError('INVALID_BACKUP', 422)
+  if (manifest.format === 4 && (manifest.schemaVersion !== 5 || ![2, 3].includes(Number(manifest.fieldVersion)))) throw new AppError('INVALID_BACKUP', 422)
+  if (manifest.fieldVersion !== 3 && manifest.records.some(record => object(record) && isProtectedKind(record.kind) && record.data?.schema === 2)) throw new AppError('INVALID_BACKUP', 422)
+}
+
+function requireRestoreProtocol(business: Business, records: BusinessRecord[], needsConfiguration: boolean): void {
+  const protocol = business.store.get<number>('businessProtocol') || 1
+  if (needsConfiguration && protocol < 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+  if (records.some(record => isProtectedKind(record.kind) && record.data.schema === 2) && protocol < 4) throw new AppError('CONFIGURATION_POLICY_NOT_ENABLED', 409)
 }
 function validDeletion(value: unknown): value is VehicleDeletion {
   if (!object(value) || !uuid(value.id) || !uuid(value.requestId) || !uuid(value.vehicleId) || typeof value.vin !== 'string' || !/^[A-HJ-NPR-Z0-9]{17}$/.test(value.vin) || !actorValue(value.actor) || value.actor.role !== 'admin' || typeof value.reason !== 'string' || !value.reason.trim() || value.reason.length > 500 || !timestamp(value.deletedAt) || !uuid(value.revision) || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 1) return false
@@ -118,7 +133,7 @@ export async function createBackupStream(business: Business, teamId: string, tea
   if (records.length > 20000 || changes.length > 200000) throw new AppError('BACKUP_TOO_LARGE', 413)
   const recordCounts = Object.fromEntries(manifestKinds.map(kind => [kind, records.filter(record => record.kind === kind).length]))
   const manifest: Manifest = {
-    application: 'stellantis-vehicle-manager', format: 4, teamId, created: new Date().toISOString(), appVersion, schemaVersion: business.store.db.prepare('PRAGMA user_version').get()!.user_version as number, fieldVersion: 2, recordCounts, records, changes, pendingOperations,
+    application: 'stellantis-vehicle-manager', format: 4, teamId, created: new Date().toISOString(), appVersion, schemaVersion: business.store.db.prepare('PRAGMA user_version').get()!.user_version as number, fieldVersion: (business.store.get<number>('businessProtocol') || 1) >= 4 || records.some(record => isProtectedKind(record.kind) && record.data.schema === 2) ? 3 : 2, recordCounts, records, changes, pendingOperations,
     deletions, quarantinedOperations: business.store.quarantineRows(), configurationReceipts: receipts, team,
   }
   const manifestBytes = Buffer.from(JSON.stringify(manifest))
@@ -175,8 +190,7 @@ export async function previewBackup(business: Business, bytes: Buffer, teamId: s
   let manifest: Manifest
   try { manifest = JSON.parse(Buffer.concat(chunks).toString()) as Manifest } catch { throw new AppError('INVALID_BACKUP', 422) }
   if (!object(manifest) || manifest.application !== 'stellantis-vehicle-manager' || ![1, 2, 3, 4].includes(manifest.format) || manifest.teamId !== teamId || (manifest.team && manifest.team.id !== teamId) || !Array.isArray(manifest.records) || manifest.records.length > 20000 || !Array.isArray(manifest.changes) || manifest.changes.length > 200000) throw new AppError('INVALID_BACKUP', 422)
-  if (manifest.format >= 3 && (typeof manifest.appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.appVersion) || !Number.isSafeInteger(manifest.schemaVersion) || Number(manifest.schemaVersion) > 5 || !Number.isSafeInteger(manifest.fieldVersion) || Number(manifest.fieldVersion) > 2 || !object(manifest.recordCounts))) throw new AppError('INVALID_BACKUP', 422)
-  if (manifest.format === 4 && (manifest.schemaVersion !== 5 || manifest.fieldVersion !== 2)) throw new AppError('INVALID_BACKUP', 422)
+  validateManifestVersion(manifest)
   const receipts = manifest.format === 4 ? configurationReceipts(manifest.configurationReceipts) : []
   const current = business.list(), currentById = new Map(current.map(record => [record.id, record]))
   const incomingIds = new Set<string>(), conflicts: string[] = [], droppedFields: RestorePreview['droppedFields'] = []
@@ -209,8 +223,8 @@ export async function previewBackup(business: Business, bytes: Buffer, teamId: s
   for (const deletion of deletions) if (liveIds.has(deletion.vehicleId) || liveParents.has(deletion.vehicleId) || deletion.recordIds.some(id => liveIds.has(id))) conflicts.push(`DELETION:${deletion.vehicleId}`)
   const allDeletions = [...business.store.deletionRows(), ...deletions], deleted = new Set(allDeletions.flatMap(row => row.recordIds))
   try {
-    const prepared = prepareConfigurationImport(current, manifest.records, deleted, new Set(allDeletions.map(row => row.vehicleId)), receipts, business.store.get<ConfigurationReceiptEntry[]>('configurationReceipts') || [])
-    if ((prepared.records.length || prepared.receipts.length || manifest.records.some(record => !deleted.has(record.id) && record.kind === 'part' && record.data.category === 'component')) && business.store.get<number>('businessProtocol') !== 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+    const prepared = prepareConfigurationImport(current, manifest.records, deleted, new Set(allDeletions.map(row => row.vehicleId)), receipts, business.store.get<ConfigurationReceiptEntry[]>('configurationReceipts') || [], true)
+    requireRestoreProtocol(business, manifest.records.filter(record => !deleted.has(record.id) && (!record.vehicleId || !allDeletions.some(marker => marker.vehicleId === record.vehicleId))), Boolean(prepared.records.length || prepared.receipts.length || manifest.records.some(record => !deleted.has(record.id) && record.kind === 'part' && record.data.category === 'component')))
   } catch (error) {
     if (error instanceof AppError && error.code === 'BACKUP_CONFIGURATION_CONFLICT') conflicts.push('CONFIGURATION_HISTORY')
     else throw error
@@ -244,8 +258,7 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
   let manifest: Manifest
   try { manifest = JSON.parse(files.get('manifest.json')!.toString()) as Manifest } catch { throw new AppError('INVALID_BACKUP', 422) }
   if (!object(manifest) || manifest.application !== 'stellantis-vehicle-manager' || ![1, 2, 3, 4].includes(manifest.format) || manifest.teamId !== teamId || (manifest.team && manifest.team.id !== teamId) || !Array.isArray(manifest.records) || manifest.records.length > 20000 || !Array.isArray(manifest.changes) || manifest.changes.length > 200000) throw new AppError('INVALID_BACKUP', 422)
-  if (manifest.format >= 3 && (typeof manifest.appVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.appVersion) || !Number.isSafeInteger(manifest.schemaVersion) || Number(manifest.schemaVersion) > 5 || !Number.isSafeInteger(manifest.fieldVersion) || Number(manifest.fieldVersion) > 2 || !object(manifest.recordCounts))) throw new AppError('INVALID_BACKUP', 422)
-  if (manifest.format === 4 && (manifest.schemaVersion !== 5 || manifest.fieldVersion !== 2)) throw new AppError('INVALID_BACKUP', 422)
+  validateManifestVersion(manifest)
   const receipts = manifest.format === 4 ? configurationReceipts(manifest.configurationReceipts) : []
   const deletions = manifest.format >= 2 ? manifest.deletions : []
   const quarantine = manifest.format >= 2 ? manifest.quarantinedOperations : []
@@ -314,9 +327,9 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
   const skipped = manifest.records.filter(record => deletedIds.has(record.id) || (record.vehicleId !== null && deletedVehicles.has(record.vehicleId)))
   const skippedVehicleIds = [...new Set(skipped.map(record => record.kind === 'vehicle' ? record.id : record.vehicleId!))]
   const currentRecords = business.list()
-  const protectedImport = prepareConfigurationImport(currentRecords, manifest.records, deletedIds, deletedVehicles, receipts, configurationReceipts(business.store.get<ConfigurationReceiptEntry[]>('configurationReceipts') || []))
+  const protectedImport = prepareConfigurationImport(currentRecords, manifest.records, deletedIds, deletedVehicles, receipts, configurationReceipts(business.store.get<ConfigurationReceiptEntry[]>('configurationReceipts') || []), true)
   const needsConfiguration = protectedImport.records.length || protectedImport.receipts.length || manifest.records.some(record => !deletedIds.has(record.id) && record.kind === 'part' && record.data.category === 'component')
-  if (needsConfiguration && business.store.get<number>('businessProtocol') !== 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+  requireRestoreProtocol(business, manifest.records.filter(record => !deletedIds.has(record.id) && (!record.vehicleId || !deletedVehicles.has(record.vehicleId))), Boolean(needsConfiguration))
   const archiveCandidates = currentRecords.filter(record => !isProtectedKind(record.kind) && !record.archived && !ids.has(record.id) && !deletedIds.has(record.id) && (record.kind === 'vehicle' || Boolean(record.vehicleId && ids.has(record.vehicleId))))
   if (!Array.isArray(archiveRecordIds) || archiveRecordIds.some(id => typeof id !== 'string') || new Set(archiveRecordIds).size !== archiveRecordIds.length || archiveRecordIds.some(id => !archiveCandidates.some(record => record.id === id))) throw new AppError('RESTORE_PREVIEW_CHANGED', 409)
   if (archiveCandidates.some(record => !archiveRecordIds.includes(record.id))) throw new AppError('RESTORE_ARCHIVE_CONFIRMATION_REQUIRED', 409)

@@ -2,18 +2,20 @@ import { keyControllerName } from './business.js'
 import type { Actor, BusinessRecord, Fields } from './business.js'
 
 export type ConfigurationFieldDefinition = { id: string; label: [string, string]; required: boolean }
-export type ComponentTypeDefinition = { id: string; name: string; label: [string, string]; description: string; disabled: boolean; builtin: boolean; version: number; fields: ConfigurationFieldDefinition[]; pendingRestore?: boolean }
-export type ComponentTypeCatalog = { enabled: boolean; types: ComponentTypeDefinition[] }
-export type ComponentTypeData = { schema: 1; name: string; description: string; disabled: boolean; definitionVersion: number }
+export type ComponentReviewState = 'active' | 'disabled' | 'removed'
+export type ComponentTypeDefinition = { id: string; name: string; label: [string, string]; description: string; disabled: boolean; builtin: boolean; version: number; fields: ConfigurationFieldDefinition[]; pendingRestore?: boolean; reviewState?: ComponentReviewState }
+export type ComponentTypeCatalog = { enabled: boolean; policyEnabled?: boolean; types: ComponentTypeDefinition[] }
+export type ComponentTypeData = { schema: 1; name: string; description: string; disabled: boolean; definitionVersion: number } | { schema: 2; name: string; description: string; reviewState: ComponentReviewState; definitionVersion: number }
+export type ConfigurationReviewScope = { typeId: string; name: string; label: [string, string]; reviewState: ComponentReviewState; included: boolean; definitionVersion: number }
 export type ConfigurationPreviewField = ConfigurationFieldDefinition & { value: string }
 export type ConfigurationPreviewComponent = { id: string; sourceId: string | null; sourceVersion: number; name: string; fields: ConfigurationPreviewField[] }
 export type ConfigurationSection = { typeId: string; name: string; label: [string, string]; components: ConfigurationPreviewComponent[] }
 export type ConfigurationDecisions = { fields: Record<string, { state: 'unknown' | 'notApplicable'; reason: string }>; sections: Record<string, { state: 'unknown' | 'notInstalled'; reason: string }> }
-export type ConfigurationPreview = { token: string; expires: number; vehicleId: string; vin: string; previousRevisionId: string | null; previousNumber: number; sections: ConfigurationSection[] }
+export type ConfigurationPreview = { token: string; expires: number; vehicleId: string; vin: string; previousRevisionId: string | null; previousNumber: number; sections: ConfigurationSection[]; reviewScope?: ConfigurationReviewScope[] }
 export type ConfigurationSnapshotField = ConfigurationPreviewField & { state: 'known' | 'unknown' | 'notApplicable'; reason: string }
 export type ConfigurationSnapshotComponent = Omit<ConfigurationPreviewComponent, 'fields'> & { fields: ConfigurationSnapshotField[] }
 export type ConfigurationSnapshotSection = Omit<ConfigurationSection, 'components'> & { state: 'installed' | 'unknown' | 'notInstalled'; reason: string; components: ConfigurationSnapshotComponent[] }
-export type ConfigurationRevisionData = { schema: 1; name: string; vehicleId: string; vin: string; number: number; label: string; title: string; summary: string; publishedAt: string; actor: Actor; previousRevisionId: string | null; sourceFingerprint: string; snapshot: { schema: 1; sections: ConfigurationSnapshotSection[] } }
+export type ConfigurationRevisionData = { schema: 1 | 2; name: string; vehicleId: string; vin: string; number: number; label: string; title: string; summary: string; publishedAt: string; actor: Actor; previousRevisionId: string | null; sourceFingerprint: string; snapshot: { schema: 1 | 2; sections: ConfigurationSnapshotSection[]; reviewScope?: ConfigurationReviewScope[] } }
 export type ConfigurationRevisionRecord = BusinessRecord & { kind: 'configurationRevision'; data: Fields & ConfigurationRevisionData }
 export type ConfigurationRevisionSummary = { vehicleId: string; revisionId: string; number: number; label: string; publishedAt: string; actor: Actor; title: string; summary: string; hasChanges: boolean }
 export type ConfigurationPublishRequest = { previewToken: string; requestId: string; title: string; summary: string; decisions: ConfigurationDecisions }
@@ -48,16 +50,23 @@ export const configurationDecisionKey = (componentId: string, fieldId: string) =
 
 export function validateComponentTypeRecord(record: BusinessRecord): ComponentTypeData {
   const data = record.data as unknown as ComponentTypeData
-  if (record.kind !== 'componentType' || record.vehicleId !== null || record.archived !== false || !identifier(record.id) || !Number.isSafeInteger(record.version) || record.version < 1 || !Number.isFinite(Date.parse(record.updated)) || !object(data) || data.schema !== 1 || !identifier(data.name) || data.name !== data.name.trim() || !text(data.description) || typeof data.disabled !== 'boolean' || !Number.isSafeInteger(data.definitionVersion) || data.definitionVersion < 1 || builtinComponentTypes.some(type => type.id === record.id)) fail()
+  if (record.kind !== 'componentType' || record.vehicleId !== null || record.archived !== false || !identifier(record.id) || !Number.isSafeInteger(record.version) || record.version < 1 || !Number.isFinite(Date.parse(record.updated)) || !object(data) || ![1, 2].includes(data.schema) || !identifier(data.name) || data.name !== data.name.trim() || !text(data.description) || !Number.isSafeInteger(data.definitionVersion) || data.definitionVersion < 1) fail()
+  const builtin = builtinComponentTypes.find(type => type.id === record.id)
+  if (data.schema === 1 ? typeof data.disabled !== 'boolean' || Boolean(builtin) : !['active', 'disabled', 'removed'].includes(data.reviewState) || builtin && (data.name !== builtin.name || data.description !== builtin.description)) fail()
   return data
 }
 export function componentTypeDefinitions(records: readonly BusinessRecord[]): ComponentTypeDefinition[] {
   const result = structuredClone(builtinComponentTypes), names = new Set(result.flatMap(type => [type.name, ...type.label]).map(name => name.toLocaleLowerCase()))
+  const policyEnabled = records.some(record => record.kind === 'componentType' && record.data.schema === 2)
+  if (policyEnabled) for (const type of result) type.reviewState = 'active'
   for (const record of records.filter(row => row.kind === 'componentType').sort((left, right) => left.id.localeCompare(right.id))) {
     const data = validateComponentTypeRecord(record), name = data.name.toLocaleLowerCase()
+    const reviewState = data.schema === 2 ? data.reviewState : data.disabled ? 'disabled' : 'active'
+    const builtin = result.find(type => type.id === record.id)
+    if (builtin) { builtin.reviewState = reviewState; builtin.version = data.definitionVersion; continue }
     if (names.has(name)) fail('COMPONENT_TYPE_EXISTS')
     names.add(name)
-    result.push({ id: record.id, name: data.name, label: [data.name, data.name], description: data.description, disabled: data.disabled, builtin: false, version: data.definitionVersion, fields: structuredClone(commonComponentFields) })
+    result.push({ id: record.id, name: data.name, label: [data.name, data.name], description: data.description, disabled: data.schema === 1 && data.disabled, builtin: false, version: data.definitionVersion, fields: structuredClone(commonComponentFields), ...(policyEnabled ? { reviewState } : {}) })
   }
   return result
 }
@@ -65,6 +74,7 @@ export function componentTypeDefinitions(records: readonly BusinessRecord[]): Co
 /** Read-model copy only: unresolved restores must remain inspectable without changing canonical names or IDs. */
 export function pendingComponentTypeView(record: BusinessRecord, occupiedNames: Set<string>): BusinessRecord {
   const data = validateComponentTypeRecord(record)
+  if (builtinComponentTypes.some(type => type.id === record.id)) return structuredClone(record)
   let candidate = '', attempt = 0
   do {
     const suffix = ` [pending restore ${record.id.slice(0, 24)}${attempt ? ` ${attempt}` : ''}]`
@@ -72,7 +82,12 @@ export function pendingComponentTypeView(record: BusinessRecord, occupiedNames: 
     attempt++
   } while (occupiedNames.has(candidate.toLocaleLowerCase()))
   occupiedNames.add(candidate.toLocaleLowerCase())
-  return { ...record, data: { ...record.data, name: candidate, disabled: true } }
+  return { ...record, data: { ...record.data, name: candidate, ...(data.schema === 2 ? { reviewState: 'disabled' } : { disabled: true }) } }
+}
+
+export function configurationReviewScope(records: readonly BusinessRecord[], vehicleId: string, types = componentTypeDefinitions(records), previous?: ConfigurationRevisionData): ConfigurationReviewScope[] {
+  const active = records.filter(row => row.kind === 'part' && row.vehicleId === vehicleId && !row.archived && !valueText(row.data.removedAt).trim())
+  return types.filter(type => type.builtin || active.some(row => row.data.category === 'component' && row.data.componentTypeId === type.id) || previous?.snapshot.sections.some(section => section.typeId === type.id) || previous?.snapshot.reviewScope?.some(scope => scope.typeId === type.id)).map(type => ({ typeId: type.id, name: type.name, label: structuredClone(type.label), reviewState: type.reviewState || 'active', included: !type.reviewState || type.reviewState === 'active', definitionVersion: type.version }))
 }
 
 export function configurationSections(records: readonly BusinessRecord[], vehicleId: string, types = componentTypeDefinitions(records), previous?: ConfigurationRevisionData): ConfigurationSection[] {
@@ -80,7 +95,8 @@ export function configurationSections(records: readonly BusinessRecord[], vehicl
   if (!vehicle) fail('RECORD_NOT_FOUND')
   const active = records.filter(row => row.kind === 'part' && row.vehicleId === vehicleId && !row.archived && !valueText(row.data.removedAt).trim())
   const mapped = (record: BusinessRecord, type: ComponentTypeDefinition): ConfigurationPreviewComponent => ({ id: record.id, sourceId: record.id, sourceVersion: record.version, name: valueText(record.data.name) || type.name, fields: type.fields.map(definition => ({ ...structuredClone(definition), value: definition.id === 'name' && type.id === 'controllers' ? keyControllerName(record.data.name) || valueText(record.data.name) : valueText(record.data[definition.id]) })) })
-  return types.filter(type => type.builtin || active.some(row => row.data.category === 'component' && row.data.componentTypeId === type.id) || previous?.snapshot.sections.some(section => section.typeId === type.id)).map(type => {
+  const includedIds = new Set(configurationReviewScope(records, vehicleId, types, previous).filter(scope => scope.included).map(scope => scope.typeId))
+  return types.filter(type => includedIds.has(type.id)).map(type => {
     const category = type.id === 'hv-battery' ? 'battery' : type.id === 'emotor' ? 'motor' : type.id === 'controllers' ? 'controller' : 'component'
     const components = active.filter(row => row.data.category === category && (category !== 'component' || row.data.componentTypeId === type.id)).sort((left, right) => left.id.localeCompare(right.id)).map(row => mapped(row, type))
     if (type.id === 'thermal-management' && (components.length || valueText(vehicle.data.thermal))) {
@@ -93,8 +109,9 @@ export function configurationSections(records: readonly BusinessRecord[], vehicl
 export function configurationSourceFingerprint(sections: readonly ConfigurationSection[]): string {
   return JSON.stringify([...sections].sort((left, right) => left.typeId.localeCompare(right.typeId)).map(section => ({ typeId: section.typeId, components: [...section.components].sort((left, right) => left.id.localeCompare(right.id)).map(component => ({ id: component.id, sourceId: component.sourceId, values: component.fields.map(item => [item.id, item.value]).sort((left, right) => left[0].localeCompare(right[0])) })) })))
 }
-export function configurationSnapshot(sections: readonly ConfigurationSection[], decisions: ConfigurationDecisions): ConfigurationRevisionData['snapshot'] {
+export function configurationSnapshot(sections: readonly ConfigurationSection[], decisions: ConfigurationDecisions, reviewScope?: ConfigurationReviewScope[]): ConfigurationRevisionData['snapshot'] {
   if (!object(decisions) || !object(decisions.fields) || !object(decisions.sections)) fail('REVISION_INFORMATION_REQUIRED')
+  if (reviewScope && !sections.length) fail('CONFIGURATION_EMPTY_REVIEW')
   const usedFields = new Set<string>(), usedSections = new Set<string>()
   const result = sections.map(section => {
     if (!section.components.length) {
@@ -114,14 +131,29 @@ export function configurationSnapshot(sections: readonly ConfigurationSection[],
     }) })) } as ConfigurationSnapshotSection
   })
   if (Object.keys(decisions.fields).some(key => !usedFields.has(key)) || Object.keys(decisions.sections).some(key => !usedSections.has(key))) fail('REVISION_PREVIEW_CHANGED')
-  return { schema: 1, sections: result }
+  return { schema: reviewScope ? 2 : 1, sections: result, ...(reviewScope ? { reviewScope: structuredClone(reviewScope) } : {}) }
 }
 
 export function validateConfigurationRevisionRecord(record: BusinessRecord): ConfigurationRevisionData {
   const data = record.data as unknown as ConfigurationRevisionData
-  if (record.kind !== 'configurationRevision' || record.archived !== false || !identifier(record.id) || !Number.isSafeInteger(record.version) || record.version < 1 || !Number.isFinite(Date.parse(record.updated)) || !identifier(record.vehicleId) || !object(data) || data.schema !== 1 || data.vehicleId !== record.vehicleId || !/^[A-HJ-NPR-Z0-9]{17}$/.test(data.vin) || !Number.isSafeInteger(data.number) || data.number < 1 || data.label !== configurationRevisionLabel(data.number) || data.name !== data.label || !text(data.title, 120) || !text(data.summary, 500) || !data.summary.trim() || !text(data.publishedAt, 64) || !Number.isFinite(Date.parse(data.publishedAt)) || !object(data.actor) || !identifier(data.actor.id) || !identifier(data.actor.name) || !identifier(data.actor.deviceId) || !['admin', 'member'].includes(data.actor.role) || (data.previousRevisionId !== null && !identifier(data.previousRevisionId)) || !text(data.sourceFingerprint, 4_000_000) || !object(data.snapshot) || data.snapshot.schema !== 1 || !Array.isArray(data.snapshot.sections)) fail()
+  if (record.kind !== 'configurationRevision' || record.archived !== false || !identifier(record.id) || !Number.isSafeInteger(record.version) || record.version < 1 || !Number.isFinite(Date.parse(record.updated)) || !identifier(record.vehicleId) || !object(data) || ![1, 2].includes(data.schema) || data.vehicleId !== record.vehicleId || !/^[A-HJ-NPR-Z0-9]{17}$/.test(data.vin) || !Number.isSafeInteger(data.number) || data.number < 1 || data.label !== configurationRevisionLabel(data.number) || data.name !== data.label || !text(data.title, 120) || !text(data.summary, 500) || !data.summary.trim() || !text(data.publishedAt, 64) || !Number.isFinite(Date.parse(data.publishedAt)) || !object(data.actor) || !identifier(data.actor.id) || !identifier(data.actor.name) || !identifier(data.actor.deviceId) || !['admin', 'member'].includes(data.actor.role) || (data.previousRevisionId !== null && !identifier(data.previousRevisionId)) || !text(data.sourceFingerprint, 4_000_000) || !object(data.snapshot) || data.snapshot.schema !== data.schema || !Array.isArray(data.snapshot.sections)) fail()
   const sections = data.snapshot.sections
-  if (sections.length < 4 || new Set(sections.map(section => section.typeId)).size !== sections.length || builtinComponentTypes.some(type => !sections.some(section => section.typeId === type.id))) fail()
+  if (new Set(sections.map(section => section.typeId)).size !== sections.length) fail()
+  if (data.schema === 1) {
+    if (data.snapshot.reviewScope !== undefined || sections.length < 4 || builtinComponentTypes.some(type => !sections.some(section => section.typeId === type.id))) fail()
+  } else {
+    const scope = data.snapshot.reviewScope
+    if (!Array.isArray(scope)) return fail()
+    if (!sections.length || scope.length < 4 || scope.some(item => !object(item)) || new Set(scope.map(item => item.typeId)).size !== scope.length || builtinComponentTypes.some(type => !scope.some(item => item.typeId === type.id))) fail()
+    for (const item of scope) {
+      if (!object(item) || !identifier(item.typeId) || !identifier(item.name) || !Array.isArray(item.label) || item.label.length !== 2 || item.label.some(label => !identifier(label)) || !['active', 'disabled', 'removed'].includes(item.reviewState) || typeof item.included !== 'boolean' || item.included !== (item.reviewState === 'active') || !Number.isSafeInteger(item.definitionVersion) || item.definitionVersion < 1) fail()
+      const section = sections.find(section => section.typeId === item.typeId)
+      if (item.included !== Boolean(section) || section && (section.name !== item.name || JSON.stringify(section.label) !== JSON.stringify(item.label))) fail()
+      const builtin = builtinComponentTypes.find(type => type.id === item.typeId)
+      if (builtin && (item.name !== builtin.name || JSON.stringify(item.label) !== JSON.stringify(builtin.label))) fail()
+    }
+    if (sections.some(section => !scope.some(item => item.typeId === section.typeId))) fail()
+  }
   const ids = new Set<string>()
   for (const section of sections) {
     if (!object(section) || !identifier(section.typeId) || !identifier(section.name) || !Array.isArray(section.label) || section.label.length !== 2 || section.label.some(label => !identifier(label)) || !['installed', 'unknown', 'notInstalled'].includes(section.state) || !text(section.reason, 500) || !Array.isArray(section.components)) fail()
@@ -152,7 +184,7 @@ export function validateConfigurationRecords(records: readonly BusinessRecord[])
   for (const record of records.filter(row => row.kind === 'configurationRevision')) {
     const data = validateConfigurationRevisionRecord(record)
     if (!records.some(vehicle => vehicle.kind === 'vehicle' && vehicle.id === record.vehicleId)) fail()
-    if (data.snapshot.sections.some(section => !typeIds.has(section.typeId))) fail('COMPONENT_TYPE_NOT_FOUND')
+    if (data.snapshot.sections.some(section => !typeIds.has(section.typeId)) || data.snapshot.reviewScope?.some(scope => !typeIds.has(scope.typeId))) fail('COMPONENT_TYPE_NOT_FOUND')
     const group = grouped.get(record.vehicleId!) || []; group.push(record as ConfigurationRevisionRecord); grouped.set(record.vehicleId!, group)
   }
   for (const group of grouped.values()) {

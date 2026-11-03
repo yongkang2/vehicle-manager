@@ -126,7 +126,7 @@ export class Business {
           const definition = this.store.db.prepare("SELECT kind,data,archived FROM records WHERE id=?").get(typeId)
           const imported = maintenance === 'restore' ? (this.store.get<{ records: BusinessRecord[] }[]>('pendingConfigurationImports') || []).flatMap(entry => entry.records).find(record => record.kind === 'componentType' && record.id === typeId) : undefined
           if ((!definition || definition.kind !== 'componentType') && !imported) throw new AppError('COMPONENT_TYPE_NOT_FOUND', 409)
-          if (maintenance !== 'restore' && (!before || before.data.componentTypeId !== typeId) && definition && (definition.archived || JSON.parse(String(definition.data)).disabled)) throw new AppError('COMPONENT_TYPE_DISABLED', 409)
+          if ((this.store.get<number>('businessProtocol') || 1) < 4 && maintenance !== 'restore' && (!before || before.data.componentTypeId !== typeId) && definition && (definition.archived || JSON.parse(String(definition.data)).disabled)) throw new AppError('COMPONENT_TYPE_DISABLED', 409)
         }
       }
       if (before) {

@@ -7,6 +7,7 @@ import type { ComponentTypeCatalog } from '../shared/configuration-revisions'
 import { ApiError, createWorkspaceScope } from './api'
 import { translateBusiness } from './business-i18n'
 import type { Language } from './i18n'
+import { componentTypeBlocksNewEntries } from './component-review-policy'
 
 type Scope = ReturnType<typeof createWorkspaceScope>
 export type ComponentSectionsProps = {
@@ -58,9 +59,9 @@ export default function ComponentSections({ vehicle, records, typeId, language, 
   }
   return <div className="component-section">
     {!catalog.enabled && <Alert type="info" showIcon title={text('configurationDisabledNotice')} />}
-    {type.disabled && <Alert type="info" showIcon title={text('componentTypeDisabled')} description={text('componentTypeNotice')} />}
+    {catalog.policyEnabled && type.reviewState && type.reviewState !== 'active' ? <Alert type="info" showIcon title={text('configurationExcluded')} description={text('componentTypeWorkingDataNotice')} /> : type.disabled && <Alert type="info" showIcon title={text('componentTypeDisabled')} description={text('componentTypeNotice')} />}
     {typeId === 'thermal-management' && <Descriptions size="small" column={1} items={[{ key: 'thermal', label: text('thermal'), children: <Space wrap><span>{thermalSystemTypes.some(item => item === vehicle.data.thermal) ? text(String(vehicle.data.thermal)) : value(vehicle.data.thermal)}</span>{onEditThermal && <Button size="small" icon={<Pencil size={13} />} disabled={locked} onClick={onEditThermal}>{text('edit')}</Button>}</Space> }]} />}
-    <div className="section-toolbar"><h3>{type.label[at]}</h3><Button icon={<Plus size={15} />} disabled={locked || type.disabled || !catalog.enabled} onClick={() => { setUnknown(false); setEditor({ record: null, removal: false }) }}>{text('addComponent')}</Button></div>
+    <div className="section-toolbar"><h3>{type.label[at]}</h3><Button icon={<Plus size={15} />} disabled={locked || componentTypeBlocksNewEntries(type, catalog.policyEnabled) || !catalog.enabled} onClick={() => { setUnknown(false); setEditor({ record: null, removal: false }) }}>{text('addComponent')}</Button></div>
     <Table<BusinessRecord> rowKey="id" size="small" dataSource={items} scroll={{ x: Math.max(700, fields.length * 170 + 220) }} pagination={{ pageSize: 8, hideOnSinglePage: true }} locale={{ emptyText: text('componentNone') }} columns={[
       ...fields.map(field => ({ key: field.id, title: field.label[at], width: field.id === 'notes' ? 230 : 170, ellipsis: { showTitle: true }, render: (_: unknown, record: BusinessRecord) => <span title={value(record.data[field.id])}>{value(record.data[field.id])}</span> })),
       { key: 'state', title: text('status'), width: 135, render: (_, record) => <Tag>{record.archived ? text('archived') : record.data.removedAt ? `${text('removed')} · ${record.data.removedAt}` : text('installed')}</Tag> },

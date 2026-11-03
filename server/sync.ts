@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { Business, checksum, fromRow, now, reason } from './business.js'
-import { SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
+import { assertConfigurationProtocol, SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
 import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
 import { AppError, TeamDirectory } from './team.js'
@@ -236,7 +236,7 @@ export class BusinessSync {
   private async ingest(master: DatabaseSync, directory: string, head: BusinessHead, conflicts: SyncConflict[]): Promise<void> {
     this.acceptCanonical(master)
     const records = master.prepare(`SELECT * FROM records ORDER BY ${kinds},id`).all() as RecordRow[]
-    if (head.protocol === 3) { try { validateConfigurationRecords(records.map(fromRow)) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
+    if (head.protocol >= 3) { try { const view = records.map(fromRow); assertConfigurationProtocol(view, head.protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
     for (const row of records.filter(item => ['report', 'attachment'].includes(item.kind))) {
       const data = JSON.parse(row.data) as { checksum: string; size: number }
       if (!hashKey(data.checksum)) throw new AppError('INVALID_INPUT')
@@ -279,7 +279,7 @@ export class BusinessSync {
       const master = snapshot.db, directory = snapshot.directory, store = this.business.store
       const markers = snapshot.deletions()
       this.acceptCanonical(master)
-      let changed = !snapshot.head, protocol: 1 | 2 | 3 = snapshot.head?.protocol || 1
+      let changed = !snapshot.head, protocol: 1 | 2 | 3 | 4 = snapshot.head?.protocol || 1
       for (const entry of store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []) {
         const marker = validateVehicleDeletion(entry.deletion), existing = markers.find(item => item.vehicleId === marker.vehicleId)
         if (existing) { if (existing.id !== marker.id) throw new AppError('BACKUP_DELETION_CONFLICT', 409); continue }
@@ -289,10 +289,11 @@ export class BusinessSync {
         if (master.prepare('SELECT vehicle_id FROM vehicle_deletions WHERE request_id=?').get(marker.requestId) || snapshot.graph(marker.vehicleId).length || marker.recordIds.some(id => master.prepare('SELECT id FROM records WHERE id=?').get(id))) throw new AppError('BACKUP_DELETION_CONFLICT', 409)
         master.prepare('INSERT INTO vehicle_deletions VALUES(?,?,?)').run(marker.vehicleId, marker.requestId, JSON.stringify(marker))
         for (const change of store.db.prepare('SELECT * FROM changes WHERE vehicle_id=?').all(marker.vehicleId)) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
-        markers.push(marker); changed = true; protocol = Math.max(protocol, 2) as 2 | 3
+        markers.push(marker); changed = true; protocol = Math.max(protocol, 2) as 2 | 3 | 4
       }
       const configurationImports = (store.get<ConfigurationImport[]>('pendingConfigurationImports') || []).filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`configurationImport:${entry.id}`))
       if (configurationImports.length && protocol < 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+      if (protocol < 4 && configurationImports.some(entry => entry.records.some(record => isProtectedKind(record.kind) && record.data.schema === 2))) throw new AppError('CONFIGURATION_POLICY_NOT_ENABLED', 409)
       for (const entry of configurationImports) {
         const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
         const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
@@ -345,7 +346,7 @@ export class BusinessSync {
         master.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run(`configurationImport:${entry.id}`, '1')
         changed = true
       }
-      if (protocol === 3) { try { validateConfigurationRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
+      if (protocol >= 3) { try { const view = (master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow); assertConfigurationProtocol(view, protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
       if (changed) {
         await snapshot.publish(team.id, protocol)
       }

@@ -7,8 +7,8 @@ import { atomicFile, BusinessSync } from './sync.js'
 import { AppError, TeamDirectory } from './team.js'
 import type { Actor, BusinessRecord, Change } from '../shared/business.js'
 import type { Identity, Member, TeamDocument } from '../shared/types.js'
-import { componentTypeDefinitions, configurationRevisionLabel, configurationRevisionSummaries, configurationSections, configurationSnapshot, configurationSourceFingerprint, isProtectedKind, pendingComponentTypeView, validateConfigurationRecords, validateConfigurationRevisionRecord } from '../shared/configuration-revisions.js'
-import type { ComponentTypeCatalog, ComponentTypeData, ComponentTypeDefinition, ConfigurationImport, ConfigurationPreview, ConfigurationPublishRequest, ConfigurationPublicationReceipt, ConfigurationRevisionData, ConfigurationRevisionRecord, ConfigurationRevisionSummary, ConfigurationWorkingView } from '../shared/configuration-revisions.js'
+import { builtinComponentTypes, componentTypeDefinitions, configurationReviewScope, configurationRevisionLabel, configurationRevisionSummaries, configurationSections, configurationSnapshot, configurationSourceFingerprint, isProtectedKind, pendingComponentTypeView, validateConfigurationRecords, validateConfigurationRevisionRecord } from '../shared/configuration-revisions.js'
+import type { ComponentReviewState, ComponentTypeCatalog, ComponentTypeData, ComponentTypeDefinition, ConfigurationImport, ConfigurationPreview, ConfigurationPublishRequest, ConfigurationPublicationReceipt, ConfigurationRevisionData, ConfigurationRevisionRecord, ConfigurationRevisionSummary, ConfigurationWorkingView } from '../shared/configuration-revisions.js'
 
 export type ConfigurationContext = { directory: string; teamId: string; identity: Identity; actor: Actor; assertCurrent?: () => void; scopeKey?: string; syncEnabled?: boolean }
 type PreviewState = { actorKey: string; vehicleId: string; guard: string; previousRevisionId: string | null; expires: number }
@@ -39,11 +39,11 @@ export class ConfigurationRevisions {
   private localCatalog(records: BusinessRecord[]): ComponentTypeCatalog {
     const committed = new Set(this.business.list().filter(record => record.kind === 'componentType').map(record => record.id))
     const pending = new Map((this.business.store.get<ConfigurationImport[]>('pendingConfigurationImports') || []).flatMap(entry => entry.records).filter(record => record.kind === 'componentType' && !committed.has(record.id)).map(record => [record.id, record]))
-    return { enabled: (this.business.store.get<number>('businessProtocol') || 1) >= 3, types: componentTypeDefinitions(records).map(type => {
+    return { enabled: (this.business.store.get<number>('businessProtocol') || 1) >= 3, policyEnabled: (this.business.store.get<number>('businessProtocol') || 1) >= 4, types: componentTypeDefinitions(records).map(type => {
       const source = pending.get(type.id)
       if (!source) return type
       const name = String(source.data.name), suffix = type.id.slice(0, 8)
-      return { ...type, name, label: [`${name} (pending restore ${suffix})`, `${name}（待恢复 ${suffix}）`], disabled: true, pendingRestore: true }
+      return { ...type, name, label: type.builtin ? type.label : [`${name} (pending restore ${suffix})`, `${name}（待恢复 ${suffix}）`], disabled: true, pendingRestore: true }
     }) }
   }
   exportRecords(): BusinessRecord[] { return this.localRecords() }
@@ -135,7 +135,7 @@ export class ConfigurationRevisions {
         await snapshot.publish(context.teamId, 3)
       }
       await this.synchronization.ingestLocked(snapshot)
-      return { enabled: true, types: componentTypeDefinitions(protectedRecords(snapshot)) }
+      return { enabled: true, policyEnabled: (snapshot.head?.protocol || 1) >= 4, types: componentTypeDefinitions(protectedRecords(snapshot)) }
     })
   }
   async createType(context: ConfigurationContext, input: { name: string; description?: string; requestId?: string; reason?: string }): Promise<ComponentTypeDefinition> {
@@ -144,7 +144,7 @@ export class ConfigurationRevisions {
       this.requireEnabled(snapshot)
       const existing = this.receipt<{ requestId: string; type: ComponentTypeDefinition }>(snapshot, context, actor, requestId, 'createType', command)
       if (existing) { await this.synchronization.ingestLocked(snapshot); return existing.type }
-      const records = protectedRecords(snapshot), id = randomUUID(), created = now(), data: ComponentTypeData = { schema: 1, name, description, disabled: false, definitionVersion: 1 }
+      const records = protectedRecords(snapshot), id = randomUUID(), created = now(), data: ComponentTypeData = (snapshot.head?.protocol || 1) >= 4 ? { schema: 2, name, description, reviewState: 'active', definitionVersion: 1 } : { schema: 1, name, description, disabled: false, definitionVersion: 1 }
       const record: BusinessRecord = { id, kind: 'componentType', vehicleId: null, archived: false, version: 1, updated: created, data }
       const definition = safe(() => componentTypeDefinitions([...records, record]).find(type => type.id === id)!)
       this.assertContext(context)
@@ -159,27 +159,33 @@ export class ConfigurationRevisions {
       return definition
     }, false)
   }
-  async updateType(context: ConfigurationContext, id: string, input: { version: number; name: string; description?: string; disabled: boolean; requestId?: string; reason?: string }): Promise<ComponentTypeDefinition> {
-    const name = normalizedText(input?.name, 120, true), description = normalizedText(input.description || '', 4000), requestId = input.requestId || randomUUID(), explanation = input.reason === undefined ? `Updated component type ${name}` : reason(input.reason), command = { id, version: input.version, name, description, disabled: input.disabled, reason: explanation }
-    if (typeof input.disabled !== 'boolean' || !Number.isSafeInteger(input.version)) throw new AppError('INVALID_INPUT')
+  async updateType(context: ConfigurationContext, id: string, input: { version: number; name: string; description?: string; disabled?: boolean; reviewState?: ComponentReviewState; requestId?: string; reason?: string }): Promise<ComponentTypeDefinition> {
+    const policyRequested = Object.hasOwn(input || {}, 'reviewState')
+    const name = normalizedText(input?.name, 120, true), description = normalizedText(input.description || '', 4000), requestId = input.requestId || randomUUID(), explanation = policyRequested ? reason(input.reason) : input.reason === undefined ? `Updated component type ${name}` : reason(input.reason), command = { id, version: input.version, name, description, ...(policyRequested ? { reviewState: input.reviewState } : { disabled: input.disabled }), reason: explanation }
+    if ((policyRequested ? !['active', 'disabled', 'removed'].includes(String(input.reviewState)) : typeof input.disabled !== 'boolean') || !Number.isSafeInteger(input.version)) throw new AppError('INVALID_INPUT')
     return this.locked(context, true, async (snapshot, actor) => {
       this.requireEnabled(snapshot)
       const existingReceipt = this.receipt<{ requestId: string; type: ComponentTypeDefinition }>(snapshot, context, actor, requestId, 'updateType', command)
       if (existingReceipt) { await this.synchronization.ingestLocked(snapshot); return existingReceipt.type }
-      const records = protectedRecords(snapshot), current = records.find(record => record.id === id && record.kind === 'componentType')
-      if (!current) throw new AppError('COMPONENT_TYPE_NOT_FOUND', 404)
-      if (current.data.definitionVersion !== input.version) { await this.synchronization.ingestLocked(snapshot); throw new AppError('VERSION_CONFLICT', 409) }
-      const data: ComponentTypeData = { schema: 1, name, description, disabled: input.disabled, definitionVersion: input.version + 1 }, updated = now(), record = { ...current, data, updated }
-      const definition = safe(() => componentTypeDefinitions(records.map(row => row.id === id ? record : row)).find(type => type.id === id)!)
+      const records = protectedRecords(snapshot), current = records.find(record => record.id === id && record.kind === 'componentType'), builtin = builtinComponentTypes.find(type => type.id === id)
+      const currentDefinition = safe(() => componentTypeDefinitions(records).find(type => type.id === id))
+      if (!currentDefinition || !current && !builtin) throw new AppError('COMPONENT_TYPE_NOT_FOUND', 404)
+      if (builtin && (!policyRequested && (snapshot.head?.protocol || 1) < 4 || name !== builtin.name || description !== builtin.description)) throw new AppError('INVALID_INPUT')
+      if (currentDefinition.version !== input.version) { await this.synchronization.ingestLocked(snapshot); throw new AppError('VERSION_CONFLICT', 409) }
+      const policyEnabled = policyRequested || (snapshot.head?.protocol || 1) >= 4
+      const data: ComponentTypeData = policyEnabled ? { schema: 2, name, description, reviewState: policyRequested ? input.reviewState! : currentDefinition.reviewState || (currentDefinition.disabled ? 'disabled' : 'active'), definitionVersion: input.version + 1 } : { schema: 1, name, description, disabled: input.disabled!, definitionVersion: input.version + 1 }
+      const updated = now(), record: BusinessRecord = { id, kind: 'componentType', vehicleId: null, archived: false, version: (current?.version || 0) + 1, data, updated }
+      const nextRecords = [...records.filter(row => row.id !== id), record]
+      const definition = safe(() => componentTypeDefinitions(nextRecords).find(type => type.id === id)!)
       this.assertContext(context)
       snapshot.db.exec('BEGIN IMMEDIATE')
       try {
-        snapshot.db.prepare('UPDATE records SET data=?,version=version+1,updated=? WHERE id=?').run(JSON.stringify(data), updated, id)
-        this.audit(snapshot, actor, record, 'componentType.updated', explanation, current.data)
+        snapshot.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,version=excluded.version,updated=excluded.updated').run(id, record.kind, null, null, JSON.stringify(data), 0, record.version, updated)
+        this.audit(snapshot, actor, record, 'componentType.updated', explanation, current?.data || null)
         this.remember(snapshot, context, actor, requestId, 'updateType', command, { requestId, type: definition })
         snapshot.db.exec('COMMIT')
       } catch (error) { snapshot.db.exec('ROLLBACK'); throw error }
-      await snapshot.publish(context.teamId, 3); await this.synchronization.ingestLocked(snapshot)
+      await snapshot.publish(context.teamId, policyEnabled ? 4 : 3); await this.synchronization.ingestLocked(snapshot)
       return definition
     }, false)
   }
@@ -194,7 +200,8 @@ export class ConfigurationRevisions {
       if (this.previews.size >= 100) this.previews.delete(this.previews.keys().next().value!)
       const token = randomBytes(32).toString('hex'), expires = Date.now() + 15 * 60 * 1000
       this.previews.set(token, { actorKey: this.previewActorKey(context, actor), vehicleId, guard: this.sourceGuard(records, vehicleId), previousRevisionId: previous?.revisionId || null, expires })
-      return { token, expires, vehicleId, vin: String(vehicle.data.vin), previousRevisionId: previous?.revisionId || null, previousNumber: previous?.number || 0, sections: configurationSections(records, vehicleId, componentTypeDefinitions(records), previousRecord?.data) }
+      const types = componentTypeDefinitions(records)
+      return { token, expires, vehicleId, vin: String(vehicle.data.vin), previousRevisionId: previous?.revisionId || null, previousNumber: previous?.number || 0, sections: configurationSections(records, vehicleId, types, previousRecord?.data), ...((snapshot.head?.protocol || 1) >= 4 ? { reviewScope: configurationReviewScope(records, vehicleId, types, previousRecord?.data) } : {}) }
     })
   }
   async publish(context: ConfigurationContext, vehicleId: string, request: ConfigurationPublishRequest): Promise<ConfigurationPublicationReceipt> {
@@ -213,9 +220,10 @@ export class ConfigurationRevisions {
       const previous = configurationRevisionSummaries(records).find(row => row.vehicleId === vehicleId)
       if ((previous?.revisionId || null) !== preview.previousRevisionId) throw new AppError('REVISION_PREVIEW_CHANGED', 409)
       const previousRecord = records.find(row => row.id === previous?.revisionId) as ConfigurationRevisionRecord | undefined
-      const sections = configurationSections(records, vehicleId, componentTypeDefinitions(records), previousRecord?.data), captured = safe(() => configurationSnapshot(sections, request.decisions))
+      const types = componentTypeDefinitions(records), sections = configurationSections(records, vehicleId, types, previousRecord?.data), policyEnabled = (snapshot.head?.protocol || 1) >= 4
+      const captured = safe(() => configurationSnapshot(sections, request.decisions, policyEnabled ? configurationReviewScope(records, vehicleId, types, previousRecord?.data) : undefined))
       const number = (previous?.number || 0) + 1, id = randomUUID(), publishedAt = now(), label = configurationRevisionLabel(number)
-      const data: ConfigurationRevisionData = { schema: 1, name: label, vehicleId, vin: String(vehicle.data.vin), number, label, title, summary, publishedAt, actor, previousRevisionId: previous?.revisionId || null, sourceFingerprint: configurationSourceFingerprint(sections), snapshot: captured }
+      const data: ConfigurationRevisionData = { schema: policyEnabled ? 2 : 1, name: label, vehicleId, vin: String(vehicle.data.vin), number, label, title, summary, publishedAt, actor, previousRevisionId: previous?.revisionId || null, sourceFingerprint: configurationSourceFingerprint(sections), snapshot: captured }
       const record: ConfigurationRevisionRecord = { id, kind: 'configurationRevision', vehicleId, data, archived: false, version: 1, updated: publishedAt }
       safe(() => validateConfigurationRecords([...records, record]))
       const receipt: ConfigurationPublicationReceipt = { requestId: request.requestId, revisionId: id, vehicleId, number, label, publishedAt, localSynced: false }

@@ -5,10 +5,15 @@ import { randomUUID } from 'node:crypto'
 import { Business, checksum, fromRow, now } from './business.js'
 import type { RecordRow } from './business.js'
 import { AppError } from './team.js'
-import type { DeleteCounts, VehicleDeletion } from '../shared/business.js'
+import type { BusinessRecord, DeleteCounts, VehicleDeletion } from '../shared/business.js'
 import { isProtectedKind, validateConfigurationRecords, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 
-export type BusinessHead = { protocol: 1 | 2 | 3; teamId: string; revision: string; sequence: number; checksum: string; created: string }
+export type BusinessHead = { protocol: 1 | 2 | 3 | 4; teamId: string; revision: string; sequence: number; checksum: string; created: string }
+
+/** Policy records and reduced review snapshots require the protocol-4 reader. */
+export function assertConfigurationProtocol(records: readonly BusinessRecord[], protocol: number): void {
+  if (protocol < 4 && records.some(record => isProtectedKind(record.kind) && record.data.schema === 2)) throw corrupt()
+}
 type AtomicWriter = (destination: string, bytes: Buffer | string) => Promise<void>
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const digest = /^[a-f0-9]{64}$/
@@ -48,7 +53,7 @@ export class SharedBusinessSnapshot {
       let head: BusinessHead | null = null
       if (bytes) {
         try { head = JSON.parse(bytes.toString()) as BusinessHead } catch { throw corrupt() }
-        if (!head || ![1, 2, 3].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
+        if (!head || ![1, 2, 3, 4].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
         const sequence = business.store.get<number>('businessSequence') || 0
         if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || head.protocol < (business.store.get<number>('businessProtocol') || 1)) throw new AppError('BUSINESS_ROLLBACK', 409)
         const snapshot = await fs.readFile(path.join(directory, 'snapshots', `${head.revision}.sqlite`))
@@ -71,8 +76,9 @@ export class SharedBusinessSnapshot {
       if (head?.protocol === 1 && markers.length) throw corrupt()
       const records = (result.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)
       if (head && head.protocol < 3 && records.some(record => isProtectedKind(record.kind) || record.kind === 'part' && record.data.category === 'component')) throw corrupt()
-      if (head?.protocol === 3) {
+      if (head && head.protocol >= 3) {
         try {
+          assertConfigurationProtocol(records, head.protocol)
           validateConfigurationRecords(records)
           for (const entry of result.db.prepare("SELECT key,value FROM metadata WHERE key LIKE 'configurationRequest:%'").all()) validateConfigurationReceiptEntry({ key: String(entry.key), value: String(entry.value) })
         } catch { throw corrupt() }
@@ -96,13 +102,17 @@ export class SharedBusinessSnapshot {
     for (const row of graph) { if (row.kind === 'configurationRevision') counts.configurationRevision = (counts.configurationRevision || 0) + 1; else if (row.kind in counts) counts[row.kind]++; else throw corrupt() }
     return counts
   }
-  async publish(teamId: string, requestedProtocol: 1 | 2 | 3, revision = randomUUID(), sequence = (this.head?.sequence || 0) + 1): Promise<BusinessHead> {
-    const protocol = Math.max(requestedProtocol, this.head?.protocol || 1) as 1 | 2 | 3
+  async publish(teamId: string, requestedProtocol: 1 | 2 | 3 | 4, revision = randomUUID(), sequence = (this.head?.sequence || 0) + 1): Promise<BusinessHead> {
+    const protocol = Math.max(requestedProtocol, this.head?.protocol || 1) as 1 | 2 | 3 | 4
     this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('teamId', teamId)
     this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('sequence', String(sequence))
     if (protocol >= 2) this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('protocol', String(protocol))
-    if (protocol === 3) {
-      try { validateConfigurationRecords((this.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)) } catch { throw corrupt() }
+    if (protocol >= 3) {
+      try {
+        const records = (this.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)
+        assertConfigurationProtocol(records, protocol)
+        validateConfigurationRecords(records)
+      } catch { throw corrupt() }
     }
     if (this.db.prepare('PRAGMA integrity_check').get()!.integrity_check !== 'ok' || this.db.prepare('PRAGMA foreign_key_check').all().length) throw corrupt()
     this.master!.close(); this.master = null
