@@ -8,8 +8,6 @@ const root = path.dirname(fileURLToPath(import.meta.url))
 const application = existsSync(path.join(root, 'app', 'dist-server')) ? path.join(root, 'app') : root
 const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
 const appVersion = process.env.VEHICLE_MANAGER_RELEASE_VERSION || String(packageInfo.version)
-const packaged = application !== root
-const updateRequest = path.join(root, '.updates', 'request.json')
 let prepared
 
 function context() {
@@ -28,7 +26,7 @@ async function probe(port) {
 function alive(pid) { try { process.kill(pid, 0); return true } catch { return false } }
 
 async function stop() {
-  const { dataDir, stateFile, instanceId } = await context()
+  const { stateFile, instanceId } = await context()
   const state = await readState(stateFile)
   if (!state) { console.log('No service is running for this application folder.'); return }
   const current = await probe(state.port)
@@ -43,8 +41,7 @@ async function launch() {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required.')
   const { dataDir, stateFile, instanceId } = await context()
   if (existsSync(`${dataDir}.update-lock`)) {
-    const owner = await fs.readFile(`${dataDir}.update-lock`, 'utf8')
-    if (owner !== process.env.VEHICLE_MANAGER_UPDATE_LOCK_OWNER || !alive(Number(owner))) throw new Error('An application update is in progress. Do not start an older release.')
+    throw new Error('A legacy application update lock exists. Finish the old update before starting this version.')
   }
   const managed = process.argv.includes('--managed')
   let managedExit
@@ -86,8 +83,7 @@ async function launch() {
         try {
           child = fork(entry, [], {
             cwd: application, execArgv: [], detached: !managed, windowsHide: true, stdio: ['ignore', log, log, 'ipc'],
-            env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir,
-              ...(packaged ? { VEHICLE_MANAGER_PROGRAM_DIR: root, VEHICLE_MANAGER_UPDATE_REQUEST: updateRequest } : {}) },
+            env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir },
           })
           if (managed) managedExit = new Promise(resolve => child.once('exit', code => resolve(code ?? 1)))
           port = await new Promise((resolve, reject) => {
@@ -114,23 +110,8 @@ async function launch() {
   if (managedExit && await managedExit !== 0) throw new Error('The managed service did not exit cleanly.')
 }
 
-async function applyUpdate(version) {
-  if (!version) throw new Error('The update version is missing.')
-  await fs.appendFile(path.join(root, 'launcher.log'), `${new Date().toISOString()} Installing ${version}\n`).catch(() => {})
-  const { installUpdate } = await import(pathToFileURL(path.join(root, 'update.mjs')).href)
-  const { dataDir } = await context()
-  const result = await installUpdate(root, dataDir, version)
-  await fs.appendFile(path.join(root, 'launcher.log'), `${new Date().toISOString()} Installed ${result.to}; backup ${result.backup}\n`).catch(() => {})
-}
-
 async function main() {
-  if (process.argv.includes('--check') || process.argv.includes('--download')) {
-    const update = await import(pathToFileURL(path.join(root, 'update.mjs')).href)
-    const result = process.argv.includes('--download') ? await update.downloadUpdate(root) : await update.checkUpdate(root)
-    console.log(JSON.stringify(result))
-    return
-  }
-  if (process.argv.includes('--apply')) return applyUpdate(process.argv[process.argv.indexOf('--apply') + 1])
+  if (['--check', '--download', '--apply'].some(flag => process.argv.includes(flag))) throw new Error('Automatic updates are not supported. Download releases manually.')
   if (process.argv.includes('--stop')) return stop()
   return launch()
 }

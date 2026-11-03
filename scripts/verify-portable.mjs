@@ -15,7 +15,7 @@ async function verifyExtracted(root) {
   const data = path.join(root, 'acceptance-data')
   assert.ok(existsSync(runtime), 'Extracted package is missing runtime/node.exe')
   assert.ok(existsSync(launcher), 'Extracted package is missing launcher.mjs')
-  assert.ok(existsSync(path.join(root, 'update.mjs')), 'Extracted package is missing update.mjs')
+  assert.ok(!existsSync(path.join(root, 'update.mjs')), 'Portable package must not contain the retired updater')
 
   const appRequire = createRequire(path.join(app, 'package.json'))
   const readableStream = appRequire('readable-stream')

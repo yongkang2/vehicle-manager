@@ -11,7 +11,7 @@ const manifest = JSON.parse(await fs.readFile(path.join(project, 'package.json')
 const argument = process.argv.indexOf('--version')
 const requested = argument >= 0 ? process.argv[argument + 1] : process.env.VEHICLE_MANAGER_PACKAGE_VERSION
 if (requested !== undefined) {
-  if (!/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(String(requested))) throw new Error('Use a release version such as --version 1.1.1 so the updater can compare it.')
+  if (!/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(String(requested))) throw new Error('Use a release version such as --version 1.1.1 with three numeric components.')
   manifest.version = String(requested)
 }
 const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)
@@ -32,7 +32,7 @@ try {
   for (const folder of ['dist', 'dist-server']) await fs.cp(path.join(project, folder), path.join(application, folder), { recursive: true })
   if (requested !== undefined) await fs.writeFile(path.join(application, 'dist-server', 'shared', 'version.js'), `export const appVersion = ${JSON.stringify(manifest.version)};\n`)
   await fs.cp(path.join(production, 'node_modules'), path.join(application, 'node_modules'), { recursive: true })
-  for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs', 'update.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
+  for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
   await fs.copyFile(path.join(project, 'scripts', 'verify-portable.mjs'), path.join(release, 'verify-portable.mjs'))
   await fs.writeFile(path.join(application, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', dependencies: manifest.dependencies, overrides: manifest.overrides }, null, 2))
   await fs.copyFile(path.join(project, '使用说明.md'), path.join(release, '使用说明.md'))

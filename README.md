@@ -1,6 +1,6 @@
 # STELLANTIS Vehicle Data Management
 
-Version 1.1.3, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
+Version 1.1.4, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
 
 ## Current Scope
 
@@ -117,7 +117,7 @@ CSV files use UTF-8 BOM, comma delimiters, CRLF rows, quoted special characters 
 
 ## Portable Distribution
 
-The **Version and downloads** panel shows the current application version and links to the [GitHub project](https://github.com/yongkang2/vehicle-manager) and [release downloads](https://github.com/yongkang2/vehicle-manager/releases). In-app automatic update controls are unavailable; this panel does not check, download or install updates automatically. Before manually changing versions, save work, stop the old service, independently back up local data and the shared folder, and upgrade collaborating clients together. Existing launcher/update backend code is unchanged.
+The **Version and downloads** panel shows the current application version and links to the [GitHub project](https://github.com/yongkang2/vehicle-manager) and [release downloads](https://github.com/yongkang2/vehicle-manager/releases). In-app automatic update controls are unavailable; this panel does not check, download or install updates automatically. Before manually changing versions, save work, stop the old service, independently back up local data and the shared folder, and upgrade collaborating clients together. Automatic update endpoints, installation processes and packaged updater scripts have been removed. Existing data, backup formats and shared protocols remain unchanged.
 
 ```powershell
 npm run package:portable
