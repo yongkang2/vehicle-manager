@@ -40,13 +40,13 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
 .page-content { padding: 34px 36px 28px; max-width: 1680px }
 .business-workspace .page-heading { margin-bottom: 25px }
 .page-heading .ant-btn-primary { padding-inline: 20px }
-.workspace-layout .fleet-stats { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px 0; margin-bottom: 25px }
+.workspace-layout .fleet-stats { background: var(--surface); border: 1px solid #e6eaf1; border-radius: 10px; padding: 22px 0; margin-bottom: 25px }
 .workspace-layout .fleet-stats>div, .workspace-layout .fleet-stats>div:first-child { padding: 0 24px }
 .workspace-layout .fleet-stats span { font-size: 12px }
 .workspace-layout .fleet-stats strong { color: var(--ink); font-size: 28px; font-weight: 600; margin-top: 6px; line-height: 1.25; letter-spacing: -.025em }
-.vehicle-table-region { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px 8px }
+.workspace-layout .vehicle-table-region { background: var(--surface); border: 1px solid #e6eaf1; border-radius: 10px; padding: 18px 20px 8px }
 .vehicle-column-resize-hint { font-size: 11px; color: var(--muted) }
-.vehicles-table .ant-table-thead>tr>th { background: #f0f4fa; color: #465873; font-size: 12px; font-weight: 600 }
+.workspace-layout .vehicles-table .ant-table-thead>tr>th { background: #f6f8fb; color: #58677d; font-size: 12px; font-weight: 600 }
 .vehicles-table .ant-table-tbody>tr>td { padding-block: 18px; border-bottom-color: #edf0f5 }
 .workspace-layout .vehicles-table .record-link { justify-content: flex-start; margin-inline: 0; text-align: left }
 .workspace-layout .record-link strong { color: var(--ink); font-size: 13px; font-weight: 600 }
@@ -77,9 +77,6 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
 .auth-language-control .ant-segmented-item { min-width: 64px; text-align: center }
 /* Quiet refinement of existing operational surfaces, without layout changes. */
 .workspace-layout .page-heading h1 { font-weight: 600; letter-spacing: -.02em }
-.workspace-layout .vehicle-table-region { border-color: #e6eaf1; border-radius: 10px }
-.workspace-layout .vehicles-table .ant-table-thead>tr>th { background: #f6f8fb; color: #58677d }
-.workspace-layout .fleet-stats { border-color: #e6eaf1; border-radius: 10px }
 @media(max-width:1050px) {
     .workspace-layout { grid-template-columns: 202px minmax(0, 1fr) }
     .sidebar { padding-inline: 12px }
@@ -104,7 +101,7 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
     .workspace-layout .fleet-stats>div, .workspace-layout .fleet-stats>div:first-child, .workspace-layout .fleet-stats>div:nth-child(3) { padding: 0 12px }
     .workspace-layout .fleet-stats strong { font-size: 24px }
     .workspace-layout .fleet-stats span { font-size: 11px }
-    .vehicle-table-region { padding: 14px 10px 4px }
+    .workspace-layout .vehicle-table-region { padding: 14px 10px 4px }
     .workspace-footer { margin-inline: 16px }
     .auth-screen { padding: 84px 24px 36px }
     .auth-content { width: 360px }

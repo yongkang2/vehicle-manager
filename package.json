@@ -1,7 +1,7 @@
 {
   "name": "stellantis-vehicle-manager",
   "private": true,
-  "version": "1.1.3",
+  "version": "1.1.4",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4411 --strictPort",
@@ -34,7 +34,6 @@
     "multer": "^2.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "semver": "^7.8.5",
     "unzipper": "^0.12.5",
     "ws": "8.22.0"
   },
