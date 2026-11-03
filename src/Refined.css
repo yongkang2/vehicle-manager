@@ -1,0 +1,123 @@
+/* Shared visual language; interaction and data owners stay in their existing components. */
+:root {
+    --scroll-thumb: #a6b2c5;
+    --scroll-track: #edf1f7;
+    --scroll-hover: #7788a4;
+    --scroll-active: #243882;
+    scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+    scrollbar-width: thin;
+    background: var(--canvas);
+    color: var(--ink)
+}
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) var(--scroll-track) }
+*::-webkit-scrollbar { width: 10px; height: 10px }
+*::-webkit-scrollbar-track { background: var(--scroll-track) }
+*::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid var(--scroll-track); border-radius: 8px }
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-hover) }
+*::-webkit-scrollbar-thumb:active { background: var(--scroll-active) }
+html { scrollbar-gutter: stable }
+::selection { background: #dce5ff; color: var(--navy) }
+input, textarea { caret-color: var(--brand) }
+textarea { resize: none }
+h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025em }
+.eyebrow { display: none }
+.workspace-layout { grid-template-columns: 236px minmax(0, 1fr); background: var(--canvas) }
+.sidebar { background: var(--navy); border: 0; color: #fff; padding: 31px 18px 22px; --line: #3d4a69; --muted: #c0cbe0 }
+.sidebar-brand { padding: 0 14px; margin-bottom: 49px }
+.sidebar-brand img { filter: brightness(0) invert(1); width: 164px; height: 46px }
+.sidebar-brand>span { font-size: 11px; line-height: 1.7; margin-top: 14px; color: #c0cbe0 }
+.sidebar nav { gap: 6px }
+.sidebar nav button { color: #c0cbe0; border-radius: 6px; padding: 13px 14px; transition: background-color 120ms ease, color 120ms ease }
+.sidebar nav button:hover:not(:disabled):not(.active) { color: #fff; background: #29395d }
+.sidebar nav button.active { color: #fff; background: #344b8b; font-weight: 600 }
+.sidebar nav button:focus-visible, .sidebar .personal-trigger:focus-visible { outline-color: #c3d1ff }
+.sidebar .build-label { color: #c0cbe0; font-size: 11px; padding: 20px 12px }
+.sidebar .account-row { padding: 20px 10px 0; gap: 12px }
+.sidebar .avatar { color: #fff; background: #344b8b; width: 36px; height: 36px; border-radius: 50% }
+.sidebar .account-row small { color: #c0cbe0 }
+.workspace-topbar { min-height: 70px; padding-inline: 36px; background: var(--surface); border-color: var(--line) }
+.current-team-label { color: var(--ink); font-size: 12px }
+.page-content { padding: 34px 36px 28px; max-width: 1680px }
+.business-workspace .page-heading { margin-bottom: 25px }
+.page-heading .ant-btn-primary { padding-inline: 20px }
+.workspace-layout .fleet-stats { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px 0; margin-bottom: 25px }
+.workspace-layout .fleet-stats>div, .workspace-layout .fleet-stats>div:first-child { padding: 0 24px }
+.workspace-layout .fleet-stats span { font-size: 12px }
+.workspace-layout .fleet-stats strong { color: var(--ink); font-size: 28px; font-weight: 600; margin-top: 6px; line-height: 1.25; letter-spacing: -.025em }
+.vehicle-table-region { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px 8px }
+.vehicle-column-resize-hint { font-size: 11px; color: var(--muted) }
+.vehicles-table .ant-table-thead>tr>th { background: #f0f4fa; color: #465873; font-size: 12px; font-weight: 600 }
+.vehicles-table .ant-table-tbody>tr>td { padding-block: 18px; border-bottom-color: #edf0f5 }
+.workspace-layout .vehicles-table .record-link { justify-content: flex-start; margin-inline: 0; text-align: left }
+.workspace-layout .record-link strong { color: var(--ink); font-size: 13px; font-weight: 600 }
+.workspace-layout .record-link small { color: var(--muted) }
+.workspace-layout .car-symbol { background: #edf2fb; color: var(--brand); border-radius: 7px }
+.workspace-layout .record-link:hover strong { color: var(--brand); text-decoration: underline; text-underline-offset: 3px }
+.workspace-footer { margin-inline: 36px; font-size: 11px; padding-block: 17px }
+.vehicle-detail-drawer .ant-drawer-header { padding: 24px 28px; background: #f3f6fb }
+.vehicle-detail-drawer .ant-drawer-title { color: var(--ink); font-size: 21px; font-weight: 600 }
+.vehicle-detail-drawer .ant-drawer-body { padding: 20px 28px }
+.vehicle-overview .ant-descriptions-item-label { color: var(--muted) }
+.vehicle-overview .ant-descriptions-item-content { font-size: 14px }
+.ant-btn { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease }
+.ant-btn-primary:not(:disabled):active { transform: translateY(1px) }
+/* A stable single-column entry: locale, tabs and validation cannot recenter it. */
+.auth-screen { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; justify-items: center; padding: clamp(76px, 12svh, 120px) 26px 48px; background: var(--surface) }
+.auth-content { width: 360px; max-width: 100%; animation: none }
+.auth-content>.auth-logo { display: block; width: 220px; height: 70px; margin: 0 auto 22px }
+.auth-content h1 { display: flex; align-items: center; justify-content: center; min-height: 64px; text-align: center; font-size: 24px; font-weight: 600; line-height: 1.3; margin-bottom: 24px; text-wrap: balance }
+.auth-content .ant-tabs { margin-bottom: 16px }
+.auth-content .ant-tabs-nav-list { width: 100% }
+.auth-content .ant-tabs-tab { flex: 1; justify-content: center; margin: 0 !important; padding: 12px 4px }
+.auth-content .ant-form-item { margin-bottom: 24px }
+.auth-content .ant-input-affix-wrapper { min-height: 44px; border-radius: 8px }
+.auth-submit { height: 44px; border-radius: 8px; box-shadow: none }
+.auth-bottom, .auth-developer-credit { text-align: center }
+.auth-language-control { position: absolute; right: 28px; top: 22px }
+.auth-language-control .ant-segmented-item { min-width: 64px; text-align: center }
+/* Quiet refinement of existing operational surfaces, without layout changes. */
+.workspace-layout .page-heading h1 { font-weight: 600; letter-spacing: -.02em }
+.workspace-layout .vehicle-table-region { border-color: #e6eaf1; border-radius: 10px }
+.workspace-layout .vehicles-table .ant-table-thead>tr>th { background: #f6f8fb; color: #58677d }
+.workspace-layout .fleet-stats { border-color: #e6eaf1; border-radius: 10px }
+@media(max-width:1050px) {
+    .workspace-layout { grid-template-columns: 202px minmax(0, 1fr) }
+    .sidebar { padding-inline: 12px }
+    .sidebar-brand { padding-inline: 10px }
+    .sidebar-brand img { width: 150px }
+    .page-content { padding: 26px 24px }
+    .workspace-topbar { padding-inline: 24px }
+}
+@media(max-width:700px) {
+    .workspace-layout { display: block }
+    .sidebar { padding: 18px 20px 0; height: auto }
+    .sidebar-brand { padding: 0; margin-bottom: 12px }
+    .sidebar-brand img { width: 145px; height: 35px }
+    .sidebar-brand>span { margin-top: 5px }
+    .sidebar nav { gap: 3px 15px; flex-direction: row; flex-wrap: wrap }
+    .sidebar nav button { padding: 12px 0; border-radius: 0 }
+    .sidebar nav button.active { background: transparent; border-bottom-color: #bdcaff }
+    .page-content { padding: 24px 16px }
+    h1 { font-size: 25px }
+    .workspace-topbar { padding: 12px 16px }
+    .workspace-layout .fleet-stats { padding-block: 17px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 0 }
+    .workspace-layout .fleet-stats>div, .workspace-layout .fleet-stats>div:first-child, .workspace-layout .fleet-stats>div:nth-child(3) { padding: 0 12px }
+    .workspace-layout .fleet-stats strong { font-size: 24px }
+    .workspace-layout .fleet-stats span { font-size: 11px }
+    .vehicle-table-region { padding: 14px 10px 4px }
+    .workspace-footer { margin-inline: 16px }
+    .auth-screen { padding: 84px 24px 36px }
+    .auth-content { width: 360px }
+    .auth-content h1 { font-size: 22px; min-height: 64px }
+    .auth-content>.auth-logo { width: 200px; height: 64px; margin-bottom: 18px }
+    .auth-language-control { right: 18px; top: 18px }
+
+}
+@media(prefers-reduced-motion:reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important }
+}
+@media(forced-colors:active) {
+    * { scrollbar-color: auto }
+    .sidebar nav button.active { outline: 1px solid Highlight }
+    .sidebar-brand img { filter: none }
+}

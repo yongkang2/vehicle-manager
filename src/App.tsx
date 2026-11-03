@@ -17,6 +17,8 @@ import { translateBusiness } from './business-i18n'
 import type { BusinessRefreshHandle, BusinessView } from './BusinessApp'
 import { VehicleTableFilterProvider } from './VehicleTableFilterSession'
 import './App.css'
+import './Refined.css'
+import { palette, fontFamily } from './theme'
 
 const BusinessApp = lazy(() => import('./BusinessApp'))
 const businessNavigation = [{ view: 'vehicles', icon: CarFront }, { view: 'dove', icon: FileSpreadsheet }, { view: 'reports', icon: Files }, { view: 'history', icon: History }, { view: 'sync', icon: FolderSync }, { view: 'audit', icon: ShieldCheck }] as const
@@ -137,5 +139,5 @@ export default function App() {
   const text = dictionaries[language]
   useEffect(() => { localStorage.setItem('vdm-language', language); document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en'; document.title = `STELLANTIS · ${text.product}` }, [language, text.product])
   const languageControl = <Segmented aria-label="Language / 语言" value={language} options={[{ label: 'English', value: 'en' }, { label: '中文', value: 'zh' }]} onChange={value => setLanguage(value as Language)} />
-  return <ConfigProvider locale={language === 'zh' ? zhCN : enUS} theme={{ token: { colorPrimary: '#263781', colorText: '#232a35', colorTextSecondary: '#586577', colorBorder: '#d6dde7', borderRadius: 5, fontFamily: 'Bahnschrift, DengXian, Microsoft YaHei UI, sans-serif', fontSize: 14, controlHeight: 40, controlHeightSM: 32, motion: false } }}><AntApp><Application language={language} text={text} languageControl={languageControl} /></AntApp></ConfigProvider>
+  return <ConfigProvider locale={language === 'zh' ? zhCN : enUS} theme={{ token: { colorPrimary: palette.brand, colorText: palette.ink, colorTextSecondary: palette.muted, colorBorder: palette.line, borderRadius: 6, fontFamily, fontSize: 14, controlHeight: 40, controlHeightSM: 32, motion: false } }}><AntApp><Application language={language} text={text} languageControl={languageControl} /></AntApp></ConfigProvider>
 }
