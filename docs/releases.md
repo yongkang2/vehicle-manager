@@ -1,5 +1,11 @@
 # 版本与发布
 
+## Required publication language
+
+All new commit subjects and bodies, PR titles and descriptions, Release titles and notes, asset names and packaged instructions must be written in English. Use `type(scope): concise English description` for commits and PR titles, and `Vehicle Manager vX.Y.Z` for official Release titles. PR titles describe the change rather than advertising a development version. Validation and upgrade notes must also be in English.
+
+Run `node scripts/check-language.mjs`; the `english` CI job rejects Chinese text in PR/commit/release metadata and the English guide/template. Authors must still review actual English wording. Future packages contain `User-Guide.md` from `docs/portable-guide.en.md` and the existing English `README.txt`. Existing bilingual UI support is unchanged. Published historical ZIPs remain immutable; packaging changes take effect in the next version.
+
 最新正式版本以 [GitHub Latest](https://github.com/yongkang2/vehicle-manager/releases/latest) 为准。本地源码可能是尚未发布的开发版本，不能据此断言线上最新版。
 
 ## 唯一版本来源

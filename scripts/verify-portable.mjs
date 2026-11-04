@@ -12,6 +12,7 @@ async function verifyExtracted(root) {
   const runtime = path.join(root, 'runtime', 'node.exe')
   const launcher = path.join(root, 'launcher.mjs')
   const app = path.join(root, 'app')
+  assert.doesNotMatch(await fs.readFile(path.join(root, 'User-Guide.md'), 'utf8'), /\p{Script=Han}/u, 'Packaged instructions must use English')
   const packageVersion = JSON.parse(await fs.readFile(path.join(app, 'package.json'), 'utf8')).version
   assert.equal(JSON.parse(await fs.readFile(path.join(app, 'dist', 'version.json'), 'utf8')).version, packageVersion, 'Frontend and package version differ')
   assert.ok(path.basename(root).startsWith(`vehicle-manager-${packageVersion}-win-x64-`), 'Package folder and application version differ')
