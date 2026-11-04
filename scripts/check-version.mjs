@@ -28,8 +28,10 @@ if (process.argv.includes('--release')) {
     return false
   }
   assert.ok(newer(version, latest.tag_name.replace(/^v/, '')), 'Release version must exceed the latest published version')
-  assert.equal(run('git', ['ls-remote', 'origin', `refs/tags/v${version}`]), '', 'Release tag already exists')
-  run('git', ['fetch', 'origin', `refs/tags/${latest.tag_name}`])
-  run('git', ['merge-base', '--is-ancestor', 'FETCH_HEAD', 'HEAD'])
+  const refs = JSON.parse(run('gh', ['api', `repos/yongkang2/vehicle-manager/git/matching-refs/tags/v${version}`]))
+  assert.ok(!refs.some(ref => ref.ref === `refs/tags/v${version}`), 'Release tag already exists')
+  const commit = run('git', ['rev-parse', 'HEAD'])
+  const status = run('gh', ['api', `repos/yongkang2/vehicle-manager/compare/${latest.tag_name}...${commit}`, '--jq', '.status'])
+  assert.ok(['ahead', 'identical'].includes(status), 'Release source must contain the previous official version')
 }
 console.log(`Version consistency passed: ${version}`)
