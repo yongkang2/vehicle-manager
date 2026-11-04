@@ -333,9 +333,10 @@ test('upgrade gate requires an administrator and rejects clients below its minim
     assert.equal(bound.members.length, 2)
     assert.equal(bound.bindings.filter(binding => binding.memberId === gated.members[1].id && binding.enabled).length, 2)
     assert.equal(bound.members[1].role, 'admin')
-    const nextVersion = new TeamDirectory(null, '1.2.0')
+    const futureVersion = `${Number(appVersion.split('.')[0]) + 1}.0.0`
+    const nextVersion = new TeamDirectory(null, futureVersion)
     const advanced = await nextVersion.enableUpgradeGate(shared, team.id, admin, 'Raise minimum version')
-    assert.equal(advanced.minWritableVersion, '1.2.0')
+    assert.equal(advanced.minWritableVersion, futureVersion)
     await assert.rejects(current.read(shared, team.id), { code: 'CLIENT_UPGRADE_REQUIRED' })
   } finally { await fs.rm(root, { recursive: true, force: true }) }
 })

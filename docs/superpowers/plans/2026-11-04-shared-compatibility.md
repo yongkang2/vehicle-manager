@@ -1,6 +1,6 @@
 # Shared data compatibility implementation plan
 
-Goal: support existing protocol 1/2/3 without data loss, preserve UI, reject future protocols safely, release 1.1.5.
+Goal: support existing protocol 1/2/3 without data loss, preserve UI, reject future protocols safely, release 1.2.1.
 Approved design: the compatibility and release safeguards described in this conversation.
 
 - [x] Create isolated fix/shared-data-version-compatibility branch from latest main.
