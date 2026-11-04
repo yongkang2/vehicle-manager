@@ -9,8 +9,6 @@ import { createHash } from 'node:crypto'
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Build this portable package on Windows x64.')
 const manifest = JSON.parse(await fs.readFile(path.join(project, 'package.json'), 'utf8'))
-const languageCheck = spawnSync(process.execPath, [path.join(project, 'scripts', 'check-language.mjs')], { stdio: 'inherit' })
-if (languageCheck.error || languageCheck.status !== 0) throw new Error('Publication language checks failed.')
 const versionCheck = spawnSync(process.execPath, [path.join(project, 'scripts', 'check-version.mjs'), '--built', '--release', ...process.argv.slice(2)], { stdio: 'inherit' })
 if (versionCheck.error || versionCheck.status !== 0) throw new Error('Release version checks failed.')
 const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)

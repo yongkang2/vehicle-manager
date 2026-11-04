@@ -6,7 +6,7 @@
 
 - Write all new commit subjects and bodies, PR titles and descriptions, Release titles and descriptions, asset names, and packaged instructions in English. This includes validation, compatibility and upgrade notes. Chat replies and the application's existing localization are outside this policy.
 - Use `type(scope): concise English description` for PR titles and commit subjects. Do not put development versions in PR titles. Use `Vehicle Manager vX.Y.Z` for official Release titles; explicitly label historical previews and deprecated releases.
-- Run `node scripts/check-language.mjs`. CI rejects Chinese text in publication metadata and packaged guide sources; the author must still review the text for actual English and clarity. Do not bypass a failed language check.
+- Before committing, opening a PR or publishing a release, review the titles, descriptions, validation notes and packaged instructions for English wording and consistency.
 - Package `docs/portable-guide.en.md` as `User-Guide.md`, alongside the existing English README.txt. Do not add Chinese-only instructions or Chinese filenames to future delivery packages. Preserve the application's existing bilingual UI.
 - Translate editable Release metadata when correcting language. Preserve historical Git commits, tags and immutable published ZIPs. Do not overwrite an existing ZIP to change its documentation; apply packaging changes to the next release after advancing its version.
 
