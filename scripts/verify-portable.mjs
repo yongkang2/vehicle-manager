@@ -15,6 +15,7 @@ async function verifyExtracted(root) {
   const data = path.join(root, 'acceptance-data')
   assert.ok(existsSync(runtime), 'Extracted package is missing runtime/node.exe')
   assert.ok(existsSync(launcher), 'Extracted package is missing launcher.mjs')
+  assert.ok(!existsSync(path.join(root, 'update.mjs')), 'Portable package must not contain the retired updater')
 
   const appRequire = createRequire(path.join(app, 'package.json'))
   const readableStream = appRequire('readable-stream')
@@ -59,6 +60,8 @@ async function verifyExtracted(root) {
     for (let attempt = 0; attempt < 200 && existsSync(path.join(data, 'service.json')); attempt++) await new Promise(resolve => setTimeout(resolve, 50))
     assert.equal(existsSync(path.join(data, 'service.json')), false, 'The packaged service did not stop cleanly')
     stopped = true
+    const workflows = await execute(runtime, [path.join(root, 'smoke-portable.mjs'), root], { cwd: root, env, timeout: 90000 })
+    process.stdout.write(workflows.stdout)
     console.log(JSON.stringify({ bundledRuntime: true, readableStream: true, process: '0.11.10', string_decoder: '1.3.0', safe_buffer: '5.2.1', bootstrap: bootstrap.status, loginPage: loginPage.status, javascript: javascript.status, gracefulStop: stopped }))
   } finally {
     if (started && !stopped) await execute(runtime, [launcher, '--stop'], { cwd: root, env, timeout: 15000 }).catch(() => {})

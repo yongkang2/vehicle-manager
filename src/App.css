@@ -1,18 +1,20 @@
-.language-control {
-    position: fixed;
+.auth-language-control {
+    position: absolute;
     right: 28px;
     top: 20px;
-    z-index: 30
+    z-index: 1
 }
 
-.language-control .ant-segmented {
-    font-size: 11px;
+.language-control .ant-segmented,
+.auth-language-control .ant-segmented {
+    font-size: 12px;
     background: #edf0f5
 }
 
 .auth-screen {
     min-height: 100svh;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     place-items: center;
     background: radial-gradient(ellipse at 50% 30%, #fff 25%, #f5f6fa 100%);
     padding: 90px 25px 65px
@@ -20,6 +22,7 @@
 
 .auth-content {
     width: 360px;
+    min-width: 0;
     max-width: 100%;
     animation: arrive .4s ease-out
 }
@@ -55,8 +58,8 @@
 
 .auth-bottom {
     text-align: center;
-    color: #9aa3b2;
-    font-size: 10px;
+    color: var(--muted);
+    font-size: 12px;
     margin-top: 27px
 }
 
@@ -95,8 +98,8 @@
 
 .sidebar-brand>span {
     display: block;
-    font-size: 10px;
-    color: #9aa2b0;
+    font-size: 12px;
+    color: var(--muted);
     margin-top: 7px
 }
 
@@ -115,9 +118,14 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 12px;
-    color: #7f899a;
+    font-size: 13px;
+    color: var(--muted);
     cursor: pointer
+}
+
+.sidebar nav button:hover:not(:disabled):not(.active) {
+    background: #f3f5f8;
+    color: #232a35
 }
 
 .sidebar nav button.active {
@@ -137,8 +145,8 @@
 
 .build-label {
     display: block;
-    color: #a0a7b3;
-    font-size: 10px;
+    color: var(--muted);
+    font-size: 12px;
     padding: 15px 8px
 }
 
@@ -168,15 +176,15 @@
 
 .account-row strong {
     display: block;
-    font-size: 12px;
+    font-size: 13px;
     overflow: hidden;
     text-overflow: ellipsis
 }
 
 .account-row small {
     display: block;
-    color: #9aa2b0;
-    font-size: 10px;
+    color: var(--muted);
+    font-size: 12px;
     margin-top: 5px
 }
 
@@ -190,12 +198,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 73px;
-    padding: 0 38px;
+    min-height: 72px;
+    padding: 12px 32px;
     border-bottom: 1px solid var(--line);
-    font-size: 11px;
-    color: #8993a2;
-    background: #ffffffc4;
+    font-size: 13px;
+    color: var(--muted);
+    background: #fff;
     gap: 12px
 }
 
@@ -212,22 +220,23 @@
 .workspace-topbar>div {
     display: flex;
     align-items: center;
-    padding-right: 190px;
-    gap: 6px
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 8px
 }
 
 .workspace-topbar .ant-tag {
     margin: 0;
-    font-size: 10px
+    font-size: 12px
 }
 
 .workspace-topbar .ant-btn {
-    width: 30px;
-    height: 30px
+    width: 32px;
+    height: 32px
 }
 
 .page-content {
-    padding: 38px;
+    padding: 28px 32px;
     max-width: 1520px;
     width: 100%;
     margin: 0 auto;
@@ -239,12 +248,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 30px
+    margin-bottom: 24px
 }
 
 .eyebrow {
-    font-size: 9px;
-    color: #98a2b2;
+    font-size: 11px;
+    color: var(--muted);
     display: block;
     margin-bottom: 12px
 }
@@ -458,8 +467,8 @@
 
 .record-title small {
     display: block;
-    color: #98a2b2;
-    font-size: 10px;
+    color: var(--muted);
+    font-size: 12px;
     margin-top: 6px
 }
 
@@ -576,9 +585,29 @@
 .personal-commands {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+    gap: 24px;
     margin-top: 24px
+}
+
+.personal-workspace-actions,
+.personal-app-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px
+}
+
+.personal-app-actions {
+    border-top: 1px solid var(--line);
+    padding-top: 20px
+}
+
+.personal-team-heading .ant-tag {
+    flex-shrink: 0;
+    margin-inline-end: 0
+}
+
+.personal-team-state {
+    line-height: 1.7
 }
 
 .personal-commands .ant-btn {
@@ -598,6 +627,10 @@
 .current-team-label {
     min-width: 0;
     overflow-wrap: anywhere
+}
+
+.language-control {
+    margin-left: 8px
 }
 
 .workspace-topbar {
@@ -633,12 +666,35 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin: 4px 0 20px
+    margin: 0 0 24px
 }
 
 .team-toolbar>.ant-input-affix-wrapper {
-    width: 300px;
+    width: 320px;
     max-width: 100%
+}
+
+.team-toolbar>.muted {
+    font-size: 12px;
+    line-height: 1.7
+}
+
+.team-management>.page-heading {
+    margin-bottom: 24px
+}
+
+.team-management>.page-heading .ant-btn-icon-only {
+    width: 40px;
+    height: 40px
+}
+
+.team-management>.ant-tabs>.ant-tabs-nav {
+    margin-bottom: 24px
+}
+
+.team-management .ant-table-cell .row-actions {
+    gap: 8px;
+    flex-wrap: wrap
 }
 
 .team-summary-separator {
@@ -766,9 +822,18 @@
     }
 }
 
+.workspace-footer {
+    color: var(--muted);
+    font-size: 12px
+}
+
+.workspace-layout .ant-btn-sm {
+    min-height: 32px
+}
+
 @media(min-width:1550px) {
     .page-content {
-        padding: 45px 55px
+        padding: 32px 40px
     }
 
     .workspace-topbar {
@@ -811,7 +876,7 @@
 }
 
 @media(max-width:700px) {
-    .language-control {
+    .auth-language-control {
         right: 18px;
         top: 17px
     }
@@ -852,7 +917,7 @@
     }
 
     .sidebar-brand>span {
-        font-size: 9px
+        font-size: 12px
     }
 
     .sidebar nav {
@@ -865,7 +930,7 @@
         padding: 12px 0;
         border-radius: 0;
         gap: 7px;
-        font-size: 11px;
+        font-size: 13px;
         border-bottom: 2px solid transparent
     }
 
@@ -884,15 +949,20 @@
     }
 
     .workspace-topbar {
-        height: 53px;
-        padding: 0 20px;
-        font-size: 10px
+        min-height: 0;
+        padding: 12px 20px;
+        font-size: 13px;
+        flex-direction: column;
+        align-items: stretch
     }
 
     .workspace-topbar>div {
-        padding-right: 0;
         flex-shrink: 0;
-        gap: 3px
+        gap: 6px
+    }
+
+    .language-control {
+        margin-left: auto
     }
 
     .workspace-topbar b {
@@ -900,7 +970,7 @@
     }
 
     .workspace-topbar .ant-tag {
-        font-size: 9px;
+        font-size: 12px;
         padding: 2px 5px
     }
 
@@ -910,7 +980,7 @@
     }
 
     .page-content {
-        padding: 27px 20px
+        padding: 24px 20px
     }
 
     .page-heading {
@@ -967,7 +1037,7 @@
 
     .workspace-footer {
         margin: 0 20px;
-        font-size: 9px
+        font-size: 12px
     }
 
     .mobile-logout {

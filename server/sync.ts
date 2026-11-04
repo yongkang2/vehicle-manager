@@ -6,7 +6,7 @@ import { Business, checksum, fromRow, now, reason } from './business.js'
 import { assertConfigurationProtocol, SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
 import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
-import { AppError, TeamDirectory } from './team.js'
+import { AppError, TeamDirectory, assertTeamLock } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
 import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 import { componentTypeDefinitions, isProtectedKind, validateConfigurationRecords, validateConfigurationRevisionRecord, validateComponentTypeRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
@@ -31,10 +31,12 @@ const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'part' THEN 1 ELSE 2 END"
 type PreviewState = { vehicleId: string; actorKey: string; graph: string; version: number; vin: string; expires: number }
 
 export async function atomicFile(destination: string, bytes: Buffer | string, beforeRename?: () => void): Promise<void> {
+  await assertTeamLock()
   const temporary = `${destination}.${randomUUID()}.tmp`
   try {
     const handle = await fs.open(temporary, 'wx')
     try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+    await assertTeamLock()
     beforeRename?.()
     await fs.rename(temporary, destination)
   } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
@@ -50,9 +52,13 @@ async function immutableFile(filename: string, bytes: Buffer): Promise<void> {
 
 export class BusinessSync {
   private running: Promise<SyncStatus> | null = null
+  private runningFull = false
   private previews = new Map<string, PreviewState>()
   private phase: SyncStatus['phase'] = 'idle'
   private error: string | null = null
+  // Only reuse a fully ingested snapshot in this process. Explicit sync and
+  // maintenance always verify files; background checks also do so every 5 min.
+  private verified: { directory: string; head: string; at: number } | null = null
   constructor(readonly business: Business, readonly teams: TeamDirectory) {}
   status(): SyncStatus {
     const store = this.business.store
@@ -62,18 +68,21 @@ export class BusinessSync {
     return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
   }
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
-  synchronize(directory: string, teamId: string, identity: Identity): Promise<SyncStatus> {
-    if (this.running) return this.running
+  synchronize(directory: string, teamId: string, identity: Identity, options: { ifChanged?: boolean } = {}): Promise<SyncStatus> {
+    if (this.running) return !options.ifChanged && !this.runningFull ? this.running.then(() => this.synchronize(directory, teamId, identity, options)) : this.running
+    this.runningFull = !options.ifChanged
     this.phase = 'syncing'
-    this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team))).catch(error => {
+    this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team, options.ifChanged))).catch(error => {
+      this.verified = null
       this.error = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
-      this.phase = ['SHARE_BUSY', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
+      this.phase = ['SHARE_BUSY', 'SHARE_LOCK_LOST', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
       return this.status()
     }).finally(() => { this.running = null })
     return this.running
   }
   async refreshLocked(directory: string, team: TeamDocument): Promise<SyncStatus> { return this.cycle(directory, team) }
   async ingestLocked(snapshot: SharedBusinessSnapshot): Promise<boolean> {
+    this.verified = null
     if (!snapshot.head) throw new AppError('SHARE_CORRUPTED', 409)
     try {
       this.acceptCanonical(snapshot.db)
@@ -273,7 +282,18 @@ export class BusinessSync {
       if (imports.length) store.set('pendingConfigurationImports', imports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`configurationImport:${entry.id}`)))
     })
   }
-  private async cycle(shared: string, team: TeamDocument): Promise<SyncStatus> {
+  private async cycle(shared: string, team: TeamDocument, ifChanged = false): Promise<SyncStatus> {
+    const previous = this.verified, state = this.status()
+    if (ifChanged && previous?.directory === shared && Date.now() >= previous.at && Date.now() - previous.at < 300000 && !state.pending && !state.conflicts.length) {
+      // Runs under the existing shared lock, after fresh membership/device
+      // validation. Even an unchanged HEAD must pass rollback/protocol checks.
+      const head = await SharedBusinessSnapshot.readHead(this.business, shared, team.id)
+      if (head && JSON.stringify(head) === previous.head && head.revision === state.revision) {
+        this.error = null; this.phase = 'ready'
+        return this.status()
+      }
+    }
+    this.verified = null
     const snapshot = await SharedBusinessSnapshot.open(this.business, shared, team.id, atomicFile)
     try {
       const master = snapshot.db, directory = snapshot.directory, store = this.business.store
@@ -352,6 +372,7 @@ export class BusinessSync {
       }
       await this.ingest(snapshot.db, directory, snapshot.head!, conflicts)
       this.error = null; this.phase = conflicts.length ? 'conflict' : 'ready'
+      this.verified = { directory: shared, head: JSON.stringify(snapshot.head), at: Date.now() }
       return this.status()
     } finally { await snapshot.close() }
   }

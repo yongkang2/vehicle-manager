@@ -4,7 +4,7 @@ import multer from 'multer'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
-import { Business, reason, validateManualRecordFields } from './business.js'
+import { Business, checksum, reason, validateManualRecordFields } from './business.js'
 import { BusinessSync, atomicFile } from './sync.js'
 import { SharedBusinessSnapshot } from './deletions.js'
 import { DoveService, compareReports } from './dove.js'
@@ -75,6 +75,11 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     assertCurrent()
     return { directory: context.configuration.sharedPath, teamId: context.configuration.teamId, identity: context.identity, actor: context.actor, scopeKey: req.get('X-Workspace-Token') || '', syncEnabled: context.syncEnabled, assertCurrent }
   }
+  const checkForUpdates = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity, { ifChanged: true }) : synchronization.status()
+  function auditEntries() {
+    const team = store.get<TeamDocument>('cachedTeam')
+    return store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || accounts.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id }))
+  }
   const router = express.Router()
   function writeRoute(method: 'post' | 'put' | 'get' | 'delete', route: string, ...handlers: RequestHandler[]) {
     const action = handlers.pop()!
@@ -94,9 +99,10 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const configurationMutation = ['POST', 'PUT'].includes(req.method) && (localPath === '/configuration-revisions/enable' || localPath === '/component-types' || localPath.startsWith('/component-types/') || /^\/vehicles\/[^/]+\/configuration-revisions(?:\/preview)?\/?$/.test(localPath))
         const canonicalMaintenance = deletePreview || configurationMutation || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && req.path === '/restore')
+        const workspaceRead = req.method === 'GET' && req.path === '/workspace'
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead) {
-          const state = await sync(req.businessContext)
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !(workspaceRead && req.query.local === '1')) {
+          const state = await (workspaceRead && req.query.full !== '1' ? checkForUpdates(req.businessContext) : sync(req.businessContext))
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
         }
@@ -109,6 +115,14 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       // Maintenance handlers must start outside the normal-write context.
       next()
     } catch (error) { next(error) }
+  })
+  // One authorized, synchronous local snapshot replaces separate records,
+  // history and sync reads. The fingerprint includes unsynchronized local edits.
+  router.get('/workspace', (req: BusinessRequest, res) => {
+    if (req.query.audit === '1' && req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
+    const data = { ...configurationRevisions.workingView(), changes: business.history(), audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }
+    const revision = checksum(JSON.stringify(data))
+    res.json({ revision, ...(req.query.known === revision ? {} : { data }), sync: synchronization.status() })
   })
   router.get('/records', (req, res) => {
     const kind = req.query.kind ? String(req.query.kind) : undefined
@@ -158,8 +172,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   })
   router.get('/audit', (req: BusinessRequest, res) => {
     if (req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
-    const team = store.get<TeamDocument>('cachedTeam')
-    res.json(store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || accounts.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id })))
+    res.json(auditEntries())
   })
   router.get('/sync', (req, res) => res.json(synchronization.status()))
   router.get('/sync/quarantined', (req, res) => res.json(store.quarantineRows()))
@@ -404,7 +417,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     try {
       const team = await teams.read(configuration.sharedPath, configuration.teamId); cache(team)
       const binding = team.bindings.find(item => item.deviceId === store.deviceId && item.enabled && team.members.some(member => member.id === item.memberId && member.enabled) && accounts.db.prepare('SELECT 1 FROM sessions WHERE user_id=? AND workspace_id=? AND sync_enabled=1 AND expires>?').get(item.localUserId, configuration.teamId, Date.now()))
-      if (binding) await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' })
+      if (binding) await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' }, { ifChanged: true })
     } catch { return }
   }
   return { business, synchronization, configurationRevisions, tick }

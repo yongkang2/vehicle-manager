@@ -1,5 +1,6 @@
 export type Language = 'en' | 'zh'
 const en = {
+  programUpdates: 'Version and downloads',
   product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
   username: 'Username', recentUsernameHint: 'Choose a previous account or enter a username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
   local: 'Local device', online: 'Connected', offline: 'Offline', refresh: 'Refresh', setupTitle: 'Connect your workspace', path: 'Shared folder path', test: 'Test connection', later: 'Set up later',
@@ -19,6 +20,7 @@ const en = {
   withdrawWarning: 'Withdraw this account’s pending request from the original team? This requires a reachable shared folder. If unavailable, you can disconnect this session, but the remote request remains.', reloadPage: 'Reload page',
 }
 const zh: Record<keyof typeof en, string> = {
+  programUpdates: '版本与下载',
   product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', recentUsernameHint: '选择历史账号，或输入用户名', displayName: '姓名', password: '密码',
   account: '本地账号', developer: '开发者', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',
   path: '共享文件夹路径', test: '测试连接', later: '稍后配置', notConfigured: '尚未配置共享目录', emptyFolder: '已验证为空目录', existingTeam: '发现已有团队', checks: '读取、写入和重命名检查通过',
@@ -88,7 +90,8 @@ const errorPairs: Record<string, [string, string]> = {
   SHARE_ACCESS_DENIED: ['Read/write access was denied. Ask your administrator to grant access.', '目录读写权限不足，请联系管理员授权。'],
   SHARE_NOT_DIRECTORY: ['The path is not a folder.', '该路径不是文件夹。'], SHARE_NOT_EMPTY: ['This folder is not empty and will not be overwritten.', '目录已有其他内容，程序不会覆盖。'],
   UNSUPPORTED_TEAM: ['The team file is damaged or uses an unsupported format.', '团队文件损坏或格式不受支持。'], WRONG_TEAM: ['This is a different team. Existing configuration was not replaced.', '该目录属于其他团队，现有配置未被替换。'],
-  SHARE_BUSY: ['Another client holds the team lock. Retry later; do not delete an active lock.', '其他客户端正持有团队锁，请稍后重试；不要删除仍在使用的锁。'], SHARE_IO_ERROR: ['The shared folder operation failed. Check network and permissions.', '共享目录操作失败，请检查网络和权限。'],
+  SHARE_BUSY: ['Shared operations are busy. Retry shortly; abandoned locks recover automatically after two minutes without a heartbeat. Do not delete active locks.', '共享操作繁忙，请稍后重试；连续两分钟无心跳的遗留锁会自动恢复，请勿手动删除活动锁。'], SHARE_IO_ERROR: ['The shared folder operation failed. Check network and permissions.', '共享目录操作失败，请检查网络和权限。'],
+  SHARE_LOCK_LOST: ['The shared lock expired or became unavailable. Further publication was stopped. Reconnect and synchronize; check the result before retrying.', '共享锁已过期或无法验证，已停止后续提交。请恢复连接并同步，核对操作结果后再重试。'],
   ADMIN_REQUIRED: ['An enabled administrator on an approved device is required.', '需要已批准设备上的有效管理员。'], LAST_ADMIN: ['The last effective administrator cannot be disabled, demoted or lose their only approved device.', '不能停用、降级最后一名有效管理员，或撤销其唯一获批设备。'],
   MEMBER_IS_ADMIN: ['Administrators cannot be deleted. Change the role to member first, while keeping an effective administrator.', '不能直接删除管理员。请先调整为普通成员，并确保团队仍有有效管理员。'], TEAM_CONFIRMATION_REQUIRED: ['Review the consequences and explicitly confirm this operation.', '请核对操作后果并完成最终确认。'],
   REQUEST_CHANGED: ['This request changed. Refresh and retry.', '申请已变化，请刷新后重试。'], MEMBER_UNAVAILABLE: ['The selected team member is unavailable.', '所选团队成员不可用。'],

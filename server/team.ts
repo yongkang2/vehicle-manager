@@ -1,6 +1,10 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { hostname } from 'node:os'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { Binding, ConnectionCheck, Identity, Member, Role, TeamDocument } from '../shared/types.js'
 import { appVersion } from '../shared/version.js'
 
@@ -11,6 +15,93 @@ const created = () => new Date().toISOString()
 const application = 'stellantis-vehicle-manager'
 const filename = 'team.json'
 const lockName = '.vehicle-manager-team-lock'
+const lockStale = 120000
+const lockUpdate = 10000
+const lockWait = 3000
+type TeamLease = { directory: string; owner: string; content: string; renewed: number; lost: boolean }
+const activeLease = new AsyncLocalStorage<TeamLease>()
+
+async function checkLease(lease: TeamLease): Promise<void> {
+  try {
+    if (lease.lost || performance.now() - lease.renewed >= lockStale) throw new Error('expired')
+    const entries = await fs.readdir(lease.directory)
+    if (entries.length !== 1 || entries[0] !== path.basename(lease.owner) || await fs.readFile(lease.owner, 'utf8') !== lease.content) throw new Error('replaced')
+    if (lease.lost || performance.now() - lease.renewed >= lockStale) throw new Error('expired')
+  } catch {
+    lease.lost = true
+    throw new AppError('SHARE_LOCK_LOST', 409)
+  }
+}
+
+export async function assertTeamLock(): Promise<void> {
+  const lease = activeLease.getStore()
+  if (lease) await checkLease(lease)
+}
+
+async function recoverLock(directory: string, lock: string): Promise<boolean> {
+  const probe = path.join(directory, `.vdm-probe-${randomUUID()}`)
+  try {
+    const entries = await fs.readdir(lock)
+    if (entries.some(name => name !== 'owner.json' && !/^lease-[a-f0-9-]{36}\.json$/.test(name))) return false
+    const files = entries.map(name => path.join(lock, name))
+    const targets = files.length ? files : [lock]
+    const observed = await Promise.all(targets.map(file => fs.stat(file)))
+    await fs.writeFile(probe, '', { flag: 'wx' })
+    const currentTime = (await fs.stat(probe)).mtimeMs
+    if (observed.some(stat => currentTime - stat.mtimeMs < lockStale)) return false
+    const current = await Promise.all(targets.map(file => fs.stat(file)))
+    if (current.some((stat, index) => stat.mtimeMs !== observed[index].mtimeMs || stat.ino !== observed[index].ino)) return false
+    for (const file of files) await fs.unlink(file).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error })
+    await fs.rmdir(lock).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes((error as NodeJS.ErrnoException).code || '')) throw error })
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
+    throw error
+  } finally { await fs.unlink(probe).catch(() => {}) }
+}
+
+async function acquireLease(directory: string): Promise<TeamLease> {
+  const lock = path.join(directory, lockName), deadline = performance.now() + lockWait
+  await fs.stat(directory)
+  while (true) {
+    let acquired = false
+    const token = randomUUID(), owner = path.join(lock, `lease-${token}.json`)
+    try {
+      await fs.mkdir(lock)
+      acquired = true
+      const lease: TeamLease = { directory: lock, owner, content: JSON.stringify({ token, host: hostname(), process: process.pid, created: created() }), renewed: performance.now(), lost: false }
+      await fs.writeFile(owner, lease.content, { flag: 'wx' })
+      await checkLease(lease)
+      return lease
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (acquired) {
+        await fs.unlink(owner).catch(() => {})
+        await fs.rmdir(lock).catch(() => {})
+        if ((error instanceof AppError && error.code === 'SHARE_LOCK_LOST') || ['ENOENT', 'EACCES', 'EPERM'].includes(code || '')) {
+          if (performance.now() >= deadline) {
+            if (['EACCES', 'EPERM'].includes(code || '')) throw error
+            throw new AppError('SHARE_BUSY', 409)
+          }
+          await delay(40 + Math.random() * 80)
+          continue
+        }
+        throw error
+      }
+      if (['EACCES', 'EPERM'].includes(code || '')) {
+        if (performance.now() >= deadline) throw error
+        await delay(40 + Math.random() * 80)
+        continue
+      }
+      if (code !== 'EEXIST') throw error
+      if (performance.now() >= deadline) throw new AppError('SHARE_BUSY', 409)
+      try { if (await recoverLock(directory, lock)) continue } catch (recoveryError) {
+        if (!['EACCES', 'EPERM'].includes((recoveryError as NodeJS.ErrnoException).code || '') || performance.now() >= deadline) throw recoveryError
+      }
+      await delay(Math.min(40 + Math.random() * 80, Math.max(1, deadline - performance.now())))
+    }
+  }
+}
 
 export function normalizeDirectory(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 1024 || value.includes('\0') || !path.isAbsolute(value.trim())) throw new AppError('INVALID_PATH')
@@ -47,6 +138,7 @@ async function atomicDocument(directory: string, team: TeamDocument): Promise<vo
   try {
     const handle = await fs.open(temporary, 'wx')
     try { await handle.writeFile(JSON.stringify(team, null, 2)); await handle.sync() } finally { await handle.close() }
+    await assertTeamLock()
     await fs.rename(temporary, path.join(directory, filename))
   } finally { await fs.rm(temporary, { force: true }).catch(() => { }) }
 }
@@ -72,22 +164,40 @@ function event(team: TeamDocument, actorId: string, action: string, targetId: st
 }
 
 async function locked<T>(directory: string, work: () => Promise<T>): Promise<T> {
-  const lock = path.join(directory, lockName)
-  let acquired = false
-  const token = randomUUID()
+  let lease: TeamLease | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let updating: Promise<void> | undefined
+  let stopped = false
+  const schedule = () => {
+    timer = setTimeout(() => {
+      updating = (async () => {
+        await checkLease(lease!)
+        const renewed = performance.now()
+        await fs.writeFile(lease!.owner, lease!.content, { flag: 'r+' })
+        if (performance.now() - lease!.renewed >= lockStale) throw new Error('expired')
+        lease!.renewed = renewed
+      })().catch(() => { lease!.lost = true }).finally(() => { if (!stopped && !lease!.lost) schedule() })
+    }, lockUpdate)
+    timer.unref()
+  }
   try {
-    await fs.stat(directory)
-    try { await fs.mkdir(lock); acquired = true } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new AppError('SHARE_BUSY', 409)
-      throw error
-    }
-    await fs.writeFile(path.join(lock, 'owner.json'), JSON.stringify({ token, process: process.pid, created: created() }), { flag: 'wx' })
-    return await work()
+    lease = await acquireLease(directory)
+    schedule()
+    return await activeLease.run(lease, async () => {
+      await assertTeamLock()
+      const result = await work()
+      await assertTeamLock()
+      return result
+    })
   } catch (error) { return mapFileError(error) }
   finally {
-    if (acquired) {
-      const owner = await fs.readFile(path.join(lock, 'owner.json'), 'utf8').then(value => JSON.parse(value) as { token: string }).catch(() => null)
-      if (owner?.token === token) await fs.rm(lock, { recursive: true }).catch(() => { })
+    stopped = true
+    if (lease) lease.lost = true
+    clearTimeout(timer)
+    await updating
+    if (lease) {
+      await fs.unlink(lease.owner).catch(() => {})
+      await fs.rmdir(lease.directory).catch(() => {})
     }
   }
 }

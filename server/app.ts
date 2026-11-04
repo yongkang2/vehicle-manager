@@ -74,7 +74,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     next()
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
-  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
+  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: process.env.VEHICLE_MANAGER_RELEASE_VERSION || appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
   if (browserPresence && presenceToken) app.post('/api/local/browser-presence-token', (req, res) => res.json({ token: presenceToken }))
   app.post('/api/local/shutdown', (req, res) => {
     const supplied = req.get('X-Control-Token') || ''

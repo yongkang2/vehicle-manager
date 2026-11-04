@@ -63,7 +63,7 @@ test('first portable launch finds one adjacent older release data directory', as
   }
 })
 
-test('first portable launch refuses to choose between multiple old data directories', async () => {
+test('first portable launch picks the most recently used old data directory', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-data-ambiguous-'))
   const local = path.join(root, 'local'), parent = path.join(root, 'releases')
   const previousLocal = process.env.LOCALAPPDATA, previousOverride = process.env.VEHICLE_MANAGER_DATA_DIR
@@ -72,11 +72,45 @@ test('first portable launch refuses to choose between multiple old data director
   try {
     const newRelease = path.join(parent, 'vehicle-manager-1.1.0-win-x64-new')
     await fs.mkdir(newRelease, { recursive: true })
-    for (const name of ['vehicle-manager-1.0.1-win-x64-first', 'vehicle-manager-1.0.2-win-x64-second']) {
-      const data = path.join(parent, name, 'data'); await fs.mkdir(data, { recursive: true }); await fs.writeFile(path.join(data, 'local.sqlite'), name)
+    const older = path.join(parent, 'vehicle-manager-1.0.1-win-x64-first'), newer = path.join(parent, 'vehicle-manager-1.0.2-win-x64-second')
+    for (const [name, since] of [[older, '2026-01-05T08:00:00Z'], [newer, '2026-01-09T08:00:00Z']] as const) {
+      const data = path.join(name, 'data'); await fs.mkdir(data, { recursive: true })
+      const file = path.join(data, 'local.sqlite'); await fs.writeFile(file, name)
+      await fs.utimes(file, new Date(since), new Date(since))
     }
-    await assert.rejects(resolveDataDirectory(newRelease), /Multiple previous release data directories were found/)
-    await assert.rejects(fs.stat(path.join(local, 'VehicleManager', 'data')), { code: 'ENOENT' })
+    const destination = await resolveDataDirectory(newRelease)
+    assert.equal(await fs.readFile(path.join(destination, 'local.sqlite'), 'utf8'), newer)
+    const marker = JSON.parse(await fs.readFile(path.join(destination, '.data-migrated'), 'utf8'))
+    assert.equal(marker.source, path.resolve(newer, 'data'))
+    assert.deepEqual(marker.otherCandidates, [path.resolve(older, 'data')])
+  } finally {
+    if (previousLocal === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = previousLocal
+    if (previousOverride === undefined) delete process.env.VEHICLE_MANAGER_DATA_DIR
+    else process.env.VEHICLE_MANAGER_DATA_DIR = previousOverride
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Windows rename denial keeps the old folder and starts only from the verified copy', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-data-rename-denied-'))
+  const local = path.join(root, 'local'), project = path.join(root, 'release'), legacy = path.join(project, 'data')
+  const previousLocal = process.env.LOCALAPPDATA, previousOverride = process.env.VEHICLE_MANAGER_DATA_DIR
+  process.env.LOCALAPPDATA = local
+  delete process.env.VEHICLE_MANAGER_DATA_DIR
+  try {
+    await fs.mkdir(legacy, { recursive: true })
+    await fs.writeFile(path.join(legacy, 'local.sqlite'), 'verified identity data')
+    const renameLegacy = async (source: string, destination: string) => {
+      if (source === legacy) throw Object.assign(new Error('directory in use'), { code: 'EPERM' })
+      return fs.rename(source, destination)
+    }
+    const destination = await resolveDataDirectory(project, renameLegacy)
+    assert.equal(await fs.readFile(path.join(destination, 'local.sqlite'), 'utf8'), 'verified identity data')
+    assert.equal(await fs.readFile(path.join(legacy, 'local.sqlite'), 'utf8'), 'verified identity data')
+    const marker = JSON.parse(await fs.readFile(path.join(destination, '.data-migrated'), 'utf8'))
+    assert.equal(marker.sourceRetained, true)
+    assert.equal(marker.backup, null)
   } finally {
     if (previousLocal === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = previousLocal
