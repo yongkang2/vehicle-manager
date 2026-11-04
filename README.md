@@ -148,3 +148,12 @@ The known templates' historical expected controller/fault record counts are 54/8
 The STELLANTIS logo is reused from the user-approved Demo resource. Trademark rights remain with their owner; this application is not a statement of official authorization.
 
 Full requirements and decision history: [development handover](../车辆数据管理正式版-需求与开发交接.md).
+
+
+### Release compatibility gate
+
+Official portable releases must run `npm test`, `npm run lint`, and `npm run package:portable` from the release commit. Packaging runs the complete regression suite, including protocol 1/2/3 compatibility and backup round-trip tests, and lint before building, then verifies the final extracted ZIP with its bundled runtime in an isolated directory. Download the uploaded release ZIP and verify its SHA-256 before marking the release ready.
+
+Version 1.1.5 supports existing business protocols 1, 2 and 3. Unknown higher business or team protocols require a client upgrade and stop synchronization. Existing schema 4/5 local databases retain their version. Protocol 3 configuration history is preserved by synchronization and format 4 backups; restore these backups only after synchronizing the original protocol 3 team. This maintenance release does not enable configuration authoring or automatically upgrade the shared business protocol. Team members must manually install the compatible release; already distributed older clients cannot receive these protections automatically.
+
+Do not downgrade HEAD.json, restore an older shared HEAD, or delete local databases to resolve version incompatibility. Keep the original local data directory when installing the new release.

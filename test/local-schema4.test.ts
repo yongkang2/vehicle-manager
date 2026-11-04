@@ -245,7 +245,7 @@ test('newer schemas and copied-machine identities are rejected without migration
     const value = await fixture('combined3')
     try {
       const source = new DatabaseSync(value.file)
-      if (rejected === 'newer') source.exec('PRAGMA user_version=5')
+      if (rejected === 'newer') source.exec('PRAGMA user_version=6')
       else source.prepare('UPDATE settings SET value=? WHERE key=?').run(JSON.stringify('another-host'), 'machine')
       const before = fingerprint(source); source.close()
       assert.throws(() => new LocalStore(value.directory), { code: rejected === 'newer' ? 'LOCAL_VERSION_TOO_NEW' : 'COPIED_LOCAL_DATA' })

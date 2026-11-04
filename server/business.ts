@@ -49,7 +49,8 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
     if (!['available', 'testing', 'maintenance', 'inactive'].includes(String(data.status))) throw new AppError('INVALID_INPUT')
     if (data.complianceLevel && !complianceLevels.some(value => value === data.complianceLevel)) throw new AppError('INVALID_INPUT')
   }
-  if (kind === 'part' && !['motor', 'battery', 'controller'].includes(String(data.category))) throw new AppError('INVALID_INPUT')
+  if (kind === 'part' && !['motor', 'battery', 'controller', 'component'].includes(String(data.category))) throw new AppError('INVALID_INPUT')
+  if (kind === 'part' && data.category === 'component' && !data.componentTypeId) throw new AppError('INVALID_INPUT')
   if (kind === 'part') {
     for (const [field, options] of [['controllerType', controllerTypes], ['lifeStatus', batteryLifeStatuses]] as const) {
       if (data[field] && !options.some(value => value === data[field])) throw new AppError('INVALID_INPUT')
@@ -104,6 +105,8 @@ export class Business {
     id?: string; kind: RecordKind; vehicleId?: string | null; data: Fields; actor: Actor; reason: unknown; version?: number; archived?: boolean; sourceId?: string | null; internal?: boolean; maintenance?: 'restore'; photoAttachmentId?: string
   }): BusinessRecord {
     this.store.assertWritable()
+    // Published configuration history and the team catalog have canonical-only writers.
+    if (kind === 'configurationRevision' || kind === 'componentType') throw new AppError('CONFIGURATION_IMMUTABLE', 409)
     this.store.assertNotDeleted(id, vehicleId)
     const why = reason(explanation)
     if (photoAttachmentId !== undefined && (kind !== 'vehicle' || parsePhotoAttachmentId(photoAttachmentId) === null)) throw new AppError('INVALID_INPUT')
@@ -116,6 +119,16 @@ export class Business {
       const row = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
       const before = row ? fromRow(row) : null
       if (before && (before.kind !== kind || before.vehicleId !== vehicleId || before.version !== version)) throw new AppError('VERSION_CONFLICT', 409)
+      if (kind === 'part' && normalized.category === 'component') {
+        if ((this.store.get<number>('businessProtocol') || 1) < 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+        const typeId = String(normalized.componentTypeId)
+        if (typeId !== 'thermal-management') {
+          const definition = this.store.db.prepare("SELECT kind,data,archived FROM records WHERE id=?").get(typeId)
+          const imported = maintenance === 'restore' ? (this.store.get<{ records: BusinessRecord[] }[]>('pendingConfigurationImports') || []).flatMap(entry => entry.records).find(record => record.kind === 'componentType' && record.id === typeId) : undefined
+          if ((!definition || definition.kind !== 'componentType') && !imported) throw new AppError('COMPONENT_TYPE_NOT_FOUND', 409)
+          if (maintenance !== 'restore' && (!before || before.data.componentTypeId !== typeId) && definition && (definition.archived || JSON.parse(String(definition.data)).disabled)) throw new AppError('COMPONENT_TYPE_DISABLED', 409)
+        }
+      }
       if (before) {
         const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : businessFieldRegistry.entry.legacy
         if (!internal && maintenance !== 'restore') for (const field of legacyNames) {

@@ -1,5 +1,5 @@
 import { entryFields, partFields, vehicleFields } from './business.js'
-import type { BusinessRecord, RecordKind } from './business.js'
+import type { BusinessRecord, WorkingRecordKind as RecordKind } from './business.js'
 
 export const MAX_EXPORT_VEHICLES = 20000
 export const MAX_EXPORT_ID_LENGTH = 120
@@ -12,7 +12,7 @@ export type CsvExportRequest = { vehicleIds: string[]; configuration: ExportConf
 export type ExportColumn = { id: string; label: [string, string] }
 
 const labels: Record<string, [string, string]> = {
-  id: ['Record ID', '记录标识'], vehicleId: ['Vehicle ID', '车辆标识'], vehicleVin: ['Vehicle VIN', '车辆 VIN'], archived: ['Archived', '已归档'], version: ['Version', '版本'], updated: ['Last updated', '最近更新'],
+  componentTypeId: ['Component type ID', '组件类型标识'], id: ['Record ID', '记录标识'], vehicleId: ['Vehicle ID', '车辆标识'], vehicleVin: ['Vehicle VIN', '车辆 VIN'], archived: ['Archived', '已归档'], version: ['Version', '版本'], updated: ['Last updated', '最近更新'],
   name: ['Name', '名称'], project: ['Project code', '项目代号'], model: ['Model', '车型'], vin: ['VIN', 'VIN'], color: ['Color', '颜色'], plate: ['License plate', '车牌'], plateExpiry: ['Plate valid until', '车牌有效期'],
   status: ['Status', '状态'], physicalLocation: ['Physical location', '实际位置'], owner: ['Owner', '负责人'], thermal: ['Thermal System Type', '热管理系统类型'], notes: ['Notes', '其他说明'],
   complianceLevel: ['Compliance Level', '排放合规等级'],

@@ -3,7 +3,7 @@ import { Alert, App, Button, Checkbox, Input, Modal, Select, Space, Table, Tabs,
 import { ArrowDown, ArrowUp, Download, RefreshCw } from 'lucide-react'
 import { defaultExportConfiguration, exportColumns, exportFilterFields, exportKinds, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration, recordsForExport } from '../shared/csv-export'
 import type { ExportConfiguration, ExportTemplate } from '../shared/csv-export'
-import type { BusinessRecord, RecordKind, SyncStatus } from '../shared/business'
+import type { BusinessRecord, WorkingRecordKind as RecordKind, SyncStatus } from '../shared/business'
 import { api, ApiError, download } from './api'
 import { translateBusiness } from './business-i18n'
 import { errorText } from './i18n'
