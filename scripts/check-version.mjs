@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = file => readFileSync(path.join(project, file), 'utf8')
-const run = (command, args) => execFileSync(command, args, { cwd: project, encoding: 'utf8', windowsHide: true }).trim()
+const run = (command, args) => execFileSync(command, args, { cwd: project, encoding: 'utf8', windowsHide: true, timeout: 30000 }).trim()
 const { version } = JSON.parse(read('package.json'))
 assert.match(version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
 assert.ok(!process.env.VEHICLE_MANAGER_PACKAGE_VERSION && !process.env.VEHICLE_MANAGER_RELEASE_VERSION, 'Independent version overrides are forbidden; change package.json instead.')
@@ -28,8 +28,10 @@ if (process.argv.includes('--release')) {
     return false
   }
   assert.ok(newer(version, latest.tag_name.replace(/^v/, '')), 'Release version must exceed the latest published version')
-  assert.equal(run('git', ['ls-remote', 'origin', `refs/tags/v${version}`]), '', 'Release tag already exists')
-  run('git', ['fetch', 'origin', `refs/tags/${latest.tag_name}`])
-  run('git', ['merge-base', '--is-ancestor', 'FETCH_HEAD', 'HEAD'])
+  const refs = JSON.parse(run('gh', ['api', `repos/yongkang2/vehicle-manager/git/matching-refs/tags/v${version}`]))
+  assert.ok(!refs.some(ref => ref.ref === `refs/tags/v${version}`), 'Release tag already exists')
+  const commit = run('git', ['rev-parse', 'HEAD'])
+  const status = run('gh', ['api', `repos/yongkang2/vehicle-manager/compare/${latest.tag_name}...${commit}`, '--jq', '.status'])
+  assert.ok(['ahead', 'identical'].includes(status), 'Release source must contain the previous official version')
 }
 console.log(`Version consistency passed: ${version}`)

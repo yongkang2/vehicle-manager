@@ -11,7 +11,7 @@
     "test": "tsx --test test/*.test.ts",
     "lint": "oxlint",
     "preview": "vite preview",
-    "package:portable": "npm test && npm run lint && npm run build && node scripts/package.mjs",
+    "package:portable": "npm run check:version && npm run build && npm test && npm run lint && node scripts/package.mjs",
     "version": "node scripts/sync-version.mjs && git add shared/version.ts",
     "verify:portable": "node scripts/verify-portable.mjs",
     "test:compatibility": "tsx --test test/shared-compatibility.test.ts test/revision-backup.test.ts",
