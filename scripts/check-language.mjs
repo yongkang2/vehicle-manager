@@ -8,6 +8,12 @@ export function assertEnglishMetadata(text, label) {
   assert.doesNotMatch(text || '', /\p{Script=Han}/u, `${label} must use English; Chinese text is not allowed in publication metadata.`)
 }
 
+export function commitRange(event) {
+  if (event.pull_request) return [`${event.pull_request.base.sha}..${event.pull_request.head.sha}`]
+  if (event.after) return event.before && !/^0+$/.test(event.before) ? [`${event.before}..${event.after}`] : [event.after]
+  return ['-1']
+}
+
 function check() {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   for (const file of ['docs/portable-guide.en.md', '.github/pull_request_template.md']) {
@@ -23,7 +29,7 @@ function check() {
       assertEnglishMetadata(event.pull_request.title, 'PR title')
       assertEnglishMetadata(event.pull_request.body, 'PR description')
     }
-    const range = event.pull_request ? [`${event.pull_request.base.sha}..${event.pull_request.head.sha}`] : ['-1']
+    const range = commitRange(event)
     const messages = execFileSync('git', ['log', ...range, '--format=%B'], { cwd: root, encoding: 'utf8', windowsHide: true })
     assertEnglishMetadata(messages, 'Commit messages')
   }
