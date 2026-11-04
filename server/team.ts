@@ -121,6 +121,7 @@ async function readDocument(directory: string): Promise<TeamDocument> {
   if (file.length > 2 * 1024 * 1024) throw new AppError('UNSUPPORTED_TEAM')
   let team: TeamDocument
   try { team = JSON.parse(file.toString('utf8')) as TeamDocument } catch { throw new AppError('UNSUPPORTED_TEAM') }
+  if (team?.application === application && Number.isSafeInteger(team.protocol) && team.protocol > 2) throw new AppError('CLIENT_UPGRADE_REQUIRED', 409)
   if (team.application !== application || ![1, 2].includes(team.protocol) || (team.protocol === 2 && !validVersion(team.minWritableVersion)) || typeof team.id !== 'string' || typeof team.name !== 'string' || !Number.isSafeInteger(team.revision) || !Array.isArray(team.members) || !Array.isArray(team.bindings) || !Array.isArray(team.requests) || !Array.isArray(team.events)) throw new AppError('UNSUPPORTED_TEAM')
   return team
 }

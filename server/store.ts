@@ -59,7 +59,7 @@ function inspectSchema(db: DatabaseSync, version: number): { core: boolean; busi
   const deletion = completeGroup(['vehicle_deletions', 'quarantined_operations'])
   const workspace = completeGroup(['workspaces', 'account_workspaces'])
   if (version === 0 ? tables.size !== 0 : !core) throw schemaError()
-  if ((version === 1 && (business || deletion || workspace)) || (version >= 2 && !business) || (version === 3 && !deletion && !workspace) || (version === 4 && (!deletion || !workspace))) throw schemaError()
+  if ((version === 1 && (business || deletion || workspace)) || (version >= 2 && !business) || (version === 3 && !deletion && !workspace) || (version >= 4 && (!deletion || !workspace))) throw schemaError()
   const sessionColumns = core ? db.prepare('PRAGMA table_info(sessions)').all().map(row => String(row.name)) : []
   const addedColumns = workspaceColumns.filter(definition => sessionColumns.includes(definition.split(' ')[0])).length
   if (addedColumns !== (workspace ? workspaceColumns.length : 0)) throw schemaError()
@@ -100,7 +100,7 @@ export class LocalStore {
     try {
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
       const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number
-      if (version > 4) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
+      if (version > 5) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
       const shape = inspectSchema(this.db, version)
       const machine = shape.core ? this.get<string>('machine') : null
       if (machine && machine !== this.deviceName) throw new AppError('COPIED_LOCAL_DATA', 409)

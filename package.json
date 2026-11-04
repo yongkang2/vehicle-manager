@@ -1,7 +1,7 @@
 {
   "name": "stellantis-vehicle-manager",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4411 --strictPort",
@@ -11,9 +11,10 @@
     "test": "tsx --test test/*.test.ts",
     "lint": "oxlint",
     "preview": "vite preview",
-    "package:portable": "npm run build && node scripts/package.mjs",
+    "package:portable": "npm test && npm run lint && npm run build && node scripts/package.mjs",
     "version": "node scripts/sync-version.mjs && git add shared/version.ts",
-    "verify:portable": "node scripts/verify-portable.mjs"
+    "verify:portable": "node scripts/verify-portable.mjs",
+    "test:compatibility": "tsx --test test/shared-compatibility.test.ts test/revision-backup.test.ts"
   },
   "engines": {
     "node": ">=24"

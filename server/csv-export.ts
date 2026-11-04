@@ -1,5 +1,5 @@
 import { ZipArchive } from 'archiver'
-import type { BusinessRecord, RecordKind } from '../shared/business.js'
+import type { BusinessRecord, WorkingRecordKind as RecordKind } from '../shared/business.js'
 import { exportColumns, exportKinds, matchesExportVehicle, MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, parseExportConfiguration, recordsForExport } from '../shared/csv-export.js'
 import type { CsvExportRequest } from '../shared/csv-export.js'
 import { AppError } from './team.js'
