@@ -1,6 +1,6 @@
 # STELLANTIS Vehicle Data Management
 
-Version 1.1.4, integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite.
+Integrated business build. React + TypeScript + Ant Design, Node.js 24 + Express, local SQLite. Download the [latest official release](https://github.com/yongkang2/vehicle-manager/releases/latest); see [version history and release rules](docs/releases.md). The source version is defined in package.json.
 
 ## Current Scope
 

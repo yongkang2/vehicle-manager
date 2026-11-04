@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const root = path.dirname(fileURLToPath(import.meta.url))
 const application = existsSync(path.join(root, 'app', 'dist-server')) ? path.join(root, 'app') : root
 const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
-const appVersion = process.env.VEHICLE_MANAGER_RELEASE_VERSION || String(packageInfo.version)
+const appVersion = String(packageInfo.version)
 let prepared
 
 function context() {

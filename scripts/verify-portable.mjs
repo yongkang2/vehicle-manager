@@ -12,6 +12,10 @@ async function verifyExtracted(root) {
   const runtime = path.join(root, 'runtime', 'node.exe')
   const launcher = path.join(root, 'launcher.mjs')
   const app = path.join(root, 'app')
+  const packageVersion = JSON.parse(await fs.readFile(path.join(app, 'package.json'), 'utf8')).version
+  assert.ok(path.basename(root).startsWith(`vehicle-manager-${packageVersion}-win-x64-`), 'Package folder and application version differ')
+  const generatedVersion = await fs.readFile(path.join(app, 'dist-server', 'shared', 'version.js'), 'utf8')
+  assert.match(generatedVersion, new RegExp(`export const appVersion = ['"]${packageVersion.replaceAll('.', '\\.')}['"]`))
   const data = path.join(root, 'acceptance-data')
   assert.ok(existsSync(runtime), 'Extracted package is missing runtime/node.exe')
   assert.ok(existsSync(launcher), 'Extracted package is missing launcher.mjs')

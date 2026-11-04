@@ -4,16 +4,13 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import { ZipArchive } from 'archiver'
+import { createHash } from 'node:crypto'
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Build this portable package on Windows x64.')
 const manifest = JSON.parse(await fs.readFile(path.join(project, 'package.json'), 'utf8'))
-const argument = process.argv.indexOf('--version')
-const requested = argument >= 0 ? process.argv[argument + 1] : process.env.VEHICLE_MANAGER_PACKAGE_VERSION
-if (requested !== undefined) {
-  if (!/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(String(requested))) throw new Error('Use a release version such as --version 1.1.1 with three numeric components.')
-  manifest.version = String(requested)
-}
+const versionCheck = spawnSync(process.execPath, [path.join(project, 'scripts', 'check-version.mjs'), '--built', '--release', ...process.argv.slice(2)], { stdio: 'inherit' })
+if (versionCheck.error || versionCheck.status !== 0) throw new Error('Release version checks failed.')
 const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)
 const name = `vehicle-manager-${manifest.version}-win-x64-${stamp}`
 const release = path.join(project, 'releases', name), application = path.join(release, 'app')
@@ -30,7 +27,6 @@ try {
 
   await fs.mkdir(application, { recursive: true })
   for (const folder of ['dist', 'dist-server']) await fs.cp(path.join(project, folder), path.join(application, folder), { recursive: true })
-  if (requested !== undefined) await fs.writeFile(path.join(application, 'dist-server', 'shared', 'version.js'), `export const appVersion = ${JSON.stringify(manifest.version)};\n`)
   await fs.cp(path.join(production, 'node_modules'), path.join(application, 'node_modules'), { recursive: true })
   for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
   await fs.copyFile(path.join(project, 'scripts', 'verify-portable.mjs'), path.join(release, 'verify-portable.mjs'))
@@ -73,7 +69,12 @@ try {
     if (verification.error) throw verification.error
     throw new Error(`Portable package acceptance failed with exit code ${verification.status}.`)
   }
-  console.log(JSON.stringify({ folder: release, zip: zipFile, packages: packages.length, bytes: (await fs.stat(zipFile)).size, acceptance: 'passed' }))
+  const sha256 = createHash('sha256').update(await fs.readFile(zipFile)).digest('hex')
+  const sourceCommit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' })
+  if (sourceCommit.status !== 0) throw new Error('Cannot record release source commit')
+  await fs.writeFile(`${zipFile}.sha256`, `${sha256}  ${path.basename(zipFile)}\n`)
+  await fs.writeFile(path.join(project, 'releases', `v${manifest.version}-provenance.json`), JSON.stringify({ version: manifest.version, sourceCommit: sourceCommit.stdout.trim(), artifact: path.basename(zipFile), sha256, portableAcceptance: 'passed' }, null, 2) + '\n')
+  console.log(JSON.stringify({ folder: release, zip: zipFile, packages: packages.length, bytes: (await fs.stat(zipFile)).size, acceptance: 'passed', sha256 }))
 } finally {
   await fs.rm(production, { recursive: true, force: true })
 }
