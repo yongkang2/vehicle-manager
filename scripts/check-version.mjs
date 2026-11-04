@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = file => readFileSync(path.join(project, file), 'utf8')
-const run = (command, args) => execFileSync(command, args, { cwd: project, encoding: 'utf8', windowsHide: true }).trim()
+const run = (command, args) => execFileSync(command, args, { cwd: project, encoding: 'utf8', windowsHide: true, timeout: 30000 }).trim()
 const { version } = JSON.parse(read('package.json'))
 assert.match(version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/)
 assert.ok(!process.env.VEHICLE_MANAGER_PACKAGE_VERSION && !process.env.VEHICLE_MANAGER_RELEASE_VERSION, 'Independent version overrides are forbidden; change package.json instead.')
