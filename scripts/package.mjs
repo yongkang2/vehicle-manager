@@ -32,7 +32,7 @@ try {
   await fs.copyFile(path.join(project, 'scripts', 'verify-portable.mjs'), path.join(release, 'verify-portable.mjs'))
   await fs.copyFile(path.join(project, 'scripts', 'smoke-portable.mjs'), path.join(release, 'smoke-portable.mjs'))
   await fs.writeFile(path.join(application, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', dependencies: manifest.dependencies, overrides: manifest.overrides }, null, 2))
-  await fs.copyFile(path.join(project, '使用说明.md'), path.join(release, '使用说明.md'))
+  await fs.copyFile(path.join(project, 'docs', 'portable-guide.en.md'), path.join(release, 'User-Guide.md'))
   await fs.mkdir(path.join(release, 'runtime'))
   await fs.copyFile(process.execPath, path.join(release, 'runtime', 'node.exe'))
   const nodeLicense = path.join(path.dirname(process.execPath), 'LICENSE')
