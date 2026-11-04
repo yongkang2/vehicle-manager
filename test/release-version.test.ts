@@ -35,5 +35,10 @@ test('version checker rejects stale source, lockfile and built versions', () => 
       assert.throws(check)
       writeFileSync(path.join(root, name), files[name])
     }
+    execFileSync('git', ['init', '--quiet'], { cwd: root })
+    execFileSync('git', ['add', '.'], { cwd: root })
+    execFileSync('git', ['-c', 'user.name=Release Test', '-c', 'user.email=release-test@example.invalid', 'commit', '--quiet', '-m', 'fixture'], { cwd: root })
+    writeFileSync(path.join(root, 'untracked-asset.txt'), 'uncommitted release input')
+    assert.throws(() => execFileSync(process.execPath, [path.join(root, 'scripts/check-version.mjs'), '--release'], { stdio: 'pipe' }), error => /Commit or preserve all changes/.test(String((error as { stderr: Buffer }).stderr)))
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

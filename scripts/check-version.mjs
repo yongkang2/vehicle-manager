@@ -20,7 +20,7 @@ if (process.argv.includes('--built')) {
   assert.match(read('dist-server/shared/version.js'), new RegExp(`export const appVersion = ['"]${version.replaceAll('.', '\\.')}['"]`))
 }
 if (process.argv.includes('--release')) {
-  assert.equal(run('git', ['status', '--porcelain', '--untracked-files=no']), '', 'Commit tracked changes before packaging a release')
+  assert.equal(run('git', ['status', '--porcelain']), '', 'Commit or preserve all changes before packaging a release')
   const latest = JSON.parse(run('gh', ['api', 'repos/yongkang2/vehicle-manager/releases/latest']))
   const newer = (left, right) => {
     const a = left.split('.').map(Number), b = right.split('.').map(Number)
