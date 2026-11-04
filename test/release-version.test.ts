@@ -18,18 +18,19 @@ test('version checker validates source and rejects independent package versions'
 test('version checker rejects stale source, lockfile and built versions', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'vehicle-version-'))
   try {
-    for (const directory of ['scripts', 'shared', 'dist-server/shared']) mkdirSync(path.join(root, directory), { recursive: true })
+    for (const directory of ['scripts', 'shared', 'dist', 'dist-server/shared']) mkdirSync(path.join(root, directory), { recursive: true })
     copyFileSync(new URL('../scripts/check-version.mjs', import.meta.url), path.join(root, 'scripts/check-version.mjs'))
     const files: Record<string, string> = {
       'package.json': JSON.stringify({ version: '1.2.2' }),
       'package-lock.json': JSON.stringify({ version: '1.2.2', packages: { '': { version: '1.2.2' } } }),
       'shared/version.ts': "export const appVersion = '1.2.2'",
       'dist-server/shared/version.js': "export const appVersion = '1.2.2'",
+      'dist/version.json': JSON.stringify({ version: '1.2.2' }),
     }
     for (const [name, value] of Object.entries(files)) writeFileSync(path.join(root, name), value)
     const check = () => execFileSync(process.execPath, [path.join(root, 'scripts/check-version.mjs'), '--built'], { stdio: 'pipe' })
     assert.doesNotThrow(check)
-    for (const name of ['package-lock.json', 'shared/version.ts', 'dist-server/shared/version.js']) {
+    for (const name of ['package-lock.json', 'shared/version.ts', 'dist-server/shared/version.js', 'dist/version.json']) {
       writeFileSync(path.join(root, name), files[name].replaceAll('1.2.2', '1.2.1'))
       assert.throws(check)
       writeFileSync(path.join(root, name), files[name])

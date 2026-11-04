@@ -13,6 +13,7 @@ async function verifyExtracted(root) {
   const launcher = path.join(root, 'launcher.mjs')
   const app = path.join(root, 'app')
   const packageVersion = JSON.parse(await fs.readFile(path.join(app, 'package.json'), 'utf8')).version
+  assert.equal(JSON.parse(await fs.readFile(path.join(app, 'dist', 'version.json'), 'utf8')).version, packageVersion, 'Frontend and package version differ')
   assert.ok(path.basename(root).startsWith(`vehicle-manager-${packageVersion}-win-x64-`), 'Package folder and application version differ')
   const generatedVersion = await fs.readFile(path.join(app, 'dist-server', 'shared', 'version.js'), 'utf8')
   assert.match(generatedVersion, new RegExp(`export const appVersion = ['"]${packageVersion.replaceAll('.', '\\.')}['"]`))

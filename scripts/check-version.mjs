@@ -16,6 +16,7 @@ assert.equal(lock.version, version, 'Lockfile version differs')
 assert.equal(lock.packages[''].version, version, 'Lockfile root version differs')
 assert.match(read('shared/version.ts'), new RegExp(`export const appVersion = '${version.replaceAll('.', '\\.')}'`))
 if (process.argv.includes('--built')) {
+  assert.equal(JSON.parse(read('dist/version.json')).version, version, 'Frontend build version differs')
   assert.match(read('dist-server/shared/version.js'), new RegExp(`export const appVersion = ['"]${version.replaceAll('.', '\\.')}['"]`))
 }
 if (process.argv.includes('--release')) {
