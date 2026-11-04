@@ -44,3 +44,18 @@ test('schema5 databases reopen without changing their version or existing record
     assert.deepEqual(store.get('sentinel'), { preserved: true })
   } finally { store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
 })
+
+test('release can access a team gated by protocol3 development version 1.2.0', async () => {
+  const { TeamDirectory } = await import('../server/team.js')
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-version-floor-'))
+  const development = new TeamDirectory(null, '1.2.0'), current = new TeamDirectory(), older = new TeamDirectory(null, '1.1.5')
+  const admin = { deviceId: 'alpha', deviceName: 'Alpha', localUserId: 'a', displayName: 'Admin' }, second = { deviceId: 'beta', deviceName: 'Beta', localUserId: 'b', displayName: 'Second' }
+  try {
+    const team = await development.create(root, 'Fictional', admin)
+    const pending = await development.join(root, team.id, second)
+    await development.approve(root, team.id, admin, pending.requests[0].id, 'admin', null, 'Approve')
+    await development.enableUpgradeGate(root, team.id, admin, 'Require protocol3 client')
+    await assert.rejects(older.read(root, team.id), { code: 'CLIENT_UPGRADE_REQUIRED' })
+    assert.equal((await current.read(root, team.id)).minWritableVersion, '1.2.0')
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
