@@ -3,6 +3,8 @@ import type { Request, RequestHandler } from 'express'
 import multer from 'multer'
 import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
+import { createReadStream } from 'node:fs'
+import { History } from './history.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
 import { Business, checksum, reason, validateManualRecordFields } from './business.js'
 import { BusinessSync, atomicFile } from './sync.js'
@@ -138,6 +140,21 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     } catch (error) { next(error) }
   })
   router.get('/history', (req, res) => res.json(business.history(req.query.vehicleId ? String(req.query.vehicleId) : undefined)))
+  router.get('/history/query', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(new History(store).query(req.query))
+  })
+  writeRoute('get', '/history/export', async (req: BusinessRequest, res) => {
+    const verify = finalAccess(req, res)
+    await verify()
+    const file = await new History(store).export(req.query)
+    try {
+      await verify()
+      store.event(req.businessContext!.actor.id, 'business.exported', { format: 'xlsx', filters: req.query })
+      res.attachment('vehicle-history.xlsx').type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      await pipeline(createReadStream(file.path), res)
+    } finally { await file.cleanup() }
+  })
   router.get('/vehicles/:id/delete-preview', async (req: BusinessRequest, res) => {
     const context = await store.runWrite(() => access(req, true))
     res.json(await synchronization.deletePreview(context.configuration.sharedPath, context.configuration.teamId, context.identity, context.actor, String(req.params.id)))

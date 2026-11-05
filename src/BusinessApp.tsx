@@ -1,14 +1,15 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Ref } from 'react'
-import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Pagination, Select, Space, Spin, Table, Tabs, Tag, Timeline, Tooltip, Upload } from 'antd'
+import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
 import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
 import { api, ApiError, createWorkspaceScope, download } from './api'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
 import { translateBusiness } from './business-i18n'
 import { activeHvBatteries, configurationFields, controllerSources as parsedControllerSources, doveRecordedTime, keyControllerName, keyControllerNames, reportAssociationVin, reportMatchesVehicle, thermalSystemTypes, validControllerValue, vehicleFields, vehicleHvBatteries } from '../shared/business'
-import type { BusinessRecord, Change, Fields, KeyControllerName, QuarantinedOperation, RecordKind, ReportData, RestorePreview, RestoreResult, SyncConflict, SyncStatus, VehicleDeletePreview, VehicleDeleteReceipt, VehicleDeleteRequest } from '../shared/business'
+import type { BusinessRecord, Fields, KeyControllerName, QuarantinedOperation, RecordKind, ReportData, RestorePreview, RestoreResult, SyncConflict, SyncStatus, VehicleDeletePreview, VehicleDeleteReceipt, VehicleDeleteRequest } from '../shared/business'
 import RecordEditor from './RecordEditor'
+import HistoryPanel from './HistoryPanel'
 import DoveImport from './DoveImport'
 import CsvExportDialog from './CsvExportDialog'
 import ResizableVehicleTable from './ResizableVehicleTable'
@@ -122,7 +123,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const text = translateBusiness(language), { message } = App.useApp()
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
   const { filters: vehicleColumnFilters, setFilters: setVehicleColumnFilters } = useVehicleTableFilterSession()
-  const [records, setRecords] = useState<BusinessRecord[]>([]), [changes, setChanges] = useState<Change[]>([]), [sync, setSync] = useState<SyncStatus>(emptySync)
+  const [records, setRecords] = useState<BusinessRecord[]>([]), [historyRevision, setHistoryRevision] = useState(0), [sync, setSync] = useState<SyncStatus>(emptySync)
   const vehicleFilterValues = useMemo(() => createVehicleFilterValues(records, language), [records, language])
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [query, setQuery] = useState(''), [filter, setFilter] = useState<string | undefined>(), [archived, setArchived] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [action, setAction] = useState<Action | null>(null), [actionReason, setActionReason] = useState('')
@@ -130,7 +131,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [reportId, setReportId] = useState<string | null>(null)
   const [csvExportOpen, setCsvExportOpen] = useState(false)
   const [reportSelection, setReportSelection] = useState<string[]>([]), [comparison, setComparison] = useState<Comparison | null>(null), [configuration, setConfiguration] = useState<Configuration | null>(null)
-  const [restoreOpen, setRestoreOpen] = useState(false), [restoreFile, setRestoreFile] = useState<File | null>(null), [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null), [archiveRecordIds, setArchiveRecordIds] = useState<string[]>([]), [confirmDroppedFields, setConfirmDroppedFields] = useState(false), [confirmation, setConfirmation] = useState(''), [restoreReason, setRestoreReason] = useState(''), [historyPage, setHistoryPage] = useState(1)
+  const [restoreOpen, setRestoreOpen] = useState(false), [restoreFile, setRestoreFile] = useState<File | null>(null), [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null), [archiveRecordIds, setArchiveRecordIds] = useState<string[]>([]), [confirmDroppedFields, setConfirmDroppedFields] = useState(false), [confirmation, setConfirmation] = useState(''), [restoreReason, setRestoreReason] = useState('')
   const attachmentCancel = useRef<(() => void) | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [quarantined, setQuarantined] = useState<QuarantinedOperation[]>([]), [deleteVehicle, setDeleteVehicle] = useState<BusinessRecord | null>(null), [deleteReceipt, setDeleteReceipt] = useState<VehicleDeleteReceipt | null>(null)
@@ -142,7 +143,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     if (result.data) {
       const data = result.data
       setRecords(data.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)))
-      setChanges(data.changes); setAudit(data.audit); setQuarantined(data.quarantined)
+      setHistoryRevision(value => value + 1); setAudit(data.audit); setQuarantined(data.quarantined)
     }
     setSync(current => JSON.stringify(current) === JSON.stringify(result.sync) ? current : result.sync)
     setLoading(false)
@@ -169,7 +170,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   const selected = records.find(record => record.id === selectedId) || null
-  const openVehicle = (id: string, tab = 'overview') => { if (id !== selectedId) attachmentCancel.current?.(); setSelectedId(id); setDetailTab(tab); setHistoryPage(1) }
+  const openVehicle = (id: string, tab = 'overview') => { if (id !== selectedId) attachmentCancel.current?.(); setSelectedId(id); setDetailTab(tab) }
   const activeReport = records.find(record => record.id === reportId) || null
   const cars = records.filter(record => record.kind === 'vehicle')
   const reports = sortedVehicleReports(records)
@@ -190,7 +191,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     setComparison(current => current && (belongs(current.left) || belongs(current.right)) ? null : current)
     setConfiguration(current => current && (belongs(current.report) || (current.part && belongs(current.part))) ? null : current)
     if (selectedId === receipt.vehicleId) attachmentCancel.current?.()
-    setDeleteVehicle(null); setDeleteReceipt(receipt); setHistoryPage(1)
+    setDeleteVehicle(null); setDeleteReceipt(receipt)
     await load()
     if (receipt.localSynced) void message.success(text('vehicleDeleted'))
     else void message.warning(text('deleteCommittedPending'), 8)
@@ -313,19 +314,6 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       { title: text('actions'), width: 130, render: (_, record) => recordActions(record) },
     ]} expandable={{ expandedRowRender: record => <Descriptions column={{ xs: 1, sm: 2 }} size="small" items={Object.entries(record.data).filter(([, value]) => value !== '').map(([key, value]) => ({ key, label: text(key), children: <span className="preserve-text">{display(value)}</span> }))} /> }} /></>
   }
-  const history = (items: Change[]) => !items.length ? <Empty description={text('noRecords')} /> : <>
-    <Timeline items={items.slice((historyPage - 1) * 20, historyPage * 20).map(change => ({
-      color: 'gray', content: <div className="change-entry">
-        <div><strong>{change.actor.name}</strong><span>{text(change.action === 'updated' ? 'updatedAction' : change.action)} · {text(change.kind === 'part' && (change.after.category || change.before?.category) === 'battery' ? 'hvBattery' : change.kind)}</span><time>{date(change.created)}</time></div>
-        <p>{change.reason}</p>
-        {['deleted', 'vehicle.deleted'].includes(change.action) && <p className="mono">VIN: {display(change.after.vin || change.before?.vin)}</p>}
-        <small className="mono">{text('device')}: {change.actor.deviceId.slice(0, 12)}{change.sourceId && <> · {records.some(record => record.id === change.sourceId && record.kind === 'report') ? <button className="inline-link" onClick={() => setReportId(change.sourceId)}>{text('source')}</button> : <span>{text('sourceUnavailable')}</span>}</>}</small>
-        <details><summary>{text('details')}</summary><div className="change-diff">{Object.keys(change.after).filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key])).map(key => <div key={key}><strong>{text(key)}</strong><del>{display(change.before?.[key])}</del><span>→</span><ins>{display(change.after[key])}</ins></div>)}{change.archivedBefore !== change.archivedAfter && <div><strong>{text('status')}</strong><del>{change.archivedBefore ? text('archived') : '—'}</del><span>→</span><ins>{change.archivedAfter ? text('archived') : text('restored')}</ins></div>}</div></details>
-      </div>
-    }))} />
-    <Pagination current={historyPage} onChange={setHistoryPage} total={items.length} pageSize={20} showSizeChanger={false} hideOnSinglePage />
-  </>
-
   const filters = <div className="business-filters"><Input prefix={<Search size={15} />} value={query} onChange={event => setQuery(event.target.value)} placeholder={text('search')} aria-label={text('search')} allowClear />{view === 'vehicles' && <Select allowClear placeholder={text('status')} value={filter} onChange={setFilter} options={statuses.map(value => ({ value, label: text(value) }))} />}<Checkbox checked={archived} onChange={event => setArchived(event.target.checked)}>{text('showArchived')}</Checkbox></div>
   const visibleReports = view === 'reports' ? reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())) : []
   const visibleAudit = view === 'audit' ? audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase())) : []
@@ -393,7 +381,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <><div className="business-table-controls">{filters}<div className="business-control-actions"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div></div><div className="business-list-heading"><h3>{text('reports')}</h3><span>{visibleReports.length}</span></div>{reportTable(visibleReports, true)}</>}
-    {view === 'history' && <><div className="business-list-heading"><h3>{text('history')}</h3><span>{changes.length}</span></div>{history(changes)}</>}
+    {view === 'history' && <HistoryPanel language={language} refreshToken={historyRevision} reportIds={records.filter(record => record.kind === 'report').map(record => record.id)} onOpenReport={setReportId} />}
     {view === 'audit' && <><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
     {view === 'sync' && <>
       <Alert type={sync.error || sync.conflicts.length || sync.quarantined ? 'warning' : 'success'} showIcon icon={sync.error ? <CloudOff size={18} /> : undefined} title={sync.error ? errorText(sync.error, language) : text(sync.phase)} />
@@ -419,7 +407,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       { key: 'modifications', label: text('modifications'), children: entryTable('modification', selected) }, { key: 'equipment', label: text('equipment'), children: entryTable('equipment', selected) },
       { key: 'reports', label: text('reports'), children: reportTable(reports.filter(record => record.vehicleId === selected.id && (!record.archived || archived))) },
       { key: 'attachments', label: text('attachments'), children: <><AttachmentUpload key={selected.id} vehicle={selected} language={language} disabled={busy} onRefresh={loadScoped} onBusyChange={setBusy} onCancelReady={cancel => { attachmentCancel.current = cancel }} onError={onError} /><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
-      { key: 'history', label: text('history'), children: history(changes.filter(change => change.vehicleId === selected.id)) },
+      { key: 'history', label: text('history'), children: <HistoryPanel key={selected.id} language={language} vehicleId={selected.id} refreshToken={historyRevision} reportIds={records.filter(record => record.kind === 'report').map(record => record.id)} onOpenReport={setReportId} /> },
     ] : []} /></Drawer>
     {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<BusinessRecord[]>('/api/business/export/records'); const available = next.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); workspaceLoader.invalidate(); setRecords(available); return available }} />}
     {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
