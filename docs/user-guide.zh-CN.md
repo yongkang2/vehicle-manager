@@ -1,6 +1,6 @@
 # 车辆数据管理使用说明
 
-应用版本以“版本与下载”窗口和发布包为准。请从 [GitHub 最新正式版](https://github.com/yongkang2/vehicle-manager/releases/latest) 下载；版本沿革与交付规则见 [发布说明](docs/releases.md)。
+应用版本以“版本与下载”窗口和发布包为准。请从 [GitHub 最新正式版](https://github.com/yongkang2/vehicle-manager/releases/latest) 下载；版本沿革与交付规则见 [发布说明](releases.md)。
 
 ## 启动和同事加入
 

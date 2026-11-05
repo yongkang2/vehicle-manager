@@ -2,6 +2,12 @@
 
 遵循用户全局指令：最少假设、最简单实现、最小改动、可验证结果。
 
+## Documentation layout
+
+- Keep the root README.md concise and use it as the documentation entry point. User guides and detailed engineering documents belong in docs/.
+- Read docs/design.md for the consolidated product scope, visual design and interface behavior. It replaces the former root PRODUCT.md, DESIGN.md and UX-CONTRACT.md; maintain this single source instead of recreating those root files.
+- The Chinese guide is docs/user-guide.zh-CN.md, the packaged English guide remains docs/portable-guide.en.md, and detailed implementation notes are in docs/developer-guide.md. See docs/README.md for the index.
+
 ## English publication policy (required by the user on 2026-11-04)
 
 - Write all new commit subjects and bodies, PR titles and descriptions, Release titles and descriptions, asset names, and packaged instructions in English. This includes validation, compatibility and upgrade notes. Chat replies and the application's existing localization are outside this policy.
