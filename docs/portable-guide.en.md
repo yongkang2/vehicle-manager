@@ -46,3 +46,13 @@ Real multi-computer Windows SMB behavior and company endpoint policies require v
 ## Publication language
 
 Commit messages, PR titles and descriptions, release titles and notes, asset names and packaged instructions use English. The application's English and Chinese interface options remain available.
+
+## Verified business recovery
+
+Administrators choose Back up data to synchronize team data and download a complete business backup. Synchronization failures or unresolved conflicts stop the download. The local-only backup remains available for maintenance through the API and never starts synchronization. Backups remain unencrypted.
+
+Restore previews validate originals and display searchable effects and field differences. Confirm all archive effects together. Before applying, the service saves and read-back verifies a local safety ZIP under the workspace data directory's `restore-backups/`; failure prevents application. Copies are retained until manually removed and do not replace independent cold backups. Current backups use format 3 or 4 depending on configuration history; formats 1–4 remain readable.
+
+Restore history and results are local administrator records. Durable request IDs prevent reapplication after a lost response; the applied receipt and business changes commit in one transaction. Query results before retrying. Applied results can retry shared publication without applying the ZIP again. Prepared or failed requests require a fresh preview. Published means shared publication completed, not that all clients have refreshed. Permissions, permanent deletions and immutable configuration history are not rolled back. Continue pausing other clients and keeping independent backups for recovery operations.
+
+Backup reminder: the overview menu contains Back up data, Restore data and Restore history. Online administrators are reminded when the team has no recorded backup or the last completed team-backup transfer was at least seven days ago. Completion time is shared by the team. Remind me tomorrow suppresses the prompt for the administrator on this device for the current local calendar day; work remains available. Local exports and automatic pre-restore safety copies do not reset the timer. Completed HTTP transfer does not verify where the browser saved the file. Old versions do not record completion, so collaborating administrators should use the updated application for reliable reminders.

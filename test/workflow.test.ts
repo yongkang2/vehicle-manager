@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import ExcelJS from 'exceljs'
 import unzipper from 'unzipper'
 import { createApp } from '../server/app.js'
@@ -119,7 +120,15 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     assert.equal((await request(member, '/business/backup')).status, 403)
     assert.equal((await request(member, '/business/audit')).status, 403)
     assert.ok((await request(admin, '/business/audit')).data.some((event: { action: string }) => event.action === 'account.login' || event.action === 'account.registered'))
+    assert.equal((await request(admin, '/business/backup/status')).data.teamName, 'Workflow')
+    assert.equal((await request(admin, '/business/backup/reminder')).data.due, true)
+    assert.equal((await request(member, '/business/backup/reminder')).status, 403)
+    assert.equal((await request(member, '/business/backup/reminder/dismiss', 'POST', { day: '2026-11-05' })).status, 403)
+    assert.equal((await request(admin, '/business/backup/reminder/dismiss', 'POST', { day: '2026-11-05' })).status, 200)
+    assert.equal((await request(admin, '/business/backup/reminder')).data.dismissedDay, '2026-11-05')
     const backup = await request(admin, '/business/backup'); assert.equal(backup.status, 200)
+    await admin.synchronization.settle()
+    assert.equal((await request(admin, '/business/backup/reminder')).data.due, false)
     const archive = await unzipper.Open.buffer(backup.data as Buffer)
     const manifest = JSON.parse((await archive.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
     assert.equal(manifest.records.filter((record: BusinessRecord) => record.kind === 'report').length, 3)
@@ -130,9 +139,16 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     await request(admin, '/business/sync', 'POST')
     const preview = await request(admin, '/business/restore/preview', 'POST', upload(backup.data as Buffer, 'backup.zip'))
     assert.equal(preview.status, 200)
-    const restore = upload(backup.data as Buffer, 'backup.zip'); restore.append('confirmation', 'RESTORE'); restore.append('reason', 'Restore verified backup'); restore.append('previewFingerprint', preview.data.fingerprint); restore.append('archiveRecordIds', JSON.stringify([]))
+    const restore = upload(backup.data as Buffer, 'backup.zip'); restore.append('requestId', randomUUID()); restore.append('confirmation', 'RESTORE'); restore.append('reason', 'Restore verified backup'); restore.append('previewFingerprint', preview.data.fingerprint); restore.append('archiveRecordIds', JSON.stringify([]))
     response = await request(admin, '/business/restore', 'POST', restore)
     assert.equal(response.status, 200); assert.ok(response.data.changed > 0)
+    const receipts = await request(admin, '/business/restore/receipts')
+    assert.equal(receipts.status, 200); assert.equal(receipts.data[0].state, 'published')
+    assert.ok(receipts.data[0].safetySha256)
+    assert.equal((await request(member, '/business/restore/receipts')).status, 403)
+    const retried = await request(admin, '/business/restore', 'POST', restore)
+    assert.equal(retried.status, 200); assert.equal(retried.data.changed, response.data.changed)
+    assert.equal((await request(admin, '/business/restore/receipts')).data.length, 1)
     await request(admin, '/business/sync', 'POST')
     const restored = (await request(member, '/business/records')).data as BusinessRecord[]
     assert.equal(restored.find(record => record.id === car.id)!.data.owner, '')
@@ -156,7 +172,7 @@ test('full approved workflow: vehicles, parts, DOVE, configuration, exact files,
     await request(admin, '/business/sync', 'POST')
     const archivedPreview = await request(admin, '/business/restore/preview', 'POST', upload(archivedBackup.data, 'archived.zip'))
     assert.equal(archivedPreview.status, 200)
-    const restoreArchived = upload(archivedBackup.data, 'archived.zip'); restoreArchived.append('confirmation', 'RESTORE'); restoreArchived.append('reason', 'Restore archived vehicle and retained child records'); restoreArchived.append('previewFingerprint', archivedPreview.data.fingerprint); restoreArchived.append('archiveRecordIds', JSON.stringify([]))
+    const restoreArchived = upload(archivedBackup.data, 'archived.zip'); restoreArchived.append('requestId', randomUUID()); restoreArchived.append('confirmation', 'RESTORE'); restoreArchived.append('reason', 'Restore archived vehicle and retained child records'); restoreArchived.append('previewFingerprint', archivedPreview.data.fingerprint); restoreArchived.append('archiveRecordIds', JSON.stringify([]))
     assert.equal((await request(admin, '/business/restore', 'POST', restoreArchived)).status, 200)
     const finalSync = await request(admin, '/business/sync', 'POST')
     assert.equal(finalSync.data.pending, 0, JSON.stringify(finalSync.data))
