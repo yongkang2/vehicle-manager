@@ -31,6 +31,12 @@ components:
 ---
 # Stellantis vehicle workspace
 
+## Product scope and maintained evidence
+
+Vehicle Manager is a local Windows engineering workspace for vehicle records, controller and battery configurations, DOVE reports, attachments, history and shared-folder collaboration. English and Chinese interfaces are supported. Preserve permissions, offline/sync recovery, confirmations, pagination, exports and existing workflows. Do not ship populated accounts or sample business databases.
+
+Business and security evidence is maintained in the [development guide](developer-guide.md), [English user guide](portable-guide.en.md), API enforcement and shared domain types. API enforcement remains authoritative for authorization. This document consolidates the former root PRODUCT.md, DESIGN.md and UX-CONTRACT.md into one maintained source for product scope, visual design and interface behavior. Preserve the restrained, refined Stellantis-inspired direction; do not add production dependencies, remote fonts, decorative imagery or continuous animation for visual changes.
+
 ## Overview
 Operate mode. Reference: https://www.stellantis.com/en . Deep blue navigation anchors a white, quietly structured engineering workspace. The approved direction is restraint and precision, not a marketing landing page.
 
@@ -50,10 +56,24 @@ Use hairline boundaries rather than decorative shadows or backdrop blur. Drawer 
 6px operational controls, 8px login controls, 10px operational panels, circular user avatar. No decorative cards or additional hero content in operational screens.
 
 ## Components
+
+### Interface ownership and behavior
+
+| Capability | Canonical owner | Source of truth | Allowed variants | Verification |
+|---|---|---|---|---|
+| Table selection | Ant Design Table + existing business selection | BusinessApp.tsx | existing report selection | project tests / browser |
+| Select/Listbox | Ant Design Select | existing component usage | authored | keyboard / open popup |
+| Date | Existing editor inputs and Ant Design DatePicker in history | RecordEditor.tsx / HistoryPanel.tsx | existing locale handling | project tests / browser |
+| Form | Ant Design Form / RecordEditor | RecordEditor.tsx | create / edit | project tests |
+| Scrollbar | Refined.css global baseline | this document | table geometry only | browser computed styles |
+| Toast | AntApp message/modal | App.tsx | existing semantic tones | browser / project tests |
+| CRUD | BusinessApp + RecordEditor + server API | developer-guide.md | existing save/close/refresh | project tests |
+
+Preserve navigation, filters, table preferences and paging. Search clear and IME behavior remain with existing inputs. Existing loaders, inline errors, empty states, modal focus behavior and destructive confirmations remain owned by the library and business components. Product and API rules govern lifecycle and permission decisions. Follow the active English/Chinese interface language for new copy. Untouched workflow limitations do not imply full accessibility certification.
 Ant Design owns controls, dialogs, drawers and notifications; Lucide owns icons. ResizableVehicleTable owns table sizing, filters, pagination and preferences. A centered single-column login restores the original entry composition. Its top anchor and reserved 64px bilingual title prevent content-height recentering during locale and login/register changes.
 
 ## Do's and Don'ts
-Keep feedback immediate. Hover transitions take 120ms; the login entrance takes 180ms. Reduced motion disables authored motion. Preserve lazy business/report loading and existing request caching. No animation timers, new production libraries, remote fonts, or extra business requests. Global visible scrollbars inherit palette; forced colors remains system-owned. Preview captures use explicitly synthetic browser-intercepted records only.
+Keep feedback immediate. Hover transitions take 120ms; the login entrance takes 180ms. Reduced motion disables authored motion. Preserve lazy business/report loading and existing request caching. No animation timers, new production libraries, remote fonts, or extra business requests. Global visible scrollbars inherit palette; forced colors remains system-owned. Acceptance previews use isolated synthetic data; never expose real business data in screenshots or demo fixtures.
 
 Refinement approved 2026-11-03: keep the operational structure; use Apple-like restraint in spacing and quiet surfaces. Remove the split login, preserve Stellantis branding, no new dependencies or motion.
 
