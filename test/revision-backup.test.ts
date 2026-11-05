@@ -73,7 +73,7 @@ test('format4 preserves frozen revisions, custom types and receipts through the 
     assert.equal(target.business.list().some(record => record.kind === 'configurationRevision' || record.kind === 'componentType'), false)
     assert.deepEqual(target.store.db.prepare("SELECT payload FROM outbox WHERE state='pending'").all().map(row => JSON.parse(String(row.payload)).kind), ['vehicle'])
     const rebundled = await manifest(await createBackup(target.business, teamId))
-    assert.equal(rebundled.source?.pending, 2)
+    assert.equal(rebundled.source?.pending, 3)
     assert.deepEqual(rebundled.records.filter(record => record.kind === 'configurationRevision' || record.kind === 'componentType').map(record => record.id).sort(), [type.id, revision.id].sort())
     assert.deepEqual(rebundled.configurationReceipts, [receipt])
     target.store.db.close()

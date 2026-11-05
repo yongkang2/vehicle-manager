@@ -180,6 +180,8 @@ for (const format of [1, 2]) {
       await restoreBackup(target.business, bytes, 'photo-team', context.actor, 'Initial legacy restore')
       const current = target.business.get(car.id), uploaded = await target.photos.upload(car.id, { name: 'newer.png', bytes: png() }, current.version, 'Newer local cover', context.actor)
       context.sent()
+      // This isolated fixture acknowledges publication without a shared team.
+      target.store.set('pendingHistoryImports', [])
       await restoreBackup(target.business, bytes, 'photo-team', context.actor, 'Restore pre-photo backup', [uploaded.attachment.id])
       assert.equal(target.business.get(car.id).data.photoAttachmentId, '')
       await assert.rejects(target.photos.read(car.id), { code: 'PHOTO_NOT_FOUND' })

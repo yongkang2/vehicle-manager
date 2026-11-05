@@ -8,11 +8,12 @@ import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
 import { AppError, TeamDirectory, assertTeamLock } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
-import type { Actor, Change, Fields, Operation, RecordKind, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
+import type { Actor, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 import { componentTypeDefinitions, isProtectedKind, validateConfigurationRecords, validateConfigurationRevisionRecord, validateComponentTypeRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 import type { ConfigurationImport } from '../shared/configuration-revisions.js'
 
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+const fieldKeys = (base: Fields, desired: Fields) => new Set([...Object.keys(base), ...Object.keys(desired)])
 // Legacy records omit these values; materializing a blank is not a change.
 const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus', 'componentTypeId'] : []
 const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => blankEquivalentFields(kind).includes(field)
@@ -64,7 +65,8 @@ export class BusinessSync {
     const pendingOperations = store.db.prepare("SELECT COUNT(*) AS total FROM outbox WHERE state='pending'").get()!.total as number
     const pendingImports = store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []
     const configurationImports = store.get<ConfigurationImport[]>('pendingConfigurationImports') || []
-    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
+    const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
+    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
   }
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity, options: { ifChanged?: boolean } = {}): Promise<SyncStatus> {
@@ -174,7 +176,7 @@ export class BusinessSync {
       if (!first.base) { if (remote) fields.push('_record') }
       else if (!remote) fields.push('_record')
       else {
-        for (const key of Object.keys(last.desired.data)) if (!equivalentField(first.kind, key, first.base.data[key], last.desired.data[key]) && !equivalentField(first.kind, key, remote.data[key], first.base.data[key]) && !equivalentField(first.kind, key, remote.data[key], last.desired.data[key])) fields.push(key)
+        for (const key of fieldKeys(first.base.data, last.desired.data)) if (!equivalentField(first.kind, key, first.base.data[key], last.desired.data[key]) && !equivalentField(first.kind, key, remote.data[key], first.base.data[key]) && !equivalentField(first.kind, key, remote.data[key], last.desired.data[key])) fields.push(key)
         if (remote.archived !== first.base.archived && (last.desired.archived !== remote.archived || !equivalentData(first.kind, last.desired.data, first.base.data) || operations.some(operation => operation.files.length))) fields.push('_archived')
         if (last.desired.archived !== first.base.archived && !equivalentData(first.kind, remote.data, first.base.data)) fields.push('_archived')
       }
@@ -200,7 +202,10 @@ export class BusinessSync {
     const duplicateReport = first.kind === 'report' && !first.base && row && JSON.parse(row.data).checksum === last.desired.data.checksum
     if (!first.decision && !duplicateReport) {
       const data: Fields = row ? JSON.parse(row.data) : structuredClone(last.desired.data)
-      if (first.base) for (const key of Object.keys(last.desired.data)) if (!equivalentField(first.kind, key, first.base.data[key], last.desired.data[key])) data[key] = last.desired.data[key]
+      if (first.base) for (const key of fieldKeys(first.base.data, last.desired.data)) if (!equivalentField(first.kind, key, first.base.data[key], last.desired.data[key])) {
+        if (Object.hasOwn(last.desired.data, key)) data[key] = last.desired.data[key]
+        else delete data[key]
+      }
       const archived = !row || !first.base || first.base.archived !== last.desired.archived ? last.desired.archived : Boolean(row.archived)
       const vin = first.kind === 'vehicle' ? String(data.vin) : null
       if (row) master.prepare('UPDATE records SET data=?,vin=?,archived=?,version=version+1,updated=? WHERE id=?').run(JSON.stringify(data), vin, archived ? 1 : 0, now(), first.recordId)
@@ -269,6 +274,8 @@ export class BusinessSync {
       store.set('configurationReceipts', master.prepare("SELECT key,value FROM metadata WHERE key LIKE 'configurationRequest:%'").all().map(row => ({ key: String(row.key), value: String(row.value) })))
       const imports = store.get<ConfigurationImport[]>('pendingConfigurationImports') || []
       if (imports.length) store.set('pendingConfigurationImports', imports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`configurationImport:${entry.id}`)))
+      const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
+      if (historyImports.length) store.set('pendingHistoryImports', historyImports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`historyImport:${entry.id}`)))
     })
   }
   private async cycle(shared: string, team: TeamDocument, ifChanged = false): Promise<SyncStatus> {
@@ -354,6 +361,15 @@ export class BusinessSync {
         master.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run(`configurationImport:${entry.id}`, '1')
         changed = true
       }
+      for (const entry of store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []) {
+        if (master.prepare('SELECT key FROM metadata WHERE key=?').get(`historyImport:${entry.id}`)) continue
+        const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
+        const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
+        if (!member || !binding) throw new AppError('ADMIN_REQUIRED', 403)
+        for (const change of entry.changes) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
+        master.prepare('INSERT INTO metadata VALUES(?,?)').run(`historyImport:${entry.id}`, '1')
+        changed = true
+      }
       if (protocol === 3) { try { validateConfigurationRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
       if (changed) {
         await snapshot.publish(team.id, protocol)
@@ -384,7 +400,10 @@ export class BusinessSync {
     if (conflict.fields.includes('_vin') && !discard) throw new AppError('VIN_EXISTS', 409)
     const desired = structuredClone(conflict.remote || conflict.local)
     if (!discard) {
-      for (const field of Object.keys(current.data)) if ((!conflict.base || !equivalentField(current.kind, field, conflict.base.data[field], current.data[field])) && (!conflict.fields.includes(field) || choices[field] === 'local')) desired.data[field] = current.data[field]
+      for (const field of fieldKeys(conflict.base?.data || {}, current.data)) if ((!conflict.base || !equivalentField(current.kind, field, conflict.base.data[field], current.data[field])) && (!conflict.fields.includes(field) || choices[field] === 'local')) {
+        if (Object.hasOwn(current.data, field)) desired.data[field] = current.data[field]
+        else delete desired.data[field]
+      }
       if (!conflict.base || conflict.base.archived !== current.archived || choices._archived === 'local') desired.archived = current.archived
     }
     const id = randomUUID(), created = now()
