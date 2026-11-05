@@ -64,6 +64,7 @@ const errorPairs: Record<string, [string, string]> = {
   BACKUP_DELETION_CONFLICT: ['This backup contains deletion information that conflicts with current live records. Restore was not applied.', '备份中的删除信息与当前有效记录冲突，未执行恢复。'],
   RESTORE_PREVIEW_REQUIRED: ['Preview this backup again before restoring.', '恢复前请重新预览此备份。'], RESTORE_PREVIEW_CHANGED: ['The backup or current data changed after preview. Review a fresh preview.', '预览后备份或当前数据已变化，请重新查看预览。'], RESTORE_ARCHIVE_CONFIRMATION_REQUIRED: ['Select every active record that is absent from the backup and should be archived.', '请选择备份中不存在、恢复后需要归档的全部有效记录。'],
   RESTORE_CONFLICTS: ['Resolve the backup conflicts before restoring.', '请先处理备份冲突再恢复。'], RESTORE_DROPPED_FIELDS_CONFIRMATION_REQUIRED: ['Review and confirm all fields not recognized by this version.', '请先查看并确认当前版本不识别的字段。'],
+  RESTORE_REQUEST_CHANGED: ['This request ID was already used with different restore options. Preview the backup again.', '此恢复请求编号已用于其他恢复参数，请重新预览备份。'],
   RESTORE_SYNC_REQUIRED: ['Synchronize this workspace before previewing a restore.', '请先同步当前工作空间，再预览恢复影响。'],
   TWO_ADMINS_REQUIRED: ['Add a second approved administrator before requiring an application upgrade.', '启用版本升级限制前，请先批准第二名管理员。'],
   DELETE_REQUEST_MISMATCH: ['This deletion request differs from the recorded request. Refresh the preview and confirm again.', '删除请求与已记录的请求不一致，请刷新预览并重新确认。'],

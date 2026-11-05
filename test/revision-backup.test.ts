@@ -15,7 +15,7 @@ import { configurationDecisionKey, configurationRevisionLabel, configurationRevi
 import type { ConfigurationDecisions, ConfigurationRevisionData } from '../shared/configuration-revisions.js'
 
 const teamId = randomUUID(), vin = 'TEST0000000000001', date = '2026-10-29T01:00:00.000Z'
-type Manifest = { format: number; schemaVersion: number; fieldVersion: number; records: BusinessRecord[]; configurationReceipts?: ConfigurationReceiptEntry[] }
+type Manifest = { source?: { pending: number }; format: number; schemaVersion: number; fieldVersion: number; records: BusinessRecord[]; configurationReceipts?: ConfigurationReceiptEntry[] }
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-revision-backup-'))
   const store = new LocalStore(directory), business = new Business(store)
@@ -73,6 +73,7 @@ test('format4 preserves frozen revisions, custom types and receipts through the 
     assert.equal(target.business.list().some(record => record.kind === 'configurationRevision' || record.kind === 'componentType'), false)
     assert.deepEqual(target.store.db.prepare("SELECT payload FROM outbox WHERE state='pending'").all().map(row => JSON.parse(String(row.payload)).kind), ['vehicle'])
     const rebundled = await manifest(await createBackup(target.business, teamId))
+    assert.equal(rebundled.source?.pending, 2)
     assert.deepEqual(rebundled.records.filter(record => record.kind === 'configurationRevision' || record.kind === 'componentType').map(record => record.id).sort(), [type.id, revision.id].sort())
     assert.deepEqual(rebundled.configurationReceipts, [receipt])
     target.store.db.close()
