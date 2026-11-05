@@ -1,2 +1,2 @@
 // Generated from package.json by scripts/sync-version.mjs.
-export const appVersion = '1.2.2'
+export const appVersion = '1.3.0'
