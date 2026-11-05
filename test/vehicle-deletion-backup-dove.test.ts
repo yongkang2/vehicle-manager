@@ -141,7 +141,9 @@ test('format 2 retains quarantine originals, markers and history without replayi
     assert.equal(target.store.get<Array<{ deletion: VehicleDeletion }>>('pendingDeletionImports')![0].deletion.id, marker.id)
     assert.equal(target.store.db.prepare("SELECT COUNT(*) AS count FROM outbox WHERE state='pending'").get()!.count, 0)
     assert.ok(target.business.history(vehicle.id).length > 0)
-    await restoreBackup(target.business, backup, teamId, target.actor, 'Repeat audit restore')
+    await assert.rejects(restoreBackup(target.business, backup, teamId, target.actor, 'Repeat audit restore'), { code: 'PENDING_BEFORE_RESTORE' })
+    // Exercise import idempotency independently of the pending-publication guard.
+    await restoreBackup(target.business, backup, teamId, target.actor, 'Repeat audit restore', [], { checkPending: false })
     assert.equal(target.store.quarantineRows().length, 1)
     const invalid = await rewrite(backup, data => { data.quarantinedOperations![0].operation.files = ['b'.repeat(64)] })
     await assert.rejects(restoreBackup(target.business, invalid, teamId, target.actor, 'Missing quarantine file'), { code: 'INVALID_BACKUP' })

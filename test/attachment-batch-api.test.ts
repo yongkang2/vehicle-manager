@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createApp } from '../server/app.js'
+import { Business } from '../server/business.js'
 import type { BusinessRecord } from '../shared/business.js'
 
 const jpeg = Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5/JJOSck9TRRRWlX+JL1Etj//2Q==', 'base64')
@@ -23,14 +24,14 @@ async function fixture() {
   const client = createApp({ dataDir: path.join(directory, 'local') }), server = client.app.listen(0, '127.0.0.1')
   if (!server.listening) await once(server, 'listening')
   const sessions = new Map<string, { cookie: string; token: string }>()
-  async function request(route: string, { method = 'GET', body, session = 'owner', token }: { method?: string; body?: unknown; session?: string; token?: string } = {}) {
+  async function request(route: string, { method = 'GET', body, session = 'owner', token, settle = true }: { method?: string; body?: unknown; session?: string; token?: string; settle?: boolean } = {}) {
     const credentials = sessions.get(session) || { cookie: '', token: '' }, form = body instanceof FormData
     const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api${route}`, { method, headers: { Cookie: credentials.cookie, 'X-App-Request': 'vehicle-manager', 'X-Workspace-Token': token ?? credentials.token, ...(body !== undefined && !form ? { 'Content-Type': 'application/json' } : {}) }, body: body === undefined ? undefined : form ? body as FormData : JSON.stringify(body) })
     const cookie = response.headers.get('set-cookie'); if (cookie) credentials.cookie = cookie.split(';')[0]
     if (response.ok) credentials.token = response.headers.get('x-workspace-token') || credentials.token
     sessions.set(session, credentials)
     const data = response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer())
-    await client.synchronization.settle()
+    if (settle) await client.synchronization.settle()
     return { status: response.status, data, headers: response.headers }
   }
   async function close() { await new Promise<void>(resolve => server.close(() => resolve())); await client.close(); await fs.rm(directory, { recursive: true, force: true }) }
@@ -140,4 +141,27 @@ test('attachment sequences preserve authentication, workspace-token and archived
     assert.equal(archived.status, 409); assert.equal(archived.data.error, 'PARENT_ARCHIVED')
     assert.equal(f.workspace.business.list('attachment', f.car.id).length, 0)
   } finally { await f.close() }
+})
+
+for (const outcome of ['logout', 'expired', 'revoked', 'workspace-epoch'] as const) test(`attachment upload rechecks ${outcome} after blob storage before creating records`, async () => {
+  const f = await fixture(), entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), originalBlob = Business.prototype.blob
+  let pending: ReturnType<typeof f.request> | null = null
+  try {
+    const before = f.workspace.business.history(f.car.id).length
+    Business.prototype.blob = async function (bytes) { const key = await originalBlob.call(this, bytes); entered.resolve(); await release.promise; return key }
+    pending = f.request(f.route, { method: 'POST', session: 'member', body: upload(pdf, 'permission-boundary.pdf'), settle: false })
+    await entered.promise
+    if (outcome === 'logout') assert.equal((await f.request('/logout', { method: 'POST', session: 'member', body: {}, settle: false })).status, 200)
+    else if (outcome === 'revoked') {
+      const roster = (await f.request('/team', { settle: false })).data, member = roster.members.find((entry: { role: string }) => entry.role === 'member')
+      assert.equal((await f.request(`/team/members/${member.id}`, { method: 'POST', body: { enabled: false, role: 'member', reason: 'Revoke during synthetic upload' }, settle: false })).status, 200)
+    } else if (outcome === 'expired') f.client.store.db.exec('UPDATE sessions SET expires=0')
+    else f.client.store.db.exec('UPDATE sessions SET workspace_epoch=workspace_epoch+1')
+    release.resolve()
+    const result = await pending
+    assert.equal(result.data.error, outcome === 'revoked' ? 'ACCESS_DISABLED' : outcome === 'workspace-epoch' ? 'WORKSPACE_CHANGED' : 'LOGIN_REQUIRED')
+    assert.equal(result.status, outcome === 'revoked' ? 403 : outcome === 'workspace-epoch' ? 409 : 401)
+    assert.equal(f.workspace.business.list('attachment', f.car.id).length, 0)
+    assert.equal(f.workspace.business.history(f.car.id).length, before)
+  } finally { release.resolve(); if (pending) await pending.catch(() => {}); Business.prototype.blob = originalBlob; await f.close() }
 })

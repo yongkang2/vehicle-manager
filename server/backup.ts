@@ -4,7 +4,7 @@ import { Transform } from 'node:stream'
 import unzipper from 'unzipper'
 import { AppError } from './team.js'
 import { Business, checksum, normalizeFields } from './business.js'
-import type { Actor, BusinessRecord, Change, Operation, QuarantinedOperation, RestorePreview, RestoreResult, VehicleDeletion } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, Operation, QuarantinedOperation, RestoredHistoryImport, RestorePreview, RestoreResult, VehicleDeletion } from '../shared/business.js'
 import { businessFieldRegistry, validReportAssociation } from '../shared/business.js'
 import type { TeamDocument } from '../shared/types.js'
 import { inspectVehiclePhoto, parsePhotoAttachmentId } from '../shared/vehicle-photo.js'
@@ -126,7 +126,7 @@ export async function createBackupStream(business: Business, teamId: string, tea
   const manifest: Manifest = {
     application: 'stellantis-vehicle-manager', format, teamId, created: new Date().toISOString(), appVersion, schemaVersion: business.store.db.prepare('PRAGMA user_version').get()!.user_version as number, fieldVersion: format === 4 ? 2 : 1, recordCounts, records, changes, pendingOperations,
     deletions, quarantinedOperations: business.store.quarantineRows(), configurationReceipts: receipts, team,
-    source: { revision: business.store.get<string>('businessRevision') || null, pending: pendingOperations.length + (business.store.get<unknown[]>('pendingDeletionImports') || []).length + pendingImports.length, conflicts: Number(business.store.db.prepare('SELECT COUNT(*) AS n FROM conflicts').get()!.n) },
+    source: { revision: business.store.get<string>('businessRevision') || null, pending: pendingOperations.length + (business.store.get<unknown[]>('pendingDeletionImports') || []).length + pendingImports.length + (business.store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []).length, conflicts: Number(business.store.db.prepare('SELECT COUNT(*) AS n FROM conflicts').get()!.n) },
   }
   const manifestBytes = Buffer.from(JSON.stringify(manifest))
   if (manifestBytes.length > maximumManifestBytes) throw new AppError('BACKUP_TOO_LARGE', 413)
@@ -329,7 +329,7 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
     const image = bytes && inspectVehiclePhoto(bytes)
     if (!image || attachment.data.mime !== image.mime || attachment.data.width !== image.width || attachment.data.height !== image.height || !(image.mime === 'image/png' ? /\.png$/i : /\.jpe?g$/i).test(String(attachment.data.name))) throw new AppError('INVALID_BACKUP', 422)
   }
-  if (options.checkPending !== false && (business.store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get() || (business.store.get<PendingConfigurationImport[]>('pendingConfigurationImports') || []).length)) throw new AppError('PENDING_BEFORE_RESTORE', 409)
+  if (options.checkPending !== false && (business.store.db.prepare("SELECT id FROM outbox WHERE state='pending' LIMIT 1").get() || (business.store.get<PendingConfigurationImport[]>('pendingConfigurationImports') || []).length || (business.store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []).length)) throw new AppError('PENDING_BEFORE_RESTORE', 409)
   const skipped = manifest.records.filter(record => deletedIds.has(record.id) || (record.vehicleId !== null && deletedVehicles.has(record.vehicleId)))
   const skippedVehicleIds = [...new Set(skipped.map(record => record.kind === 'vehicle' ? record.id : record.vehicleId!))]
   const currentRecords = business.list()
@@ -359,7 +359,6 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
     if (protectedImport.records.length || protectedImport.receipts.length) business.store.set('pendingConfigurationImports', [{ id: randomUUID(), records: protectedImport.records, receipts: protectedImport.receipts, actor, reason } satisfies PendingConfigurationImport])
     business.store.applyDeletions(deletions)
     business.store.importQuarantine(quarantine)
-    const previousSequence = business.store.db.prepare('SELECT COALESCE(MAX(seq),0) AS seq FROM outbox').get()!.seq as number
     for (const record of ordered) {
       const exists = business.store.db.prepare('SELECT id FROM records WHERE id=?').get(record.id)
       const current = exists ? business.get(record.id) : null
@@ -382,12 +381,8 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
     }
     const historical = manifest.changes.filter(change => object(change) && identifier(change.id) && identifier(change.recordId) && (ids.has(change.recordId) || deletedIds.has(change.recordId) || deletedVehicles.has(change.vehicleId)) && identifier(change.vehicleId) && timestamp(change.created))
     for (const change of historical) business.store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
-    const first = business.store.db.prepare('SELECT id,payload FROM outbox WHERE seq>? ORDER BY seq LIMIT 1').get(previousSequence)
-    if (first) {
-      const operation = JSON.parse(first.payload as string) as Operation
-      operation.changes.push(...historical.filter(change => !operation.changes.some(existing => existing.id === change.id)))
-      business.store.db.prepare('UPDATE outbox SET payload=? WHERE id=?').run(JSON.stringify(operation), first.id)
-    }
+    // History must also publish when working records already match the backup.
+    if (historical.length) business.store.set('pendingHistoryImports', [...(business.store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []), { id: randomUUID(), actor, changes: historical } satisfies RestoredHistoryImport])
     summary.changed = changed + protectedImport.records.length
     business.store.event(actor.id, 'backup.restored', { reason, ...summary, teamId })
     options.committed?.(summary)
