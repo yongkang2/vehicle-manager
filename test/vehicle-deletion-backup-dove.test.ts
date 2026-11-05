@@ -73,6 +73,7 @@ test('restore preview reports changes, archive candidates and unrecognized field
     assert.equal(preview.changes, 1)
     assert.deepEqual(preview.archiveCandidates.map(item => [item.id, item.relatedRecords]), [[extra.id, 1]])
     assert.deepEqual(preview.droppedFields, [{ recordId: sharedId, fields: ['futureField'] }])
+    assert.equal(preview.effects.some(effect => effect.fields.some(field => field.key === 'futureField')), false)
     const current = target.business.get(sharedId)
     target.business.write({ id: sharedId, kind: 'vehicle', data: { ...current.data, owner: 'Edited after preview' }, version: current.version, actor: target.actor, reason: 'Invalidate preview' })
     const refreshed = await previewBackup(target.business, bytes, teamId)

@@ -101,7 +101,7 @@ test('HTTP deletion preserves archive behavior, enforces confirmations and permi
 
     const restoreForm = new FormData()
     restoreForm.append('file', new Blob([new Uint8Array(backup.data as Buffer)]), 'before-delete.zip')
-    restoreForm.append('confirmation', 'RESTORE'); restoreForm.append('reason', 'Restore unrelated state without resurrecting deleted vehicles')
+    restoreForm.append('requestId', randomUUID()); restoreForm.append('confirmation', 'RESTORE'); restoreForm.append('reason', 'Restore unrelated state without resurrecting deleted vehicles')
     const previewForm = new FormData(); previewForm.append('file', new Blob([new Uint8Array(backup.data as Buffer)]), 'before-delete.zip')
     const backupPreview = await request(admin, '/business/restore/preview', 'POST', previewForm)
     assert.equal(backupPreview.status, 200); restoreForm.append('previewFingerprint', backupPreview.data.fingerprint); restoreForm.append('archiveRecordIds', JSON.stringify([]))

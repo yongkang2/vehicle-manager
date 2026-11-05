@@ -224,6 +224,15 @@ export class TeamDirectory {
     } catch (error) { return mapFileError(error) }
   }
 
+  async recordBackup(directory: string, teamId: string, identity: Identity): Promise<TeamDocument> {
+    return this.withAccess(directory, teamId, identity, true, async (team, member) => {
+      team.lastBackupAt = created()
+      event(team, member.id, 'backup.completed', team.id, 'Team backup transfer completed')
+      await atomicDocument(directory, team)
+      return team
+    })
+  }
+
   async withAccess<T>(directory: string, teamId: string, identity: Identity, admin: boolean, work: (team: TeamDocument, member: Member) => Promise<T>): Promise<T> {
     return locked(directory, async () => {
       const team = await this.read(directory, teamId)

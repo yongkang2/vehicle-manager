@@ -8,6 +8,7 @@ export type TeamEvent = { id: string; actorId: string; action: string; targetId:
 export type TeamDocument = {
   application: 'stellantis-vehicle-manager'
   protocol: 1 | 2
+  lastBackupAt?: string
   minWritableVersion?: string
   id: string
   name: string
