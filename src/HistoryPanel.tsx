@@ -28,12 +28,15 @@ function HistoryEntry({ change, language, reportIds, onOpenReport }: { change: H
     <header><p className="history-summary"><strong>{change.actor.name}</strong><span className="history-action">{text(change.action === 'updated' ? 'updatedAction' : change.action)}</span><span className="history-object">{object}</span></p><time dateTime={change.created}>{new Date(change.created).toLocaleString(zh ? 'zh-CN' : 'en-GB')}</time></header>
     <p className="history-reason"><span>{text('reason')}{zh ? '： ' : ': '}</span>{change.reason || '—'}</p>
     <details><summary>{zh ? `查看变更（${fields.length + Number(statusChanged)}）` : `View changes (${fields.length + Number(statusChanged)})`}</summary>
+      <div className="history-detail-body">
+      {(fields.length > 0 || statusChanged) && <div className="history-diff-heading" aria-hidden="true"><span>{zh ? '字段' : 'Field'}</span><span>{zh ? '变更前' : 'Before'}</span><span /><span>{zh ? '变更后' : 'After'}</span></div>}
       <div className="history-diffs">{fields.map(diff)}
         {statusChanged && <div className="history-field"><strong>{text('status')}</strong><del>{text(change.archivedBefore ? 'archived' : 'available')}</del><span>→</span><ins>{text(change.archivedAfter ? 'archived' : 'available')}</ins></div>}
         {!fields.length && !statusChanged && <p className="muted">{zh ? '没有字段值变更' : 'No field value changes'}</p>}
       </div>
       {change.sourceId && (reportIds?.includes(change.sourceId) && onOpenReport ? <Button type="link" onClick={() => onOpenReport(change.sourceId!)}>{text('source')}</Button> : <p className="muted">{text('sourceUnavailable')}</p>)}
       <p className="history-actor-id">{zh ? '操作人 ID' : 'Actor ID'}: {change.actor.id}</p>
+      </div>
     </details>
   </article>
 }
