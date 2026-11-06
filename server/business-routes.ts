@@ -86,12 +86,15 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const localPath = req.path.toLowerCase()
         const localExport = localPath.startsWith('/backup/reminder') || localPath === '/backup/status' || (localPath === '/backup' && req.query.source === 'local') || localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/') || localPath === '/vehicle-table-preferences' || localPath === '/vehicle-table-preferences/'
         const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
+        // History uses the authorized local snapshot; the existing workspace tick
+        // refreshes shared data without making every search/page hash all blobs.
+        const historyRead = req.method === 'GET' && localPath.startsWith('/history/')
         const localDraftBinding = req.method === 'POST' && /^\/dove\/[^/]+\/vehicle\/?$/.test(localPath)
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const canonicalMaintenance = deletePreview || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && (req.path === '/restore' || /^\/restore\/[^/]+\/publish$/.test(req.path)))
         const workspaceRead = req.method === 'GET' && req.path === '/workspace'
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !(workspaceRead && req.query.local === '1')) {
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !historyRead && !(workspaceRead && req.query.local === '1')) {
           const state = await (workspaceRead && req.query.full !== '1' ? checkForUpdates(req.businessContext) : sync(req.businessContext))
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
@@ -144,7 +147,15 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   router.get('/history', (req, res) => res.json(business.history(req.query.vehicleId ? String(req.query.vehicleId) : undefined)))
   router.get('/history/query', (req: BusinessRequest, res) => {
     sessionGuard(req)()
-    res.json(new History(store).query(req.query))
+    res.json({ ...new History(store).query(req.query), sync: synchronization.status() })
+  })
+  router.get('/history/options', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(new History(store).options())
+  })
+  router.get('/history/changes/:id', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(new History(store).detail(String(req.params.id)))
   })
   writeRoute('get', '/history/export', async (req: BusinessRequest, res) => {
     const verify = finalAccess(req, res)
