@@ -113,5 +113,7 @@ const labels: Record<string, [string, string]> = {
   partNumber: ['Part Number', '零件号'], serialNumber: ['Serial Number', '序列号'], partMaturityLevel: ['Part Maturity Level', '零件成熟度'],
   hvBatteryMaturityLevel: ['HV Battery Maturity Level', '高压电池成熟度'],
   multipleHvBatteries: ['Multiple active HV batteries are recorded. All current maturity levels are shown; review the battery records if only one should be installed.', '存在多条在装高压电池记录，车辆总览显示全部当前成熟度；如应仅安装一个电池，请核对电池记录。'],
+  downloadSelected: ['Download', '下载'], vehicleUnavailable: ['Vehicle unavailable', '车辆信息不可用'], selectReportVehicle: ['Model / VIN', '车型 / VIN'], reportNameSearch: ['Report name', '报告名称'], unarchived: ['Unarchived', '未归档'], retry: ['Retry', '重试'], selected: ['Selected', '已选'], clearSelection: ['Clear selection', '清空选择'], selectTwoReports: ['Select exactly two reports from the same vehicle and VIN', '请选择同一车辆、同一 VIN 的两份报告'], onlyDifferences: ['Differences only', '仅看差异'], noReportDifferences: ['No differences in this comparison scope', '本次比较范围内无差异'], changedFields: ['Changed fields', '变化字段'],
+
 }
 export const translateBusiness = (language: Language) => (key: string): string => labels[key]?.[language === 'zh' ? 1 : 0] || key

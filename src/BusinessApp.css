@@ -1106,3 +1106,16 @@
         padding-right: 0
     }
 }
+.report-vehicle { display: flex; flex-direction: column; gap: 4px; }
+.report-vehicle small, .comparison-names small { color: #58677d; display: block; font-weight: 400; }
+.report-vehicle small { font-family: Consolas, monospace; }
+.report-filters { flex: 1; flex-wrap: wrap; }
+.report-filters > .ant-select:first-child { min-width: 280px; max-width: 100%; }
+.report-selection-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; flex-wrap: wrap; }
+.report-difference-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 12px; }
+@media (max-width: 700px) { .report-difference-detail { grid-template-columns: 1fr; } }
+
+.report-field-differences { padding: 12px; overflow-x: auto; }
+.report-field-differences table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.report-field-differences th, .report-field-differences td { padding: 8px 12px; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.report-field-differences th:first-child { width: 28%; }

@@ -150,7 +150,7 @@ function differences<T extends object>(before: T[], after: T[], keyOf: (item: T)
   for (const [items, target] of [[before, left], [after, right]] as const) for (const item of items) target.set(keyOf(item), [...(target.get(keyOf(item)) || []), item])
   return [...new Set([...left.keys(), ...right.keys()])].sort().map(key => {
     const previous = left.get(key) || [], current = right.get(key) || []
-    const fields = previous.length === 1 && current.length === 1 ? Object.keys(previous[0]).filter(field => !ignoredFields.includes(field) && JSON.stringify((previous[0] as Record<string, unknown>)[field]) !== JSON.stringify((current[0] as Record<string, unknown>)[field])) : []
+    const fields = previous.length === 1 && current.length === 1 ? Array.from(new Set([...Object.keys(previous[0]), ...Object.keys(current[0])])).filter(field => !ignoredFields.includes(field) && JSON.stringify((previous[0] as Record<string, unknown>)[field]) !== JSON.stringify((current[0] as Record<string, unknown>)[field])) : []
     return { key, status: previous.length > 1 || current.length > 1 ? 'ambiguous' : !previous.length ? 'added' : !current.length ? 'missing' : fields.length ? 'changed' : 'unchanged', before: previous.length === 1 ? previous[0] : previous, after: current.length === 1 ? current[0] : current, fields }
   })
 }
@@ -159,5 +159,6 @@ export function compareReports(left: BusinessRecord, right: BusinessRecord) {
   const before = (left.data as unknown as ReportData).parsed, after = (right.data as unknown as ReportData).parsed
   const leftVin = reportAssociationVin(left), rightVin = reportAssociationVin(right)
   if (!leftVin || leftVin !== rightVin) throw new AppError('REPORT_VIN_MISMATCH', 409)
-  return { left, right, controllers: differences(before.controllers, after.controllers, item => `${keyControllerName(item.name) || item.name}|${item.network}`, ['name']), faults: differences(before.faults, after.faults, item => `${item.controller}|${item.code}`) }
+  const summary = (record: BusinessRecord) => ({ ...record, data: { name: record.data.name, recordedAt: record.data.recordedAt } })
+  return { left: summary(left), right: summary(right), controllers: differences(before.controllers, after.controllers, item => `${keyControllerName(item.name) || item.name}|${item.network}`, ['name']), faults: differences(before.faults, after.faults, item => `${item.controller}|${item.code}`) }
 }

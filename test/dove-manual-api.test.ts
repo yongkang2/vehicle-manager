@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import ExcelJS from 'exceljs'
+import { Open } from 'unzipper'
 import { createApp } from '../server/app.js'
 import { Business } from '../server/business.js'
 import type { BusinessRecord, DovePreview } from '../shared/business.js'
@@ -254,4 +255,40 @@ test('graceful shutdown waits for manual report retention before closing databas
     assert.equal(retained.data.association.vehicleId, car.id); assert.equal(retained.data.association.vin, vinA); assert.equal(retained.data.parsed.vin, '')
     assert.deepEqual((await f.request(`/business/files/${retained.id}`)).data, bytes)
   } finally { release.resolve(); if (pending) await pending.catch(() => {}); if (closing) await closing.catch(() => {}); Business.prototype.blob = originalBlob; await f.close() }
+})
+
+
+test('report ZIP preserves duplicate names and validates selection; comparison returns compact local results', async () => {
+  const f = await fixture()
+  try {
+    await f.register(); const team = await f.team(); const car = await f.vehicle()
+    const bytes = await workbook()
+    const first = await f.save(await f.bind(await f.preview(bytes), car), { reportOnly: true })
+    const second = await f.save(await f.bind(await f.preview(await workbook(null, '3.0')), car), { reportOnly: true })
+    assert.equal(first.status, 201); assert.equal(second.status, 201)
+    const ids = [first.data.id, second.data.id]
+    const zip = await f.request('/business/reports/download', { method: 'POST', body: { ids } })
+    assert.equal(zip.status, 200)
+    const entries = (await Open.buffer(zip.data)).files
+    assert.equal(entries.length, 2); assert.equal(new Set(entries.map(entry => entry.path)).size, 2)
+    assert.deepEqual(await entries[0].buffer(), bytes)
+    for (const invalid of [[], [ids[0], ids[0]], [car.id], [42]]) {
+      assert.equal((await f.request('/business/reports/download', { method: 'POST', body: { ids: invalid } })).status, 400)
+    }
+    const comparison = await f.request(`/business/reports/compare?left=${ids[0]}&right=${ids[1]}`)
+    assert.equal(comparison.status, 200)
+    assert.equal(comparison.data.left.data.parsed, undefined)
+    assert.ok(comparison.data.controllers.some((row: { status: string }) => row.status === 'changed'))
+    const business = f.client.workspaces.get(team.id).business, originalRead = business.readBlob.bind(business)
+    const entered = deferred(), release = deferred()
+    business.readBlob = async key => { entered.resolve(); await release.promise; return originalRead(key) }
+    const controller = new AbortController()
+    const interrupted = f.request('/business/reports/download', { method: 'POST', body: { ids }, signal: controller.signal, settle: false })
+    await entered.promise; controller.abort(); release.resolve()
+    await assert.rejects(interrupted)
+    business.readBlob = originalRead
+    const nextWrite = await f.request('/business/records', { method: 'POST', signal: AbortSignal.timeout(5000), body: { kind: 'vehicle', data: { vin: vinB, status: 'available', complianceLevel: 'Eu7', name: 'Cancellation test vehicle' }, reason: 'Verify download cancellation releases the queue' } })
+    assert.equal(nextWrite.status, 201)
+
+  } finally { await f.close() }
 })
