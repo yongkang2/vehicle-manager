@@ -31,6 +31,10 @@ Use the vehicle list and detail views to manage vehicles, components, attachment
 
 Pending offline changes remain local until synchronization succeeds. Pausing synchronization keeps pending changes queued; resume explicitly when ready. Team permissions and archived-record restrictions continue to apply.
 
+Report archive shows active and archived reports together. Filter by vehicle model/VIN, or combine space-separated keywords across vehicle identity, project, report name and dates. Select one or more reports to download originals (a ZIP for multiple reports); administrators can archive selected active reports with a reason. Selection persists across pages and clears when filters change. Failed archive items remain selected for retry. Open a report to view its contents or restore an archived report.
+
+To compare, select exactly two unarchived reports belonging to the same vehicle and associated VIN. The earlier acquisition is the left baseline; acquisition time and filename identify each side. Comparison uses the authorized local snapshot without waiting for shared synchronization. Differences appear first with details collapsed; turn off Differences only to inspect unchanged entries. Expand a row to see aligned values, and review ambiguous duplicate matches manually.
+
 ## Backups and upgrades
 
 Before changing application versions, save your work, stop the old service, and independently back up the complete local data directory and shared folder to protected storage. An automatic migration backup is not a complete disaster-recovery backup and may omit separate blob files.
