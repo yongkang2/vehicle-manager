@@ -155,6 +155,7 @@ function differences<T extends object>(before: T[], after: T[], keyOf: (item: T)
   })
 }
 export function compareReports(left: BusinessRecord, right: BusinessRecord) {
+  if (left.archived || right.archived) throw new AppError('RECORD_ARCHIVED', 409)
   if (left.kind !== 'report' || right.kind !== 'report' || left.vehicleId !== right.vehicleId) throw new AppError('REPORT_VIN_MISMATCH', 409)
   const before = (left.data as unknown as ReportData).parsed, after = (right.data as unknown as ReportData).parsed
   const leftVin = reportAssociationVin(left), rightVin = reportAssociationVin(right)

@@ -57,6 +57,8 @@ test('DOVE validates VIN, retains exact bytes, prevents unmatched retention and 
     assert.equal(business.list('part', car.id).length, 1)
     assert.equal(business.list('part', car.id)[0].data.software, '2.0')
     assert.equal(compareReports(first, second).controllers[0].status, 'changed')
+    assert.throws(() => compareReports({ ...first, archived: true }, second), { code: 'RECORD_ARCHIVED' })
+    assert.throws(() => compareReports(first, { ...second, archived: true }), { code: 'RECORD_ARCHIVED' })
     const aliasReport = (name: string) => ({ ...first, data: { ...first.data, parsed: { ...parsed, controllers: [{ ...parsed.controllers[0], name }] } } })
     const aliasComparison = compareReports(aliasReport('MSB'), aliasReport('bms'))
     assert.equal(aliasComparison.controllers.length, 1)
