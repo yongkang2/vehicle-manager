@@ -174,7 +174,7 @@ test('an aborted asynchronous upload must settle before the same session can swi
     release(); assert.equal((await switching).status, 200)
     workspace.business.blob = originalBlob
     assert.equal((await request('/status')).data.teamId, b.id)
-    assert.equal(workspace.business.list('attachment', car.id).length, 1)
+    assert.equal(workspace.business.list('attachment', car.id).length, 0)
     assert.equal(client.workspaces.get(b.id).business.list('attachment').length, 0)
   } finally { release?.(); await context.close() }
 })
