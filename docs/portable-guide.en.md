@@ -5,13 +5,15 @@
 Download the latest official Windows x64 ZIP from:
 https://github.com/yongkang2/vehicle-manager/releases/latest
 
-Choose the application ZIP, rather than GitHub's source-code archives. Extract the entire ZIP to a writable local folder. Do not run the application inside the ZIP or from the team share. The package includes Node.js and production dependencies; no separate Node.js or npm installation is required.
+Choose the application ZIP, rather than GitHub's source-code archives. Extract the entire ZIP to a writable local folder. Do not run the application inside the ZIP or from the team share. The branded launcher uses .NET Framework 4, normally included with Windows 10/11. Start.cmd remains available as a fallback. The package includes Node.js and production dependencies; no separate Node.js or npm installation is required.
 
 ## Start and stop
 
+The executable is currently unsigned. Organization application-control policies may block it even when Start.cmd works. If blocked, use the existing Start.cmd entry point and ask your IT administrator about an approved signed distribution; do not disable application-control policies.
+
 Double-click Create-Desktop-Shortcut.cmd to create a Vehicle Manager desktop shortcut with the application icon. Keep the extracted folder in place; recreate the shortcut after moving the folder or installing a new release.
 
-Double-click Start.cmd to start the local service and open your browser. The service uses a free local port. Run Stop.cmd to stop safely and finish pending work before the database closes. Closing all application pages also permits automatic shutdown after the browser-presence checks and reconnect grace period. Hidden or minimized pages keep the service running.
+Double-click Vehicle Manager.exe (the silver car icon) to start the local service and open your browser. The service uses a free local port. Run Stop.cmd to stop safely and finish pending work before the database closes. Closing all application pages also permits automatic shutdown after the browser-presence checks and reconnect grace period. Hidden or minimized pages keep the service running.
 
 ## Accounts and local data
 

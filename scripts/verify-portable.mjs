@@ -20,6 +20,8 @@ async function verifyExtracted(root) {
   const data = path.join(root, 'acceptance-data')
   assert.ok(existsSync(runtime), 'Extracted package is missing runtime/node.exe')
   assert.ok(existsSync(launcher), 'Extracted package is missing launcher.mjs')
+  const desktopLauncher = path.join(root, 'Vehicle Manager.exe')
+  assert.ok(existsSync(desktopLauncher), 'Extracted package is missing the branded launcher')
   assert.ok(existsSync(path.join(root, 'Create-Desktop-Shortcut.cmd')), 'Extracted package is missing the shortcut script')
   const icon = await fs.readFile(path.join(root, 'vehicle-manager.ico'))
   assert.equal(icon.readUInt32LE(0), 0x00010000, 'Application icon must be a Windows ICO')
@@ -49,7 +51,7 @@ async function verifyExtracted(root) {
   let started = false
   let stopped = false
   try {
-    await execute(runtime, [launcher, '--no-browser'], { cwd: root, env, timeout: 30000 })
+    await execute(desktopLauncher, ['--no-browser'], { cwd: os.tmpdir(), env, timeout: 30000 })
     started = true
     const state = JSON.parse(await fs.readFile(path.join(data, 'service.json'), 'utf8'))
     const origin = `http://127.0.0.1:${state.port}`
