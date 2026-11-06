@@ -423,7 +423,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
           {
             key: 'vcuType', title: text('vcuType'), width: 160, ellipsis: { showTitle: false }, render: (_, record) => {
               const value = display(controllerFor(record.id, 'VCU')?.data.controllerType)
-              return <Tooltip title={value}><span>{value}</span></Tooltip>
+              return <Tooltip title={value}><span className="vehicle-vcu-type">
+                {value === 'Open ECU' && <img className="vehicle-vcu-type-icon" src="/open-ecu.png" width={35} height={32} alt="" aria-hidden="true" />}
+                <span className="vehicle-vcu-type-label">{value}</span>
+              </span></Tooltip>
             }
           },
           ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
