@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { Alert, Button, Empty, Input, Pagination, Spin, Select, DatePicker, Tooltip } from 'antd'
+import { Alert, Button, Empty, Input, Pagination, Spin, Select, DatePicker, Tooltip, Popover } from 'antd'
 import type { DatePickerProps } from 'antd'
-import { Download, Search } from 'lucide-react'
+import { Download, Search, CircleHelp, Clock3 } from 'lucide-react'
 import { createWorkspaceScope } from './api'
 import { errorText, type Language } from './i18n'
 import { translateBusiness } from './business-i18n'
@@ -55,6 +55,7 @@ function HistoryEntry({ change, language, reportIds, onOpenReport }: { change: H
 export default function HistoryPanel({ language, vehicleId, refreshToken, reportIds, onOpenReport }: { language: Language; vehicleId?: string; refreshToken?: unknown; reportIds?: string[]; onOpenReport?: (id: string) => void }) {
   const zh = language === 'zh', text = translateBusiness(language)
   const searchHelpId = useId()
+  const searchHelp = zh ? '搜索操作人、原因、字段名或内容；多个关键词用空格分隔，同时匹配。' : 'Search people, reasons, field names or content. Separate keywords with spaces to match all.'
   const [selectedVehicle, setSelectedVehicle] = useState<string | undefined>(), [day, setDay] = useState<Exclude<DatePickerProps['value'], unknown[]>>(null)
   const activeVehicle = vehicleId || selectedVehicle
   const date = day?.format('YYYY-MM-DD') || ''
@@ -116,19 +117,22 @@ export default function HistoryPanel({ language, vehicleId, refreshToken, report
 
       <DatePicker value={day} aria-label={zh ? '操作日期' : 'Date'} placeholder={zh ? '操作日期' : 'Date'} format="YYYY-MM-DD" onChange={next => { setDay(next); setPage(1) }} />
       <Input.Search prefix={<Search size={15} />} value={draft} allowClear aria-label={zh ? '搜索历史' : 'Search history'} placeholder={zh ? '姓名、原因、字段或内容…' : 'Name, reason, field or content…'} aria-describedby={searchHelpId} onChange={event => { setDraft(event.target.value); if (!event.target.value) { setQuery(''); setPage(1) } }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} onSearch={() => { if (!composing) { setQuery(draft.trim()); setPage(1) } }} />
+      <Popover trigger="click" title={zh ? '搜索提示' : 'Search tips'} content={<div className="history-help-content"><p>{searchHelp}</p><p>{zh ? '例如：Alex 软件' : 'Example: Alex software'}</p><p>{zh ? '已删除车辆的历史仍可通过车型或 VIN 关键词查找。' : 'Find deleted vehicle history using model or VIN keywords.'}</p></div>}><Button type="text" className="history-help-button" aria-label={zh ? '搜索帮助' : 'Search help'} icon={<CircleHelp size={17} />} /></Popover>
       {!vehicleId && <Tooltip title={zh ? '按当前车辆、日期和关键词导出全部匹配记录，不受分页限制' : 'Export all records matching the current vehicle, date and keywords, across all pages'}><span className="history-export"><Button icon={<Download size={15} />} disabled={!exportReady} loading={exporting} onClick={() => void exportHistory()}>{zh ? '导出筛选结果' : 'Export filtered results'}</Button></span></Tooltip>}
       {(selectedVehicle || day || draft) && <Button type="text" onClick={() => { setSelectedVehicle(undefined); setDay(null); setDraft(''); setQuery(''); setPage(1) }}>{zh ? '清空筛选' : 'Clear filters'}</Button>}
     </div>
-    <p id={searchHelpId} className="history-search-help">{zh ? '搜索操作人、原因、字段名或内容；多个关键词用空格分隔，同时匹配。例如：Alex 软件' : 'Search actors, reasons, field names or content. Separate keywords with spaces to match all. Example: Alex software'}</p>
+    <span id={searchHelpId} className="history-accessible-help">{searchHelp}</span>
     {exportError && <Alert type="error" showIcon title={errorText(exportError, language)} />}
     {!vehicleId && optionsError && <Alert type="error" showIcon title={errorText(optionsError, language)} action={<Button onClick={() => setRetry(item => item + 1)}>{zh ? '重试' : 'Retry'}</Button>} />}
     <div className="history-results" aria-busy={loading}>
       {!visibleResult && loading ? <div className="history-loading" role="status"><Spin /><span>{zh ? '正在加载历史…' : 'Loading history…'}</span></div> : !visibleResult && error ? <Alert type="error" showIcon title={errorText(error, language)} action={<Button onClick={() => setRetry(item => item + 1)}>{zh ? '重试' : 'Retry'}</Button>} /> : visibleResult && <>
         {error && <Alert type="error" showIcon title={errorText(error, language)} action={<Button onClick={() => setRetry(item => item + 1)}>{zh ? '重试' : 'Retry'}</Button>} />}
-        <p className="muted">{zh ? '本地历史' : 'Local history'} · {zh ? '上次同步：' : 'Last synchronized: '}{visibleResult.sync.lastSync ? new Date(visibleResult.sync.lastSync).toLocaleString(zh ? 'zh-CN' : 'en-GB') : '—'}{visibleResult.sync.phase === 'offline' ? (zh ? ' · 离线' : ' · Offline') : visibleResult.sync.error ? (zh ? ' · 同步暂停' : ' · Synchronization paused') : ''}{loading ? (zh ? ' · 正在刷新…' : ' · Refreshing…') : ''}</p>
-        <p className="muted" role="status">{zh ? `共 ${visibleResult.total} 条记录 · 每页 50 条` : `${visibleResult.total.toLocaleString('en-GB')} entries · 50 per page`}</p>
+        <div className="history-result-meta">
+          <p role="status" className="history-result-count"><strong>{visibleResult.total.toLocaleString(zh ? 'zh-CN' : 'en-GB')}</strong> {zh ? '条记录' : 'entries'}{loading && <span className="muted"> · {zh ? '正在刷新…' : 'Refreshing…'}</span>}</p>
+          <Popover trigger="click" title={zh ? '本地历史' : 'Local history'} content={<div className="history-help-content"><p>{zh ? '上次同步：' : 'Last synchronized: '}{visibleResult.sync.lastSync ? new Date(visibleResult.sync.lastSync).toLocaleString(zh ? 'zh-CN' : 'en-GB') : (zh ? '尚未同步' : 'Not synchronized yet')}</p><p>{zh ? '先显示本机记录，共享数据在后台同步。' : 'Showing local records while shared data synchronizes in the background.'}</p></div>}><Button type="text" size="small" className="history-sync-status" icon={<Clock3 size={13} />}>{visibleResult.sync.phase === 'offline' ? (zh ? '离线 · 本地记录' : 'Offline · Local records') : visibleResult.sync.error ? (zh ? '同步暂停 · 本地记录' : 'Sync paused · Local records') : (zh ? '本地记录' : 'Local records')}{visibleResult.sync.lastSync && <span>{' · '}{new Date(visibleResult.sync.lastSync).toLocaleTimeString(zh ? 'zh-CN' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>}</Button></Popover>
+        </div>
         {visibleResult.items.length ? visibleResult.items.map(change => <HistoryEntry key={change.id} change={change} language={language} reportIds={reportIds} onOpenReport={onOpenReport} />) : <Empty description={query || day || selectedVehicle ? (zh ? '没有匹配历史，请修改或清空搜索。' : 'No matching history. Change or clear your search.') : (zh ? '暂无历史记录' : 'No history yet')} />}
-        <Pagination current={visibleResult.page} total={visibleResult.total} pageSize={50} showSizeChanger={false} hideOnSinglePage onChange={setPage} />
+        <Pagination current={visibleResult.page} total={visibleResult.total} pageSize={50} showSizeChanger={false} hideOnSinglePage showTotal={(total, range) => zh ? `第 ${range[0]}–${range[1]} 条 · 共 ${total} 条 · 每页 50 条` : `${range[0]}–${range[1]} of ${total} · 50 per page`} onChange={setPage} />
       </>}
     </div>
   </section>
