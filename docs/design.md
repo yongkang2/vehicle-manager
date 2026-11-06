@@ -99,4 +99,4 @@ History toolbar refinement: search guidance lives in a focusable help popover be
 
 ## Application icon
 
-The portable desktop shortcut and browser favicon use the silver flowing car mark on a solid midnight navy (#061850) rounded tile. The editable master is public/vehicle-manager.svg; PNG and multi-size ICO exports sit alongside it. The package includes Create-Desktop-Shortcut.cmd and vehicle-manager.ico; the shortcut targets Vehicle Manager.exe in the extracted folder. The package includes this branded Windows launcher for direct startup without creating a shortcut. It runs the bundled Node.js launcher without a console window and reports startup errors in a dialog. Recreate it after moving or upgrading that folder.
+The portable desktop shortcut and browser favicon use the silver flowing car mark on a solid midnight navy (#061850) rounded tile. The editable master is public/vehicle-manager.svg; PNG and multi-size ICO exports sit alongside it. The package includes Create-Desktop-Shortcut.cmd and vehicle-manager.ico; the shortcut targets Start.cmd in the extracted folder. Recreate it after moving or upgrading that folder.
