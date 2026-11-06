@@ -121,6 +121,7 @@ async function readDocument(directory: string): Promise<TeamDocument> {
   if (file.length > 2 * 1024 * 1024) throw new AppError('UNSUPPORTED_TEAM')
   let team: TeamDocument
   try { team = JSON.parse(file.toString('utf8')) as TeamDocument } catch { throw new AppError('UNSUPPORTED_TEAM') }
+  if (team?.application === application && Number.isSafeInteger(team.protocol) && team.protocol > 2) throw new AppError('CLIENT_UPGRADE_REQUIRED', 409)
   if (team.application !== application || ![1, 2].includes(team.protocol) || (team.protocol === 2 && !validVersion(team.minWritableVersion)) || typeof team.id !== 'string' || typeof team.name !== 'string' || !Number.isSafeInteger(team.revision) || !Array.isArray(team.members) || !Array.isArray(team.bindings) || !Array.isArray(team.requests) || !Array.isArray(team.events)) throw new AppError('UNSUPPORTED_TEAM')
   return team
 }
@@ -221,6 +222,15 @@ export class TeamDirectory {
       this.observe(team)
       return team
     } catch (error) { return mapFileError(error) }
+  }
+
+  async recordBackup(directory: string, teamId: string, identity: Identity): Promise<TeamDocument> {
+    return this.withAccess(directory, teamId, identity, true, async (team, member) => {
+      team.lastBackupAt = created()
+      event(team, member.id, 'backup.completed', team.id, 'Team backup transfer completed')
+      await atomicDocument(directory, team)
+      return team
+    })
   }
 
   async withAccess<T>(directory: string, teamId: string, identity: Identity, admin: boolean, work: (team: TeamDocument, member: Member) => Promise<T>): Promise<T> {

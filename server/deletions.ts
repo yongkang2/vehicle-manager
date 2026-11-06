@@ -50,7 +50,8 @@ export class SharedBusinessSnapshot {
     }
     let head: BusinessHead
     try { head = JSON.parse(bytes.toString()) as BusinessHead } catch { throw corrupt() }
-    if (!head || ![1, 2, 3, 4].includes(head.protocol) || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
+    if (!head || !Number.isSafeInteger(head.protocol) || head.protocol < 1 || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
+    if (head.protocol > 4) throw new AppError('CLIENT_UPGRADE_REQUIRED', 409)
     const sequence = business.store.get<number>('businessSequence') || 0
     if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || head.protocol < (business.store.get<number>('businessProtocol') || 1)) throw new AppError('BUSINESS_ROLLBACK', 409)
     return head

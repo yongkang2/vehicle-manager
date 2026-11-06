@@ -4,16 +4,13 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import { ZipArchive } from 'archiver'
+import { createHash } from 'node:crypto'
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Build this portable package on Windows x64.')
 const manifest = JSON.parse(await fs.readFile(path.join(project, 'package.json'), 'utf8'))
-const argument = process.argv.indexOf('--version')
-const requested = argument >= 0 ? process.argv[argument + 1] : process.env.VEHICLE_MANAGER_PACKAGE_VERSION
-if (requested !== undefined) {
-  if (!/^\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(String(requested))) throw new Error('Use a release version such as --version 1.1.1 with three numeric components.')
-  manifest.version = String(requested)
-}
+const versionCheck = spawnSync(process.execPath, [path.join(project, 'scripts', 'check-version.mjs'), '--built', '--release', ...process.argv.slice(2)], { stdio: 'inherit' })
+if (versionCheck.error || versionCheck.status !== 0) throw new Error('Release version checks failed.')
 const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)
 const name = `vehicle-manager-${manifest.version}-win-x64-${stamp}`
 const release = path.join(project, 'releases', name), application = path.join(release, 'app')
@@ -30,13 +27,12 @@ try {
 
   await fs.mkdir(application, { recursive: true })
   for (const folder of ['dist', 'dist-server']) await fs.cp(path.join(project, folder), path.join(application, folder), { recursive: true })
-  if (requested !== undefined) await fs.writeFile(path.join(application, 'dist-server', 'shared', 'version.js'), `export const appVersion = ${JSON.stringify(manifest.version)};\n`)
   await fs.cp(path.join(production, 'node_modules'), path.join(application, 'node_modules'), { recursive: true })
   for (const file of ['Start.cmd', 'Stop.cmd', 'launcher.mjs']) await fs.copyFile(path.join(project, file), path.join(release, file))
   await fs.copyFile(path.join(project, 'scripts', 'verify-portable.mjs'), path.join(release, 'verify-portable.mjs'))
   await fs.copyFile(path.join(project, 'scripts', 'smoke-portable.mjs'), path.join(release, 'smoke-portable.mjs'))
   await fs.writeFile(path.join(application, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', dependencies: manifest.dependencies, overrides: manifest.overrides }, null, 2))
-  await fs.copyFile(path.join(project, '使用说明.md'), path.join(release, '使用说明.md'))
+  await fs.copyFile(path.join(project, 'docs', 'portable-guide.en.md'), path.join(release, 'User-Guide.md'))
   await fs.mkdir(path.join(release, 'runtime'))
   await fs.copyFile(process.execPath, path.join(release, 'runtime', 'node.exe'))
   const nodeLicense = path.join(path.dirname(process.execPath), 'LICENSE')
@@ -61,7 +57,7 @@ try {
   }
   await collectPackages(path.join(application, 'node_modules'))
   await fs.writeFile(path.join(release, 'THIRD-PARTY-NOTICES.json'), JSON.stringify({ node: process.versions.node, packages: packages.sort((left, right) => left.name.localeCompare(right.name)), note: 'Package licenses are included in their respective directories.' }, null, 2))
-  await fs.writeFile(path.join(release, 'README.txt'), `STELLANTIS Vehicle Data Management ${manifest.version}\r\n\r\n1. Extract this entire folder to a writable local folder. Do not run it inside the ZIP or from the team share.\r\n2. Double-click Start.cmd. The local service opens your browser; a different free local port is used if necessary.\r\n3. Create your own local account. Enter the existing Windows SMB folder in Shared folder settings.\r\n4. Only the team owner creates a team in an empty folder; colleagues select the same existing team and request approval.\r\n5. The service checks open app pages every five minutes and stops safely when all are closed, allowing a brief refresh/reconnect grace period. Hidden or minimized pages keep it running. Reopen with Start.cmd after an automatic stop, or use Stop.cmd to stop immediately and finish pending sync.\r\n6. Local data is generated in data/. Do not copy someone else's data/ or distribute it to colleagues. Back up before upgrading.\r\n7. This package contains no accounts, vehicles, reports or preconfigured share. Company application control still applies.\r\n8. Backups are not encrypted. Keep them in approved protected storage. Real SMB multi-computer acceptance is required before sensitive use.\r\n`)
+  await fs.writeFile(path.join(release, 'README.txt'), `STELLANTIS Vehicle Data Management ${manifest.version}\r\n\r\n1. Extract this entire folder to a writable local folder. Do not run it inside the ZIP or from the team share.\r\n2. Double-click Start.cmd. The local service opens your browser; a different free local port is used if necessary.\r\n3. Create your own local account. Enter the existing Windows SMB folder in Shared folder settings.\r\n4. Only the team owner creates a team in an empty folder; colleagues select the same existing team and request approval.\r\n5. The service checks open app pages every five minutes and stops safely when all are closed, allowing a brief refresh/reconnect grace period. Hidden or minimized pages keep it running. Reopen with Start.cmd after an automatic stop, or use Stop.cmd to stop immediately and finish pending sync.\r\n6. Local data normally resides in %LOCALAPPDATA%\\VehicleManager\\data. An explicitly configured VEHICLE_MANAGER_DATA_DIR takes precedence. Do not copy or distribute someone else's local data. Back up through the application before upgrading.\r\n7. This package contains no accounts, vehicles, reports or preconfigured share. Company application control still applies.\r\n8. Backups are not encrypted. Keep them in approved protected storage. Real SMB multi-computer acceptance is required before sensitive use.\r\n`)
   const zipFile = path.join(project, 'releases', `${name}.zip`), output = createWriteStream(zipFile), archive = new ZipArchive({ zlib: { level: 6 } })
   const completed = new Promise((resolve, reject) => { output.once('close', resolve); output.once('error', reject); archive.once('error', reject) })
   archive.pipe(output); archive.directory(release, name); await archive.finalize(); await completed
@@ -73,7 +69,12 @@ try {
     if (verification.error) throw verification.error
     throw new Error(`Portable package acceptance failed with exit code ${verification.status}.`)
   }
-  console.log(JSON.stringify({ folder: release, zip: zipFile, packages: packages.length, bytes: (await fs.stat(zipFile)).size, acceptance: 'passed' }))
+  const sha256 = createHash('sha256').update(await fs.readFile(zipFile)).digest('hex')
+  const sourceCommit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: project, encoding: 'utf8' })
+  if (sourceCommit.status !== 0) throw new Error('Cannot record release source commit')
+  await fs.writeFile(`${zipFile}.sha256`, `${sha256}  ${path.basename(zipFile)}\n`)
+  await fs.writeFile(path.join(project, 'releases', `v${manifest.version}-provenance.json`), JSON.stringify({ version: manifest.version, sourceCommit: sourceCommit.stdout.trim(), artifact: path.basename(zipFile), sha256, portableAcceptance: 'passed' }, null, 2) + '\n')
+  console.log(JSON.stringify({ folder: release, zip: zipFile, packages: packages.length, bytes: (await fs.stat(zipFile)).size, acceptance: 'passed', sha256 }))
 } finally {
   await fs.rm(production, { recursive: true, force: true })
 }

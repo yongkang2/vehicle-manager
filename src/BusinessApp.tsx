@@ -1,14 +1,16 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Ref } from 'react'
-import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Pagination, Select, Space, Spin, Table, Tabs, Tag, Timeline, Tooltip, Upload } from 'antd'
+import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
 import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
 import { api, ApiError, createWorkspaceScope, download } from './api'
+import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
 import { translateBusiness } from './business-i18n'
 import { activeHvBatteries, configurationFields, controllerSources as parsedControllerSources, doveRecordedTime, keyControllerName, keyControllerNames, reportAssociationVin, reportMatchesVehicle, thermalSystemTypes, validControllerValue, vehicleFields, vehicleHvBatteries } from '../shared/business'
-import type { BusinessRecord, Change, Fields, KeyControllerName, QuarantinedOperation, RecordKind, ReportData, RestorePreview, RestoreResult, SyncConflict, SyncStatus, VehicleDeletePreview, VehicleDeleteReceipt, VehicleDeleteRequest } from '../shared/business'
+import type { BusinessRecord, Fields, KeyControllerName, QuarantinedOperation, RecordKind, ReportData, RestorePreview, RestoreResult, RestoreReceipt, SyncConflict, SyncStatus, VehicleDeletePreview, VehicleDeleteReceipt, VehicleDeleteRequest } from '../shared/business'
 import RecordEditor from './RecordEditor'
+import HistoryPanel from './HistoryPanel'
 import DoveImport from './DoveImport'
 import CsvExportDialog from './CsvExportDialog'
 import ResizableVehicleTable from './ResizableVehicleTable'
@@ -125,10 +127,10 @@ function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel,
 }
 
 export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef }: { view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
-  const text = translateBusiness(language), { message } = App.useApp()
+  const text = translateBusiness(language), { message, modal } = App.useApp()
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
   const { filters: vehicleColumnFilters, setFilters: setVehicleColumnFilters } = useVehicleTableFilterSession()
-  const [records, setRecords] = useState<BusinessRecord[]>([]), [changes, setChanges] = useState<Change[]>([]), [sync, setSync] = useState<SyncStatus>(emptySync)
+  const [records, setRecords] = useState<BusinessRecord[]>([]), [historyRevision, setHistoryRevision] = useState(0), [sync, setSync] = useState<SyncStatus>(emptySync)
   const [catalog, setCatalog] = useState<ComponentTypeCatalog>({ enabled: false, types: builtinComponentTypes })
   const [revisionSummaries, setRevisionSummaries] = useState<ConfigurationRevisionSummary[]>([])
   const [revisionBusy, setRevisionBusy] = useState(false)
@@ -139,7 +141,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [reportId, setReportId] = useState<string | null>(null)
   const [csvExportOpen, setCsvExportOpen] = useState(false)
   const [reportSelection, setReportSelection] = useState<string[]>([]), [comparison, setComparison] = useState<Comparison | null>(null), [configuration, setConfiguration] = useState<Configuration | null>(null)
-  const [restoreOpen, setRestoreOpen] = useState(false), [restoreFile, setRestoreFile] = useState<File | null>(null), [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null), [archiveRecordIds, setArchiveRecordIds] = useState<string[]>([]), [confirmDroppedFields, setConfirmDroppedFields] = useState(false), [confirmation, setConfirmation] = useState(''), [restoreReason, setRestoreReason] = useState(''), [historyPage, setHistoryPage] = useState(1)
+  const [restoreOpen, setRestoreOpen] = useState(false), [restoreFile, setRestoreFile] = useState<File | null>(null), [restorePreview, setRestorePreview] = useState<RestorePreview | null>(null), [archiveRecordIds, setArchiveRecordIds] = useState<string[]>([]), [confirmDroppedFields, setConfirmDroppedFields] = useState(false), [confirmation, setConfirmation] = useState(''), [restoreReason, setRestoreReason] = useState('')
   const attachmentCancel = useRef<(() => void) | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [quarantined, setQuarantined] = useState<QuarantinedOperation[]>([]), [deleteVehicle, setDeleteVehicle] = useState<BusinessRecord | null>(null), [deleteReceipt, setDeleteReceipt] = useState<VehicleDeleteReceipt | null>(null)
@@ -152,7 +154,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       const data = result.data
       setRecords(data.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)))
       setCatalog(data.catalog); setRevisionSummaries(data.revisionSummaries.filter(summary => !deletedRecordIds.current.has(summary.vehicleId)))
-      setChanges(data.changes); setAudit(data.audit); setQuarantined(data.quarantined)
+      setHistoryRevision(value => value + 1); setAudit(data.audit); setQuarantined(data.quarantined)
     }
     setSync(current => JSON.stringify(current) === JSON.stringify(result.sync) ? current : result.sync)
     setLoading(false)
@@ -179,7 +181,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   const selected = records.find(record => record.id === selectedId) || null
-  const openVehicle = (id: string, tab = 'overview') => { if (id !== selectedId) attachmentCancel.current?.(); setSelectedId(id); setDetailTab(tab); setHistoryPage(1) }
+  const openVehicle = (id: string, tab = 'overview') => { if (id !== selectedId) attachmentCancel.current?.(); setSelectedId(id); setDetailTab(tab) }
   const activeReport = records.find(record => record.id === reportId) || null
   const cars = records.filter(record => record.kind === 'vehicle')
   const reports = sortedVehicleReports(records)
@@ -201,7 +203,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     setComparison(current => current && (belongs(current.left) || belongs(current.right)) ? null : current)
     setConfiguration(current => current && (belongs(current.report) || (current.part && belongs(current.part))) ? null : current)
     if (selectedId === receipt.vehicleId) attachmentCancel.current?.()
-    setDeleteVehicle(null); setDeleteReceipt(receipt); setHistoryPage(1)
+    setDeleteVehicle(null); setDeleteReceipt(receipt)
     await load()
     if (receipt.localSynced) void message.success(text('vehicleDeleted'))
     else void message.warning(text('deleteCommittedPending'), 8)
@@ -255,7 +257,52 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     try { const state = await api<SyncStatus>('/api/business/sync', { method: 'POST' }); setSync(state); await load(); if (state.error) onError(new ApiError(state.error)); else { if (state.phase === 'ready') setDeleteReceipt(null); void message.success(text(state.conflicts.length ? 'conflict' : 'synced')) } }
     catch (error) { onError(error) } finally { setBusy(false) }
   }
+  const restoreRequestId = useRef(crypto.randomUUID())
+  const [restoreSearch, setRestoreSearch] = useState('')
+  const [receipts, setReceipts] = useState<RestoreReceipt[]>([])
+  const [receiptsOpen, setReceiptsOpen] = useState(false)
+  const backupActive = useRef(false)
+  async function startBackup() {
+    if (backupActive.current) return
+    backupActive.current = true
+    const scope = createWorkspaceScope()
+    modal.confirm({ afterClose: () => { backupActive.current = false }, title: language === 'zh' ? '备份数据' : 'Back up data', okText: language === 'zh' ? '下载备份' : 'Download backup', cancelText: text('cancel'), content: language === 'zh' ? '将先同步团队数据，再下载备份文件，包含车辆记录和附件。请将文件妥善保存。' : 'Sync team data, then download a backup containing vehicle records and attachments. Keep the file in a safe location.', onOk: async () => {
+      try {
+        scope.assertCurrent()
+        const status = await scope.request<{ teamId: string }>('/api/business/backup/status')
+        scope.assertCurrent()
+        await download('/api/business/backup', `vehicle-team-backup-${status.teamId}-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`)
+      } catch (error) { onError(error); throw error }
+    } })
+  }
+  const reminderOpen = useRef(false)
+  const reminderEpoch = useRef(0)
+  const reminderDialog = useRef<{ destroy: () => void } | null>(null)
+  const mayRemind = useEffectEvent(() => admin && online && view === 'vehicles' && !busy && !revisionBusy && !selectedId && !editor && !action && !reportId && !configuration && !comparison && !deleteVehicle && !csvExportOpen && !restoreOpen && !receiptsOpen && !backupActive.current && !reminderOpen.current && !document.querySelector('.component-type-management-modal, .vehicle-column-settings-modal'))
+  const checkBackupReminder = useEffectEvent(async () => {
+    if (!mayRemind()) return
+    const scope = createWorkspaceScope(), epoch = reminderEpoch.current
+    try {
+      const status = await scope.request<{ due: boolean; dismissedDay: string | null; lastBackupAt: string | null }>('/api/business/backup/reminder')
+      scope.assertCurrent()
+      if (!mayRemind() || epoch !== reminderEpoch.current || !status.due || status.dismissedDay === localReminderDay() || reminderOpen.current) return
+      reminderOpen.current = true
+      const dismiss = async () => { try { await scope.request('/api/business/backup/reminder/dismiss', { method: 'POST', body: { day: localReminderDay() } }) } finally { reminderOpen.current = false } }
+      reminderDialog.current = modal.confirm({ title: language === 'zh' ? '备份提醒' : 'Backup reminder', content: language === 'zh' ? (status.lastBackupAt ? '本团队已连续 7 天未备份，建议现在备份。' : '尚无团队备份记录，建议先备份一次。') : (status.lastBackupAt ? 'This team has not been backed up for at least 7 days. Back up now.' : 'No team backup is recorded. Create your first backup.'), okText: language === 'zh' ? '立即备份' : 'Back up now', cancelText: language === 'zh' ? '今天稍后提醒' : 'Remind me tomorrow', onCancel: dismiss, onOk: async () => { await dismiss(); scope.assertCurrent(); await startBackup() } })
+    } catch { /* Offline or revoked access must not produce an unverified reminder. */ }
+  })
+  const closeReminder = useEffectEvent(() => { reminderEpoch.current++; reminderDialog.current?.destroy(); reminderDialog.current = null; reminderOpen.current = false })
+  useEffect(() => {
+    void checkBackupReminder()
+    const timer = setInterval(() => void checkBackupReminder(), 60000)
+    return () => { clearInterval(timer); closeReminder() }
+  }, [admin, online, view])
+  async function showReceipts() {
+    try { setReceipts(await api<RestoreReceipt[]>('/api/business/restore/receipts')); setReceiptsOpen(true) } catch (error) { onError(error) }
+  }
   async function previewRestore(file: File) {
+    restoreRequestId.current = crypto.randomUUID()
+
     setRestoreFile(file); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason(''); setBusy(true)
     try {
       const form = new FormData(); form.append('file', file)
@@ -266,11 +313,11 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   async function restore() {
     if (syncPaused) { onError(new ApiError('CONFIRM_RESUME')); return }
     if (!restoreFile || !restorePreview) return
-    const form = new FormData(); form.append('file', restoreFile); form.append('confirmation', confirmation); form.append('reason', restoreReason); form.append('archiveRecordIds', JSON.stringify(archiveRecordIds)); form.append('previewFingerprint', restorePreview.fingerprint); form.append('confirmDroppedFields', String(confirmDroppedFields))
+    const form = new FormData(); form.append('file', restoreFile); form.append('requestId', restoreRequestId.current); form.append('confirmation', confirmation); form.append('reason', restoreReason); form.append('archiveRecordIds', JSON.stringify(archiveRecordIds)); form.append('previewFingerprint', restorePreview.fingerprint); form.append('confirmDroppedFields', String(confirmDroppedFields))
     setBusy(true)
     try {
       const result = await api<RestoreResult>('/api/business/restore', { method: 'POST', body: form })
-      setRestoreOpen(false); setRestoreFile(null); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason(''); await load()
+      setRestoreOpen(false); setRestoreFile(null); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason(''); await load(); await showReceipts()
       if (result.syncError) void message.warning(`${text('restoredBackup')} · ${errorText(result.syncError, language)}`, 8)
       else if (result.skippedVehicles || result.skippedRecords) void message.warning(`${text('restoredBackup')} · ${text('skippedVehicles')}: ${result.skippedVehicles} · ${text('skippedRecords')}: ${result.skippedRecords}`, 8)
       else void message.success(text('restoredBackup'))
@@ -324,19 +371,6 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       { title: text('actions'), width: 130, render: (_, record) => recordActions(record) },
     ]} expandable={{ expandedRowRender: record => <Descriptions column={{ xs: 1, sm: 2 }} size="small" items={Object.entries(record.data).filter(([, value]) => value !== '').map(([key, value]) => ({ key, label: text(key), children: <span className="preserve-text">{display(value)}</span> }))} /> }} /></>
   }
-  const history = (items: Change[]) => !items.length ? <Empty description={text('noRecords')} /> : <>
-    <Timeline items={items.slice((historyPage - 1) * 20, historyPage * 20).map(change => ({
-      color: 'gray', content: <div className="change-entry">
-        <div><strong>{change.actor.name}</strong><span>{text(change.action === 'updated' ? 'updatedAction' : change.action)} · {text(change.kind === 'part' && (change.after.category || change.before?.category) === 'battery' ? 'hvBattery' : change.kind)}</span><time>{date(change.created)}</time></div>
-        <p>{change.reason}</p>
-        {['deleted', 'vehicle.deleted'].includes(change.action) && <p className="mono">VIN: {display(change.after.vin || change.before?.vin)}</p>}
-        <small className="mono">{text('device')}: {change.actor.deviceId.slice(0, 12)}{change.sourceId && <> · {records.some(record => record.id === change.sourceId && record.kind === 'report') ? <button className="inline-link" onClick={() => setReportId(change.sourceId)}>{text('source')}</button> : <span>{text('sourceUnavailable')}</span>}</>}</small>
-        <details><summary>{text('details')}</summary><div className="change-diff">{Object.keys(change.after).filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key])).map(key => <div key={key}><strong>{text(key)}</strong><del>{display(change.before?.[key])}</del><span>→</span><ins>{display(change.after[key])}</ins></div>)}{change.archivedBefore !== change.archivedAfter && <div><strong>{text('status')}</strong><del>{change.archivedBefore ? text('archived') : '—'}</del><span>→</span><ins>{change.archivedAfter ? text('archived') : text('restored')}</ins></div>}</div></details>
-      </div>
-    }))} />
-    <Pagination current={historyPage} onChange={setHistoryPage} total={items.length} pageSize={20} showSizeChanger={false} hideOnSinglePage />
-  </>
-
   const filters = <div className="business-filters"><Input prefix={<Search size={15} />} value={query} onChange={event => setQuery(event.target.value)} placeholder={text('search')} aria-label={text('search')} allowClear />{view === 'vehicles' && <Select allowClear placeholder={text('status')} value={filter} onChange={setFilter} options={statuses.map(value => ({ value, label: text(value) }))} />}<Checkbox checked={archived} onChange={event => setArchived(event.target.checked)}>{text('showArchived')}</Checkbox></div>
   const visibleReports = view === 'reports' ? reports.filter(record => (archived || !record.archived) && `${record.data.name} ${vehicleName(record.vehicleId)} ${reportAssociationVin(record) || ''}`.toLowerCase().includes(query.toLowerCase())) : []
   const visibleAudit = view === 'audit' ? audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase())) : []
@@ -353,14 +387,11 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         toolbarFilters={filters}
         toolbarActions={<><Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button>{admin && <ComponentTypeManagement language={language} online={online} syncPaused={syncPaused} catalog={catalog} onChanged={loadScoped} onBusyChange={setBusy} onError={onError} />}</>}
         toolbarMenu={<Dropdown trigger={['click']} menu={{
-          items: [
-            { key: 'json', label: text('export'), icon: <Download size={16} />, onClick: () => void download('/api/business/export', 'vehicle-data.json').catch(onError) },
-            ...(admin ? [
-              { type: 'divider' as const },
-              { key: 'backup', label: text('backup'), icon: <Download size={16} />, disabled: !online, onClick: () => void download('/api/business/backup', `vehicle-backup-${new Date().toISOString().slice(0, 10)}.zip`).catch(onError) },
-              { key: 'restore', label: <span title={syncPaused ? errorText('CONFIRM_RESUME', language) : undefined}>{text('restoreBackup')}</span>, icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
-            ] : []),
-          ]
+          items: admin ? [
+            { key: 'backup', label: language === 'zh' ? '备份数据' : 'Back up data', icon: <Download size={16} />, disabled: !online, onClick: () => void startBackup() },
+            { key: 'restore', label: text('restoreBackup'), icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
+            { key: 'restore-results', label: language === 'zh' ? '恢复记录' : 'Restore history', icon: <ClipboardCheck size={16} />, onClick: () => void showReceipts() },
+          ] : []
         }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
         filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
         rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
@@ -408,7 +439,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
     {view === 'reports' && <><div className="business-table-controls">{filters}<div className="business-control-actions"><span className="muted">{reportSelection.length} / 2</span><Button icon={<GitCompare size={16} />} disabled={reportSelection.length !== 2} loading={busy} onClick={() => void compare()}>{text('compare')}</Button></div></div><div className="business-list-heading"><h3>{text('reports')}</h3><span>{visibleReports.length}</span></div>{reportTable(visibleReports, true)}</>}
-    {view === 'history' && <><div className="business-list-heading"><h3>{text('history')}</h3><span>{changes.length}</span></div>{history(changes)}</>}
+    {view === 'history' && <HistoryPanel language={language} refreshToken={historyRevision} reportIds={records.filter(record => record.kind === 'report').map(record => record.id)} onOpenReport={setReportId} />}
     {view === 'audit' && <><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
     {view === 'sync' && <>
       <Alert type={sync.error || sync.conflicts.length || sync.quarantined ? 'warning' : 'success'} showIcon icon={sync.error ? <CloudOff size={18} /> : undefined} title={sync.error ? errorText(sync.error, language) : text(sync.phase)} />
@@ -438,7 +469,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       { key: 'modifications', label: text('modifications'), children: entryTable('modification', selected) }, { key: 'equipment', label: text('equipment'), children: entryTable('equipment', selected) },
       { key: 'reports', label: text('reports'), children: reportTable(reports.filter(record => record.vehicleId === selected.id && (!record.archived || archived))) },
       { key: 'attachments', label: text('attachments'), children: <><AttachmentUpload key={selected.id} vehicle={selected} language={language} disabled={busy} onRefresh={loadScoped} onBusyChange={setBusy} onCancelReady={cancel => { attachmentCancel.current = cancel }} onError={onError} /><Table<BusinessRecord> rowKey="id" size="small" dataSource={records.filter(record => record.kind === 'attachment' && record.vehicleId === selected.id && (archived || !record.archived))} columns={[{ title: text('name'), render: (_, record) => display(record.data.name) }, { title: text('size'), render: (_, record) => `${(Number(record.data.size) / 1024).toFixed(1)} KB` }, { title: text('actions'), render: (_, record) => <Space><Button icon={<Download size={15} />} onClick={() => downloadFile(record)}>{text('download')}</Button>{recordActions(record)}</Space> }]} /></> },
-      { key: 'history', label: text('history'), children: history(changes.filter(change => change.vehicleId === selected.id)) },
+      { key: 'history', label: text('history'), children: <HistoryPanel key={selected.id} language={language} vehicleId={selected.id} refreshToken={historyRevision} reportIds={records.filter(record => record.kind === 'report').map(record => record.id)} onOpenReport={setReportId} /> },
     ] : []} /></Drawer>
     {csvExportOpen && <CsvExportDialog records={records} language={language} online={online} syncPaused={syncPaused} syncStatus={sync} onCancel={() => setCsvExportOpen(false)} onBusyChange={setBusy} onError={onError} onRefresh={async () => { const next = await api<ConfigurationWorkingView>('/api/business/export/working-view'); const available = next.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)); workspaceLoader.invalidate(); setRecords(available); setCatalog(next.catalog); setRevisionSummaries(next.revisionSummaries.filter(summary => !deletedRecordIds.current.has(summary.vehicleId))); return available }} />}
     {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
@@ -456,6 +487,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       {olderReport && <Alert type="warning" showIcon title={text('olderReport')} description={<Checkbox checked={configuration.allowOlder} onChange={event => setConfiguration({ ...configuration, allowOlder: event.target.checked })}>{text('confirmOlderReport')}</Checkbox>} />}
       <label>{text('configurationReason')}<Input.TextArea value={configuration.reason} maxLength={500} rows={2} onChange={event => setConfiguration({ ...configuration, reason: event.target.value })} /></label>
     </div>}</Modal>
-    <Modal open={restoreOpen} title={text('restoreBackup')} onCancel={() => { if (!busy) { setRestoreOpen(false); setRestoreFile(null); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason('') } }} onOk={() => void restore()} okText={text('restore')} cancelText={text('cancel')} confirmLoading={busy} okButtonProps={{ disabled: syncPaused || !restoreFile || !restorePreview || confirmation !== 'RESTORE' || !restoreReason.trim() || sync.pending > 0 || Boolean(restorePreview?.conflicts.length) || Boolean(restorePreview?.archiveCandidates.some(record => !archiveRecordIds.includes(record.id))) || Boolean(restorePreview?.droppedFields.length && !confirmDroppedFields) }} destroyOnHidden><div className="configuration-form">{syncPaused && <Alert type="warning" showIcon title={errorText('CONFIRM_RESUME', language)} />}{sync.pending > 0 && <Alert type="warning" title={text('pendingBeforeRestore')} />}<Upload accept=".zip" maxCount={1} fileList={restoreFile ? [{ uid: 'backup', name: restoreFile.name, status: 'done' }] : []} beforeUpload={file => { void previewRestore(file); return false }} onRemove={() => { setRestoreFile(null); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason('') }}><Button icon={<UploadIcon size={16} />} loading={busy}>{text('chooseFile')} · .zip</Button></Upload>{restorePreview && <div className="configuration-form"><h3>{text('restorePreview')}</h3><p>{text('restoreVersion')} {restorePreview.appVersion || 'legacy'} · {restorePreview.records} {text('restoreRecords')} · {restorePreview.additions} {text('restoreAdditions')} · {restorePreview.changes} {text('restoreChanges')}</p>{restorePreview.conflicts.length > 0 && <Alert type="error" showIcon title={text('restoreConflicts')} description={restorePreview.conflicts.join(', ')} />}{restorePreview.archiveCandidates.length > 0 && <div><p>{text('restoreArchiveConfirm')}</p><Checkbox.Group value={archiveRecordIds} onChange={values => setArchiveRecordIds(values.map(String))} options={restorePreview.archiveCandidates.map(record => ({ value: record.id, label: `${record.kind}: ${record.name}${record.parentName ? ` · ${record.parentName}` : ''}${record.kind === 'vehicle' && record.relatedRecords ? ` · ${record.relatedRecords} related` : ''}` }))} /></div>}{restorePreview.droppedFields.length > 0 && <Alert type="warning" showIcon title={text('restoreDroppedFields')} description={<><ul>{restorePreview.droppedFields.map(item => <li key={item.recordId}>{item.recordId}: {item.fields.join(', ')}</li>)}</ul><Checkbox checked={confirmDroppedFields} onChange={event => setConfirmDroppedFields(event.target.checked)}>{text('restoreDroppedConfirm')}</Checkbox></>} />}</div>}<label>{text('restoreConfirmation')}<Input value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label><label>{text('reason')}<Input.TextArea maxLength={500} rows={2} value={restoreReason} onChange={event => setRestoreReason(event.target.value)} /></label></div></Modal>
+    <Modal width={850} styles={{ body: { maxHeight: '65vh', overflowY: 'auto' } }} open={receiptsOpen} title={language === 'zh' ? '恢复记录' : 'Restore history'} onCancel={() => setReceiptsOpen(false)} footer={<Button onClick={() => void showReceipts()}>{text('refresh')}</Button>}><p>{language === 'zh' ? '本机数据目录 restore-backups 中的保护副本保留至管理员手动清理。待发布状态可安全重试，不会再次应用备份。' : 'Safety copies in restore-backups in the local data directory are retained until manually removed. Retrying publication never reapplies the backup.'}</p><Table rowKey="requestId" size="small" pagination={{ pageSize: 5 }} dataSource={receipts} columns={[{ title: language === 'zh' ? '时间 / 编号' : 'Time / ID', render: (_, receipt) => <>{receipt.created}<br /><small>{receipt.requestId}</small></> }, { title: language === 'zh' ? '状态' : 'State', render: (_, receipt) => <>{language === 'zh' ? ({ prepared: '未执行恢复，请重新选择备份', applied: '已恢复到本机，需核对团队同步', published: '恢复完成，已同步到团队', failed: '恢复未完成，业务数据未改变' }[receipt.state]) : receipt.state}{receipt.result && <div>{receipt.result.changed} {language === 'zh' ? '项变更' : 'changes'}</div>}{receipt.error && <div>{errorText(receipt.error, language)}</div>}</> }, { title: language === 'zh' ? '操作' : 'Action', render: (_, receipt) => receipt.state === 'applied' ? <Button disabled={busy || syncPaused || !online} onClick={async () => { setBusy(true); try { await api(`/api/business/restore/${receipt.requestId}/publish`, { method: 'POST' }); await showReceipts(); await load() } catch (error) { onError(error) } finally { setBusy(false) } }}>{language === 'zh' ? '检查并继续同步' : 'Check and finish syncing'}</Button> : null }]} expandable={{ expandedRowRender: receipt => <p className="preserve-text">{receipt.safetyFile || '—'}<br />SHA-256: {receipt.safetySha256 || '—'}<br />{receipt.result?.syncError ? errorText(receipt.result.syncError, language) : ''}</p> }} /></Modal>
+    <Modal width={900} styles={{ body: { maxHeight: '65vh', overflowY: 'auto' } }} open={restoreOpen} title={text('restoreBackup')} onCancel={() => { if (!busy) { setRestoreOpen(false); setRestoreFile(null); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason('') } }} onOk={() => void restore()} okText={text('restore')} cancelText={text('cancel')} confirmLoading={busy} okButtonProps={{ disabled: syncPaused || !restoreFile || !restorePreview || confirmation !== 'RESTORE' || !restoreReason.trim() || sync.pending > 0 || Boolean(restorePreview?.conflicts.length) || Boolean(restorePreview?.archiveCandidates.some(record => !archiveRecordIds.includes(record.id))) || Boolean(restorePreview?.droppedFields.length && !confirmDroppedFields) }} destroyOnHidden><div className="configuration-form">{!restorePreview && <p>{language === 'zh' ? '请选择以前保存的备份，下一步查看恢复影响。' : 'Choose a saved backup to review its effects.'}</p>}{syncPaused && <Alert type="warning" showIcon title={errorText('CONFIRM_RESUME', language)} />}{sync.pending > 0 && <Alert type="warning" title={text('pendingBeforeRestore')} />}<Upload disabled={busy} accept=".zip" maxCount={1} fileList={restoreFile ? [{ uid: 'backup', name: restoreFile.name, status: 'done' }] : []} beforeUpload={file => { void previewRestore(file); return false }} onRemove={() => { setRestoreFile(null); setRestorePreview(null); setArchiveRecordIds([]); setConfirmDroppedFields(false); setConfirmation(''); setRestoreReason('') }}><Button icon={<UploadIcon size={16} />} loading={busy}>{text('chooseFile')} · .zip</Button></Upload>{restorePreview && <div className="configuration-form"><h3>{text('restorePreview')}</h3><Alert type="info" showIcon title={language === 'zh' ? '执行前自动保存本机保护副本，请另做独立冷备份。恢复不回退权限、永久删除或不可变配置历史。' : 'A local safety copy is saved before applying. Keep an independent cold backup. Permissions, permanent deletion and immutable history are not rolled back.'} /><p>{restorePreview.teamId} · {restorePreview.created} · {language === 'zh' ? '格式' : 'Format'} {restorePreview.format}</p>{restorePreview.source && <Alert type={restorePreview.source.pending || restorePreview.source.conflicts ? 'warning' : 'info'} title={`${language === 'zh' ? '备份时待同步 / 冲突' : 'Pending / conflicts at backup'}: ${restorePreview.source.pending} / ${restorePreview.source.conflicts}`} description={restorePreview.source.revision || '—'} />}<Input.Search allowClear value={restoreSearch} onChange={event => setRestoreSearch(event.target.value)} placeholder={language === 'zh' ? '搜索车辆、记录或字段' : 'Search vehicles, records or fields'} /><Table size="small" rowKey="id" scroll={{ x: 650 }} pagination={{ pageSize: 8 }} dataSource={restorePreview.effects.filter(effect => JSON.stringify(effect).toLowerCase().includes(restoreSearch.toLowerCase()))} columns={[{ title: language === 'zh' ? '记录 / 车辆' : 'Record / vehicle', render: (_, effect) => <>{effect.name}<br /><small>{effect.vehicleName || effect.vehicleId || effect.id}</small></> }, { title: language === 'zh' ? '类别' : 'Kind', dataIndex: 'kind', render: value => text(value) }, { title: language === 'zh' ? '影响' : 'Effect', dataIndex: 'action', render: (value: string) => language === 'zh' ? ({ add: '新增', change: '覆盖', unchanged: '保持', skip: '跳过已删除', archive: '归档' }[value] || value) : value }]} expandable={{ rowExpandable: effect => effect.fields.length > 0, expandedRowRender: effect => <Descriptions column={1} size="small" items={effect.fields.map(field => ({ key: field.key, label: text(field.key), children: <span className="preserve-text">{display(field.before)} → {display(field.after)}</span> }))} /> }} /><p>{text('restoreVersion')} {restorePreview.appVersion || 'legacy'} · {restorePreview.records} {text('restoreRecords')} · {restorePreview.additions} {text('restoreAdditions')} · {restorePreview.changes} {text('restoreChanges')}</p>{restorePreview.conflicts.length > 0 && <Alert type="error" showIcon title={text('restoreConflicts')} description={restorePreview.conflicts.join(', ')} />}{restorePreview.archiveCandidates.length > 0 && <div><p>{text('restoreArchiveConfirm')}</p><Checkbox checked={archiveRecordIds.length === restorePreview.archiveCandidates.length} onChange={event => setArchiveRecordIds(event.target.checked ? restorePreview.archiveCandidates.map(record => record.id) : [])}>{language === 'zh' ? `确认归档全部 ${restorePreview.archiveCandidates.length} 项及其关联记录` : `Confirm archiving all ${restorePreview.archiveCandidates.length} items and their children`}</Checkbox></div>}{restorePreview.droppedFields.length > 0 && <Alert type="warning" showIcon title={text('restoreDroppedFields')} description={<><ul>{restorePreview.droppedFields.map(item => <li key={item.recordId}>{item.recordId}: {item.fields.join(', ')}</li>)}</ul><Checkbox checked={confirmDroppedFields} onChange={event => setConfirmDroppedFields(event.target.checked)}>{text('restoreDroppedConfirm')}</Checkbox></>} />}</div>}<label>{text('restoreConfirmation')}<Input value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label><label>{text('reason')}<Input.TextArea maxLength={500} rows={2} value={restoreReason} onChange={event => setRestoreReason(event.target.value)} /></label></div></Modal>
   </section>
 }

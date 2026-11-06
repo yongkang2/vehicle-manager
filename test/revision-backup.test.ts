@@ -11,11 +11,11 @@ import { Business } from '../server/business.js'
 import { createBackup, previewBackup, restoreBackup } from '../server/backup.js'
 import type { ConfigurationReceiptEntry, PendingConfigurationImport } from '../server/backup.js'
 import type { Actor, BusinessRecord, VehicleDeletion } from '../shared/business.js'
-import { configurationDecisionKey, configurationRevisionLabel, configurationRevisionSummaries, configurationSections, configurationSnapshot, configurationSourceFingerprint, validateConfigurationRecords } from '../shared/configuration-revisions.js'
+import { configurationDecisionKey, configurationReviewScope, configurationRevisionLabel, configurationRevisionSummaries, configurationSections, configurationSnapshot, configurationSourceFingerprint, validateConfigurationRecords } from '../shared/configuration-revisions.js'
 import type { ConfigurationDecisions, ConfigurationRevisionData } from '../shared/configuration-revisions.js'
 
 const teamId = randomUUID(), vin = 'TEST0000000000001', date = '2026-10-29T01:00:00.000Z'
-type Manifest = { format: number; schemaVersion: number; fieldVersion: number; records: BusinessRecord[]; configurationReceipts?: ConfigurationReceiptEntry[] }
+type Manifest = { source?: { pending: number }; format: number; schemaVersion: number; fieldVersion: number; records: BusinessRecord[]; configurationReceipts?: ConfigurationReceiptEntry[] }
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-revision-backup-'))
   const store = new LocalStore(directory), business = new Business(store)
@@ -37,7 +37,8 @@ async function fixture() {
     }
     const number = previous ? Number(previous.data.number) + 1 : 1
     const label = configurationRevisionLabel(number)
-    const data: ConfigurationRevisionData = { schema: 1, name: label, vehicleId, vin, number, label, title: '', summary: `Publish ${label}`, publishedAt: date, actor, previousRevisionId: previous?.id || null, sourceFingerprint: configurationSourceFingerprint(sections), snapshot: configurationSnapshot(sections, decisions) }
+    const snapshot = configurationSnapshot(sections, decisions, (store.get<number>('businessProtocol') || 1) >= 4 ? configurationReviewScope(business.list(), vehicleId) : undefined)
+    const data: ConfigurationRevisionData = { schema: snapshot.schema, name: label, vehicleId, vin, number, label, title: '', summary: `Publish ${label}`, publishedAt: date, actor, previousRevisionId: previous?.id || null, sourceFingerprint: configurationSourceFingerprint(sections), snapshot }
     const record: BusinessRecord = { id, kind: 'configurationRevision', vehicleId, archived: false, version: 1, updated: date, data }
     insert(record); validateConfigurationRecords(business.list()); return record
   }
@@ -73,6 +74,7 @@ test('format4 preserves frozen revisions, custom types and receipts through the 
     assert.equal(target.business.list().some(record => record.kind === 'configurationRevision' || record.kind === 'componentType'), false)
     assert.deepEqual(target.store.db.prepare("SELECT payload FROM outbox WHERE state='pending'").all().map(row => JSON.parse(String(row.payload)).kind), ['vehicle'])
     const rebundled = await manifest(await createBackup(target.business, teamId))
+    assert.equal(rebundled.source?.pending, 3)
     assert.deepEqual(rebundled.records.filter(record => record.kind === 'configurationRevision' || record.kind === 'componentType').map(record => record.id).sort(), [type.id, revision.id].sort())
     assert.deepEqual(rebundled.configurationReceipts, [receipt])
     target.store.db.close()
@@ -164,4 +166,72 @@ test('protected imports require activation and reject malformed format4 receipt/
       (content: Manifest) => { content.configurationReceipts![0].value = '{}' },
     ]) await assert.rejects(restoreBackup(target.business, await rewrite(bytes, mutate), teamId, target.actor, 'Reject malformed metadata'), { code: 'INVALID_BACKUP' })
   } finally { await source.close(); await target.close() }
+})
+
+test('protocol3 synchronization preserves frozen history when working records change', async () => {
+  const { SharedBusinessSnapshot } = await import('../server/deletions.js')
+  const { BusinessSync } = await import('../server/sync.js')
+  const { TeamDirectory } = await import('../server/team.js')
+  const source = await fixture(), target = await fixture(), shared = path.join(source.directory, 'shared')
+  try {
+    await fs.mkdir(shared)
+    const teams = new TeamDirectory(), identity = { deviceId: target.store.deviceId, deviceName: 'test', localUserId: 'test', displayName: 'Test' }
+    const team = await teams.create(shared, 'Fictional compatibility team', identity)
+    const car = source.car(), revision = source.revision(car.id)
+    const snapshot = await SharedBusinessSnapshot.open(source.business, shared, team.id, async (file, bytes) => { await fs.writeFile(file, bytes) })
+    for (const row of source.store.db.prepare('SELECT * FROM records').all()) snapshot.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, row.vehicle_id, row.vin, row.data, row.archived, row.version, row.updated)
+    await snapshot.publish(team.id, 3); await snapshot.close()
+    const sync = new BusinessSync(target.business, teams)
+    assert.equal((await sync.synchronize(shared, team.id, identity)).error, null)
+    assert.deepEqual(target.business.get(revision.id).data, revision.data)
+    const current = target.business.get(car.id)
+    target.business.write({ id: car.id, kind: 'vehicle', data: { ...current.data, owner: 'Updated' }, version: current.version, actor: { ...target.actor, id: team.members[0].id }, reason: 'Test ordinary change' })
+    assert.equal((await sync.synchronize(shared, team.id, identity)).error, null)
+    assert.deepEqual(target.business.get(revision.id).data, revision.data)
+    assert.equal(JSON.parse(await fs.readFile(path.join(shared, 'business', 'HEAD.json'), 'utf8')).protocol, 3)
+  } finally { source.store.db.close(); target.store.db.close(); await fs.rm(source.directory, { recursive: true, force: true }); await fs.rm(target.directory, { recursive: true, force: true }) }
+})
+
+test('protocol4 synchronization and backup preserve mixed revision schemas and frozen exclusions', async () => {
+  const { SharedBusinessSnapshot } = await import('../server/deletions.js')
+  const { BusinessSync } = await import('../server/sync.js')
+  const { TeamDirectory } = await import('../server/team.js')
+  const source = await fixture(), target = await fixture(), restored = await fixture(), shared = path.join(source.directory, 'shared')
+  try {
+    await fs.mkdir(shared)
+    const teams = new TeamDirectory(), identity = { deviceId: target.store.deviceId, deviceName: 'test', localUserId: 'test', displayName: 'Test' }
+    const team = await teams.create(shared, 'Fictional policy integration team', identity)
+    const car = source.car(), first = source.revision(car.id)
+    const policy: BusinessRecord = { id: 'controllers', kind: 'componentType', vehicleId: null, archived: false, version: 1, updated: date, data: { schema: 2, name: 'Controllers', description: '', reviewState: 'removed', definitionVersion: 1 } }
+    source.insert(policy); source.store.set('businessProtocol', 4)
+    const second = source.revision(car.id, first)
+    assert.equal(first.data.schema, 1); assert.equal(second.data.schema, 2)
+    const snapshot = await SharedBusinessSnapshot.open(source.business, shared, team.id, async (file, bytes) => { await fs.writeFile(file, bytes) })
+    try {
+      for (const row of source.store.db.prepare('SELECT * FROM records').all()) snapshot.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, row.vehicle_id, row.vin, row.data, row.archived, row.version, row.updated)
+      await snapshot.publish(team.id, 4)
+    } finally { await snapshot.close() }
+    const sync = new BusinessSync(target.business, teams)
+    assert.equal((await sync.synchronize(shared, team.id, identity)).error, null)
+    const current = target.business.get(car.id)
+    target.business.write({ id: car.id, kind: 'vehicle', data: { ...current.data, owner: 'Updated independently' }, version: current.version, actor: { ...target.actor, id: team.members[0].id }, reason: 'Update unrelated vehicle details' })
+    assert.equal((await sync.synchronize(shared, team.id, identity)).error, null)
+    for (const revision of [first, second]) assert.deepEqual(target.business.get(revision.id).data, revision.data)
+    assert.deepEqual(target.business.get(policy.id).data, policy.data)
+    assert.equal(configurationRevisionSummaries(target.business.list())[0].hasChanges, false)
+    assert.equal(JSON.parse(await fs.readFile(path.join(shared, 'business', 'HEAD.json'), 'utf8')).protocol, 4)
+    const bytes = await createBackup(target.business, team.id), content = await manifest(bytes)
+    assert.equal(content.format, 4); assert.equal(content.schemaVersion, 5); assert.equal(content.fieldVersion, 3)
+    restored.store.set('businessProtocol', 4)
+    const preview = await previewBackup(restored.business, bytes, team.id)
+    assert.equal(preview.additions, 3, 'Only the vehicle and its two frozen revisions will be added')
+    const policyEffect = preview.effects.find(effect => effect.id === policy.id)!
+    assert.equal(policyEffect.action, 'unchanged', 'The destination implicit Active policy is retained')
+    assert.deepEqual(policyEffect.fields, [], 'Historical policy differences must not be promised as restored changes')
+    assert.equal((await restoreBackup(restored.business, bytes, team.id, restored.actor, 'Restore mixed frozen revision history')).changed, 3)
+    const queued = restored.store.get<PendingConfigurationImport[]>('pendingConfigurationImports')!
+    assert(queued?.length)
+    for (const revision of [first, second]) assert.deepEqual(queued.flatMap(entry => entry.records).find(row => row.id === revision.id)?.data, revision.data)
+    assert(!queued.flatMap(entry => entry.records).some(row => row.id === policy.id), 'Restoring history must preserve the destination implicit Active policy')
+  } finally { await source.close(); await target.close(); await restored.close() }
 })

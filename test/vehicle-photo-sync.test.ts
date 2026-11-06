@@ -158,7 +158,8 @@ test('format 2 backups preserve the cover reference, original bytes and history,
     source.store.set('vehicleTablePreferences:private-local-account', { privateSentinel: 'DO-NOT-BACKUP-PERSONAL-COLUMNS', visible: ['vehicle', 'owner', 'actions'] })
     const bytes = await createBackup(source.business, 'photo-team'), archive = await unzipper.Open.buffer(bytes)
     const manifest = JSON.parse((await archive.files.find(file => file.path === 'manifest.json')!.buffer()).toString())
-    assert.equal(manifest.format, 4)
+    assert.equal(manifest.format, 3)
+    assert.equal(manifest.fieldVersion, 1)
     assert.equal(manifest.records.find((record: BusinessRecord) => record.id === car.id).data.photoAttachmentId, photo.attachment.id)
     assert.equal(JSON.stringify(manifest).includes('DO-NOT-BACKUP-PERSONAL-COLUMNS'), false)
     const result = await restoreBackup(target.business, bytes, 'photo-team', context.actor, 'Restore selected photo')
@@ -180,6 +181,8 @@ for (const format of [1, 2]) {
       await restoreBackup(target.business, bytes, 'photo-team', context.actor, 'Initial legacy restore')
       const current = target.business.get(car.id), uploaded = await target.photos.upload(car.id, { name: 'newer.png', bytes: png() }, current.version, 'Newer local cover', context.actor)
       context.sent()
+      // This isolated fixture acknowledges publication without a shared team.
+      target.store.set('pendingHistoryImports', [])
       await restoreBackup(target.business, bytes, 'photo-team', context.actor, 'Restore pre-photo backup', [uploaded.attachment.id])
       assert.equal(target.business.get(car.id).data.photoAttachmentId, '')
       await assert.rejects(target.photos.read(car.id), { code: 'PHOTO_NOT_FOUND' })

@@ -174,7 +174,7 @@ test('an aborted asynchronous upload must settle before the same session can swi
     release(); assert.equal((await switching).status, 200)
     workspace.business.blob = originalBlob
     assert.equal((await request('/status')).data.teamId, b.id)
-    assert.equal(workspace.business.list('attachment', car.id).length, 1)
+    assert.equal(workspace.business.list('attachment', car.id).length, 0)
     assert.equal(client.workspaces.get(b.id).business.list('attachment').length, 0)
   } finally { release?.(); await context.close() }
 })
@@ -227,7 +227,7 @@ for (const operation of ['preview', 'delete', 'restore']) {
       const restorePreview = operation === 'restore' ? (await request('/business/restore/preview', { method: 'POST', body: upload(backup, 'secondary.zip') })).data : null
       const path = operation === 'restore' ? '/business/restore' : `/business/vehicles/${car.id}${operation === 'preview' ? '/delete-preview' : ''}`
       const body = operation === 'restore' ? upload(backup, 'secondary.zip', true) : operation === 'delete' ? { previewToken: preview.token, version: preview.version, vin, confirmation: 'DELETE', reason: 'Finish admitted deletion after disconnect', requestId: randomUUID() } : undefined
-      if (operation === 'restore') { body!.append('previewFingerprint', restorePreview.fingerprint); body!.append('archiveRecordIds', JSON.stringify([])) }
+      if (operation === 'restore') { body!.append('requestId', randomUUID()); body!.append('previewFingerprint', restorePreview.fingerprint); body!.append('archiveRecordIds', JSON.stringify([])) }
       const method = operation === 'restore' ? 'POST' : operation === 'delete' ? 'DELETE' : 'GET'
       let entered!: () => void, closed!: () => void, maintenanceEntered!: () => void, reads = 0
       const started = new Promise<void>(resolve => { entered = resolve }), readBarrier = new Promise<void>(resolve => { releaseRead = resolve })
@@ -298,4 +298,21 @@ test('workspace close is idempotent and drains active ticks, writes and maintena
     await client.close(); await client.tick()
     assert.equal(closeCounts.size, 2)
   } finally { releaseTick?.(); releaseWrite?.(); releaseMaintenance?.(); await context.close() }
+})
+
+
+test('local backup preserves pending work without synchronizing', async () => {
+  const context = await fixture()
+  try {
+    await context.register(); const team = await context.team('backup-source'), car = await context.vehicle()
+    const workspace = context.client.workspaces.get(team.id), status = (await context.request('/status')).data
+    const actor: Actor = { id: status.member.id, name: status.member.name, role: 'admin', deviceId: workspace.store.deviceId }
+    workspace.business.write({ id: car.id, kind: 'vehicle', version: workspace.business.get(car.id).version, data: { ...car.data, owner: 'Local pending owner' }, actor, reason: 'Unsynchronized local recovery point' })
+    const before = await fs.readFile(path.join(team.shared, 'business', 'HEAD.json'), 'utf8')
+    const local = await context.request('/business/backup?source=local')
+    assert.equal(local.status, 200)
+    assert.equal((await manifest(local.data)).source.pending, 1)
+    assert.equal(await fs.readFile(path.join(team.shared, 'business', 'HEAD.json'), 'utf8'), before)
+    assert.equal(workspace.synchronization.status().pending, 1)
+  } finally { await context.close() }
 })

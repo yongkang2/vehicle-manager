@@ -8,7 +8,7 @@ import path from 'node:path'
 import { createApp } from '../server/app.js'
 import { SharedBusinessSnapshot } from '../server/deletions.js'
 import { configurationDecisionKey } from '../shared/configuration-revisions.js'
-import type { Actor, BusinessRecord } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, RestoredHistoryImport } from '../shared/business.js'
 import type { ComponentTypeCatalog, ComponentTypeDefinition, ConfigurationDecisions, ConfigurationImport, ConfigurationPreview, ConfigurationPublicationReceipt, ConfigurationPublishRequest } from '../shared/configuration-revisions.js'
 import type { WorkspaceSnapshot } from '../shared/workspace.js'
 import type { TeamDocument } from '../shared/types.js'
@@ -76,8 +76,9 @@ async function fixture() {
   return { directory, shared, client, workspace, actor, headPath, request, enable, car, close }
 }
 
-test('protocol-4 background HEAD checks reject downgrades and ingest pending configuration restores', async t => {
+test('protocol-4 background HEAD checks reject downgrades and ingest pending configuration and history restores', async t => {
   const f = await fixture(); t.after(f.close)
+  const car = await f.car()
   await f.enable(true)
   const first = await f.request<WorkspaceSnapshot>('/business/workspace?full=1')
   assert.equal(first.status, 200); assert.equal(first.data.sync.phase, 'ready')
@@ -97,6 +98,17 @@ test('protocol-4 background HEAD checks reject downgrades and ingest pending con
   assert.equal(importedSnapshot.data.data!.catalog.types.find(row => row.id === restored.id)!.pendingRestore, undefined)
   assert.equal(f.workspace.store.get<ConfigurationImport[]>('pendingConfigurationImports')!.length, 0)
 
+  const historical = JSON.parse(String(f.workspace.store.db.prepare('SELECT payload FROM changes WHERE record_id=? LIMIT 1').get(car.id)!.payload)) as Change
+  historical.id = randomUUID(); historical.reason = 'Recover a fictional history-only backup'
+  const historyImport: RestoredHistoryImport = { id: randomUUID(), actor: f.actor, changes: [historical] }
+  f.workspace.store.set('pendingHistoryImports', [historyImport])
+  assert.equal(f.workspace.synchronization.status().pending, 1)
+  const recovered = await f.request<WorkspaceSnapshot>('/business/workspace')
+  assert.equal(open.mock.callCount(), 2, 'a history-only restore also bypasses the cached HEAD')
+  assert.equal(recovered.data.sync.pending, 0)
+  assert(recovered.data.data!.changes.some(change => change.id === historical.id))
+  assert.deepEqual(f.workspace.store.get('pendingHistoryImports'), [])
+
   const before = open.mock.callCount(), bytes = await fs.readFile(f.headPath, 'utf8'), head = JSON.parse(bytes)
   assert.equal(head.protocol, 4)
   await f.request<WorkspaceSnapshot>(`/business/workspace?known=${importedSnapshot.data.revision}`)
@@ -108,7 +120,7 @@ test('protocol-4 background HEAD checks reject downgrades and ingest pending con
   await fs.writeFile(f.headPath, bytes)
   assert.equal((await f.request<WorkspaceSnapshot>('/business/workspace?full=1')).data.sync.phase, 'ready')
   await fs.writeFile(f.headPath, JSON.stringify({ ...head, protocol: 5 }))
-  assert.equal((await f.request<WorkspaceSnapshot>('/business/workspace')).data.sync.error, 'SHARE_CORRUPTED')
+  assert.equal((await f.request<WorkspaceSnapshot>('/business/workspace')).data.sync.error, 'CLIENT_UPGRADE_REQUIRED')
   await fs.writeFile(f.headPath, bytes)
 })
 
