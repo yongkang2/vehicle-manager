@@ -90,7 +90,17 @@ export class History {
     return { vehicleOptions: [...labels].map(([id, label]) => ({ id, label: [label.model, label.vin].filter(Boolean).join(' · ') || id })) }
   }
 
-  options() { return this.optionsFromLabels(this.labels()) }
+  options() {
+    const deleted = new Set(this.store.deletionRows().map(marker => marker.vehicleId))
+    const labels = new Map<string, { model: string; vin: string }>()
+    for (const row of this.store.db.prepare("SELECT id,data FROM records WHERE kind='vehicle' ORDER BY id").all()) {
+      if (deleted.has(String(row.id))) continue
+      const data = JSON.parse(String(row.data))
+      const clean = (value: unknown) => typeof value === 'string' ? value.trim() : ''
+      labels.set(String(row.id), { model: clean(data.model), vin: clean(data.vin) })
+    }
+    return this.optionsFromLabels(labels)
+  }
 
   detail(id: unknown) {
     const row = this.store.db.prepare('SELECT payload FROM changes WHERE id=?').get(text(id, 200))
