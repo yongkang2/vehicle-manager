@@ -9,6 +9,8 @@ Choose the application ZIP, rather than GitHub's source-code archives. Extract t
 
 ## Start and stop
 
+Double-click Create-Desktop-Shortcut.cmd to create a Vehicle Manager desktop shortcut with the application icon. Keep the extracted folder in place; recreate the shortcut after moving the folder or installing a new release.
+
 Double-click Start.cmd to start the local service and open your browser. The service uses a free local port. Run Stop.cmd to stop safely and finish pending work before the database closes. Closing all application pages also permits automatic shutdown after the browser-presence checks and reconnect grace period. Hidden or minimized pages keep the service running.
 
 ## Accounts and local data
