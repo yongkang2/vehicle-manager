@@ -20,6 +20,10 @@ async function verifyExtracted(root) {
   const data = path.join(root, 'acceptance-data')
   assert.ok(existsSync(runtime), 'Extracted package is missing runtime/node.exe')
   assert.ok(existsSync(launcher), 'Extracted package is missing launcher.mjs')
+  assert.ok(existsSync(path.join(root, 'Create-Desktop-Shortcut.cmd')), 'Extracted package is missing the shortcut script')
+  const icon = await fs.readFile(path.join(root, 'vehicle-manager.ico'))
+  assert.equal(icon.readUInt32LE(0), 0x00010000, 'Application icon must be a Windows ICO')
+  assert.deepEqual(await fs.readFile(path.join(app, 'dist', 'vehicle-manager.ico')), icon, 'Browser and shortcut icons differ')
   assert.ok(!existsSync(path.join(root, 'update.mjs')), 'Portable package must not contain the retired updater')
 
   const appRequire = createRequire(path.join(app, 'package.json'))
