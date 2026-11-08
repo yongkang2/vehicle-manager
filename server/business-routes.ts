@@ -19,6 +19,10 @@ import { ExportTemplates } from './export-templates.js'
 import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
 import { VehiclePhotos } from './vehicle-photos.js'
 import { ConfigurationRevisions } from './configuration-revisions.js'
+import { Modifications } from './modifications.js'
+import { installModificationRoutes } from './modification-routes.js'
+import type { ModificationContext } from './modifications.js'
+import { abandonModificationRestore, exportModificationRestore, pendingModificationRestores } from './modification-recovery.js'
 import { MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, matchesExportVehicle, parseExportConfiguration } from '../shared/csv-export.js'
 import type { Identity, LocalUser, TeamDocument } from '../shared/types.js'
 import { configurationFields, controllerRecordId, doveRecordedTime, keyControllerName, reportMatchesVehicle, validControllerValue, DOVE_BATCH_LIMIT, DOVE_MAX_FILE_BYTES } from '../shared/business.js'
@@ -32,6 +36,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business), exportTemplates = new ExportTemplates(store)
   const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business)
   const configurationRevisions = new ConfigurationRevisions(business, synchronization, teams)
+  const modifications = new Modifications(business, synchronization, teams)
   function sessionGuard(req: BusinessRequest): () => void {
     const current = () => accounts.db.prepare('SELECT workspace_id,workspace_epoch FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now()) as { workspace_id: string | null; workspace_epoch: number } | undefined
     const before = current()
@@ -80,6 +85,16 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     return { directory: context.configuration.sharedPath, teamId: context.configuration.teamId, identity: context.identity, actor: context.actor, scopeKey: req.get('X-Workspace-Token') || '', syncEnabled: context.syncEnabled, assertCurrent }
   }
   const checkForUpdates = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity, { ifChanged: true }) : synchronization.status()
+  async function modificationContext(request: express.Request, response: express.Response, admin = false): Promise<ModificationContext> {
+    const req = request as BusinessRequest, assertCurrent = sessionGuard(req)
+    const context = await store.runWrite(() => access(req, admin))
+    assertCurrent()
+    return { directory: context.configuration.sharedPath, teamId: context.configuration.teamId, identity: context.identity, actor: context.actor, online: context.online, syncEnabled: context.syncEnabled, scopeKey: req.get('X-Workspace-Token') || '', assertCurrent, verifyAccess: finalAccess(req, response), assertLinked: () => {
+      assertCurrent()
+      const session = accounts.db.prepare('SELECT sync_enabled FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now())
+      if (!session?.sync_enabled) throw new AppError('CONFIRM_RESUME', 409)
+    } }
+  }
   function auditEntries() {
     const team = store.get<TeamDocument>('cachedTeam')
     return store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || accounts.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id }))
@@ -134,6 +149,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     res.json(business.list(kind as RecordKind | undefined, req.query.vehicleId ? String(req.query.vehicleId) : undefined).filter(record => recordKinds.includes(record.kind)))
   })
   router.get('/working-view', (_req, res) => res.json(configurationRevisions.workingView()))
+  installModificationRoutes(router, modifications, modificationContext)
   router.get('/component-types', (_req, res) => res.json(configurationRevisions.catalog()))
   router.post('/configuration-revisions/enable', async (req: BusinessRequest, res) => res.json(await configurationRevisions.enable(await configurationContext(req, true), req.body)))
   router.post('/component-types', async (req: BusinessRequest, res) => res.status(201).json(await configurationRevisions.createType(await configurationContext(req, true), req.body)))
@@ -153,6 +169,23 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     if (['report', 'attachment'].includes(current.kind)) throw new AppError('IMMUTABLE_REPORT', 409)
     validateManualRecordFields(current.kind, req.body.data, current)
     res.json(business.write({ id: current.id, kind: current.kind, vehicleId: current.vehicleId, data: req.body.data, version: req.body.version, actor: req.businessContext!.actor, reason: req.body.reason }))
+  })
+  router.post('/records/:id/archive', async (req: BusinessRequest, res, next) => {
+    try {
+      const current = business.get(String(req.params.id))
+      if (current.kind === 'modification' && (current.data.groupId || req.body?.groupVersion != null)) {
+        res.json(await modifications.archiveMember(current.id, req.body, await modificationContext(req, res, true)))
+        return
+      }
+      const remembered = typeof req.body?.requestId === 'string' && (store.get<{ key: string; value: string }[]>('modificationReceipts') || []).some(entry => entry.key === `modificationRequest:${req.body.requestId}` && JSON.parse(entry.value).kind === 'archiveVehicle')
+      const reviewedGroups = req.body?.groupVersions && typeof req.body.groupVersions === 'object' && Object.keys(req.body.groupVersions).length > 0
+      const linked = current.kind === 'vehicle' && req.body?.archived === true && (reviewedGroups || remembered || business.list('modification', current.id).some(record => record.data.groupId))
+      if (linked) {
+        res.json(await modifications.archiveVehicle(current.id, req.body, await modificationContext(req, res, true)))
+        return
+      }
+      next()
+    } catch (error) { next(error) }
   })
   writeRoute('post', '/records/:id/archive', async (req: BusinessRequest, res, next) => {
     try {
@@ -423,7 +456,17 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       catch { store.event(context.actor.id, 'backup.reminder-update-failed', {}) }
     }
   })
-  writeRoute('get', '/restore/receipts', async (req: BusinessRequest, res) => { await access(req, true); res.json(restoreReceipts(business)) })
+  writeRoute('get', '/restore/receipts', async (req: BusinessRequest, res) => { await access(req, true); res.json(restoreReceipts(business).map(receipt => ({ ...receipt, pendingModificationImportIds: pendingModificationRestores(business, receipt.requestId).map(entry => entry.id) }))) })
+  writeRoute('get', '/restore/:id/modification-import', async (req: BusinessRequest, res) => {
+    const verify = finalAccess(req, res)
+    await access(req, true)
+    const bytes = await exportModificationRestore(business, String(req.params.id))
+    await verify()
+    res.attachment('retained-modification-restore.zip').type('application/zip').send(bytes)
+  })
+  router.post('/restore/:id/abandon-modifications', async (req: BusinessRequest, res) => {
+    res.json(await abandonModificationRestore(business, synchronization, teams, await modificationContext(req, res, true), String(req.params.id), req.body?.reason))
+  })
   router.post('/restore/:id/publish', async (req: BusinessRequest, res) => {
     const guard = sessionGuard(req)
     const context = await store.runWrite(() => access(req, true))

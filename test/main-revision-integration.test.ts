@@ -119,7 +119,7 @@ test('protocol-4 background HEAD checks reject downgrades and ingest pending con
   assert.equal(open.mock.callCount(), before, 'the fast reader validates monotonic protocol before opening any snapshot')
   await fs.writeFile(f.headPath, bytes)
   assert.equal((await f.request<WorkspaceSnapshot>('/business/workspace?full=1')).data.sync.phase, 'ready')
-  await fs.writeFile(f.headPath, JSON.stringify({ ...head, protocol: 5 }))
+  await fs.writeFile(f.headPath, JSON.stringify({ ...head, protocol: 6 }))
   assert.equal((await f.request<WorkspaceSnapshot>('/business/workspace')).data.sync.error, 'CLIENT_UPGRADE_REQUIRED')
   await fs.writeFile(f.headPath, bytes)
 })

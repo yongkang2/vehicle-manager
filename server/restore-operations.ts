@@ -4,6 +4,7 @@ import { Business, checksum } from './business.js'
 import { AppError } from './team.js'
 import { createBackup, previewBackup, restoreBackup } from './backup.js'
 import type { Actor, RestoreReceipt } from '../shared/business.js'
+import type { ModificationImport } from '../shared/modifications.js'
 
 export const restoreReceipts = (business: Business): RestoreReceipt[] => business.store.get<RestoreReceipt[]>('restoreReceipts') || []
 export function saveRestoreReceipt(business: Business, receipt: RestoreReceipt) {
@@ -38,7 +39,11 @@ export async function applyRestore(business: Business, request: { requestId: str
     await fs.writeFile(file, safety, { flag: 'wx', flush: true })
     if (checksum(await fs.readFile(file)) !== receipt.safetySha256) throw new AppError('LOCAL_BACKUP_FAILED', 503)
     saveRestoreReceipt(business, receipt)
-    await restoreBackup(business, request.bytes, request.teamId, request.actor, request.reason, request.archiveRecordIds, { committed: result => saveRestoreReceipt(business, { ...receipt, state: 'applied', result }) })
+    await restoreBackup(business, request.bytes, request.teamId, request.actor, request.reason, request.archiveRecordIds, { committed: result => {
+      const pending = business.store.get<ModificationImport[]>('pendingModificationImports') || []
+      if (pending.length) business.store.set('pendingModificationImports', pending.map(entry => ({ ...entry, restoreRequestId: request.requestId })))
+      saveRestoreReceipt(business, { ...receipt, state: 'applied', result })
+    } })
     return restoreReceipts(business).find(item => item.requestId === receipt.requestId)!
   } catch (error) {
     saveRestoreReceipt(business, { ...receipt, state: 'failed', error: error instanceof AppError ? error.code : 'LOCAL_BACKUP_FAILED' })

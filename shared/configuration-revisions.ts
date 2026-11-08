@@ -20,7 +20,7 @@ export type ConfigurationRevisionRecord = BusinessRecord & { kind: 'configuratio
 export type ConfigurationRevisionSummary = { vehicleId: string; revisionId: string; number: number; label: string; publishedAt: string; actor: Actor; title: string; summary: string; hasChanges: boolean }
 export type ConfigurationPublishRequest = { previewToken: string; requestId: string; title: string; summary: string; decisions: ConfigurationDecisions }
 export type ConfigurationPublicationReceipt = { requestId: string; revisionId: string; vehicleId: string; number: number; label: string; publishedAt: string; localSynced: boolean }
-export type ConfigurationWorkingView = { records: BusinessRecord[]; catalog: ComponentTypeCatalog; revisionSummaries: ConfigurationRevisionSummary[] }
+export type ConfigurationWorkingView = { records: BusinessRecord[]; catalog: ComponentTypeCatalog; revisionSummaries: ConfigurationRevisionSummary[]; modificationEnabled?: boolean }
 export type ConfigurationReceiptEntry = { key: string; value: string }
 export type ConfigurationImport = { id: string; records: BusinessRecord[]; actor: Actor; reason: string; receipts: ConfigurationReceiptEntry[] }
 

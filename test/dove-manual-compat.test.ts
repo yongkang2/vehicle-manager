@@ -79,7 +79,7 @@ test('manual report association, original bytes and truthful history synchronize
       assert.equal(client.business.get(vehicle.id).data.vin, vin)
     }
     assert.equal(JSON.parse(await fs.readFile(path.join(f.shared, 'business', 'HEAD.json'), 'utf8')).protocol, 1)
-    assert.equal(alpha.store.db.prepare('PRAGMA user_version').get()!.user_version, 5)
+    assert.equal(alpha.store.db.prepare('PRAGMA user_version').get()!.user_version, 6)
   } finally { await f.close() }
 })
 

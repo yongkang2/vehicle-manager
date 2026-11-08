@@ -7,8 +7,9 @@ import type { RecordRow } from './business.js'
 import { AppError } from './team.js'
 import type { BusinessRecord, DeleteCounts, VehicleDeletion } from '../shared/business.js'
 import { isProtectedKind, validateConfigurationRecords, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
+import { validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
 
-export type BusinessHead = { protocol: 1 | 2 | 3 | 4; teamId: string; revision: string; sequence: number; checksum: string; created: string }
+export type BusinessHead = { protocol: 1 | 2 | 3 | 4 | 5; teamId: string; revision: string; sequence: number; checksum: string; created: string }
 
 /** Policy records and reduced review snapshots require the protocol-4 reader. */
 export function assertConfigurationProtocol(records: readonly BusinessRecord[], protocol: number): void {
@@ -51,7 +52,7 @@ export class SharedBusinessSnapshot {
     let head: BusinessHead
     try { head = JSON.parse(bytes.toString()) as BusinessHead } catch { throw corrupt() }
     if (!head || !Number.isSafeInteger(head.protocol) || head.protocol < 1 || head.teamId !== teamId || !uuid.test(head.revision) || !Number.isSafeInteger(head.sequence) || head.sequence < 1 || !digest.test(head.checksum)) throw corrupt()
-    if (head.protocol > 4) throw new AppError('CLIENT_UPGRADE_REQUIRED', 409)
+    if (head.protocol > 5) throw new AppError('CLIENT_UPGRADE_REQUIRED', 409)
     const sequence = business.store.get<number>('businessSequence') || 0
     if (head.sequence < sequence || (head.sequence === sequence && business.store.get('businessRevision') !== head.revision) || head.protocol < (business.store.get<number>('businessProtocol') || 1)) throw new AppError('BUSINESS_ROLLBACK', 409)
     return head
@@ -84,6 +85,10 @@ export class SharedBusinessSnapshot {
       const markers = result.deletions()
       if (head?.protocol === 1 && markers.length) throw corrupt()
       const records = (result.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)
+      try {
+        validateModificationRecords(records, head?.protocol || 1)
+        for (const entry of result.db.prepare("SELECT key,value FROM metadata WHERE key LIKE 'modificationRequest:%'").all()) validateModificationReceiptEntry({ key: String(entry.key), value: String(entry.value) })
+      } catch { throw corrupt() }
       if (head && head.protocol < 3 && records.some(record => isProtectedKind(record.kind) || record.kind === 'part' && record.data.category === 'component')) throw corrupt()
       if (head && head.protocol >= 3) {
         try {
@@ -108,11 +113,12 @@ export class SharedBusinessSnapshot {
   graph(vehicleId: string): RecordRow[] { return this.db.prepare('SELECT * FROM records WHERE id=? OR vehicle_id=? ORDER BY kind,id').all(vehicleId, vehicleId) as RecordRow[] }
   counts(graph: RecordRow[]): DeleteCounts {
     const counts: DeleteCounts = { vehicle: 0, part: 0, modification: 0, equipment: 0, report: 0, attachment: 0 }
-    for (const row of graph) { if (row.kind === 'configurationRevision') counts.configurationRevision = (counts.configurationRevision || 0) + 1; else if (row.kind in counts) counts[row.kind]++; else throw corrupt() }
+    for (const row of graph) { if (row.kind === 'configurationRevision') counts.configurationRevision = (counts.configurationRevision || 0) + 1; else if (row.kind in counts) { const kind = row.kind as keyof DeleteCounts; counts[kind] = (counts[kind] || 0) + 1 } else throw corrupt() }
     return counts
   }
-  async publish(teamId: string, requestedProtocol: 1 | 2 | 3 | 4, revision = randomUUID(), sequence = (this.head?.sequence || 0) + 1): Promise<BusinessHead> {
-    const protocol = Math.max(requestedProtocol, this.head?.protocol || 1) as 1 | 2 | 3 | 4
+  async publish(teamId: string, requestedProtocol: 1 | 2 | 3 | 4 | 5, revision = randomUUID(), sequence = (this.head?.sequence || 0) + 1): Promise<BusinessHead> {
+    const protocol = Math.max(requestedProtocol, this.head?.protocol || 1) as 1 | 2 | 3 | 4 | 5
+    try { validateModificationRecords((this.db.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow), protocol) } catch { throw corrupt() }
     this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('teamId', teamId)
     this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('sequence', String(sequence))
     if (protocol >= 2) this.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('protocol', String(protocol))

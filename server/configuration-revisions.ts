@@ -5,6 +5,7 @@ import type { RecordRow } from './business.js'
 import { SharedBusinessSnapshot } from './deletions.js'
 import { atomicFile, BusinessSync } from './sync.js'
 import { AppError, TeamDirectory } from './team.js'
+import { configurationFeatureFlags } from '../shared/business-features.js'
 import type { Actor, BusinessRecord, Change } from '../shared/business.js'
 import type { Identity, Member, TeamDocument } from '../shared/types.js'
 import { builtinComponentTypes, componentTypeDefinitions, configurationReviewScope, configurationRevisionLabel, configurationRevisionSummaries, configurationSections, configurationSnapshot, configurationSourceFingerprint, isProtectedKind, pendingComponentTypeView, validateConfigurationRecords, validateConfigurationRevisionRecord } from '../shared/configuration-revisions.js'
@@ -39,7 +40,8 @@ export class ConfigurationRevisions {
   private localCatalog(records: BusinessRecord[]): ComponentTypeCatalog {
     const committed = new Set(this.business.list().filter(record => record.kind === 'componentType').map(record => record.id))
     const pending = new Map((this.business.store.get<ConfigurationImport[]>('pendingConfigurationImports') || []).flatMap(entry => entry.records).filter(record => record.kind === 'componentType' && !committed.has(record.id)).map(record => [record.id, record]))
-    return { enabled: (this.business.store.get<number>('businessProtocol') || 1) >= 3, policyEnabled: (this.business.store.get<number>('businessProtocol') || 1) >= 4, types: componentTypeDefinitions(records).map(type => {
+    const flags = configurationFeatureFlags(this.business.store.get<number>('businessProtocol') || 1, this.business.store.get('configurationEnabled'), this.business.store.get('configurationPolicyEnabled'))
+    return { ...flags, types: componentTypeDefinitions(records).map(type => {
       const source = pending.get(type.id)
       if (!source) return type
       const name = String(source.data.name), suffix = type.id.slice(0, 8)
@@ -51,7 +53,7 @@ export class ConfigurationRevisions {
   workingView(): ConfigurationWorkingView {
     return safe(() => {
       const all = this.localRecords()
-      return { records: all.filter(record => !isProtectedKind(record.kind)), catalog: this.localCatalog(all), revisionSummaries: configurationRevisionSummaries(all) }
+      return { records: all.filter(record => !isProtectedKind(record.kind)), catalog: this.localCatalog(all), revisionSummaries: configurationRevisionSummaries(all), modificationEnabled: (this.business.store.get<number>('businessProtocol') || 1) >= 5 }
     })
   }
   history(vehicleId: string): ConfigurationRevisionSummary[] {
@@ -107,7 +109,8 @@ export class ConfigurationRevisions {
       }))
     } catch (error) { if (error instanceof AppError) throw error; throw new AppError(error instanceof Error && 'code' in error ? String(error.code) : 'SHARE_IO_ERROR', 409) }
   }
-  private requireEnabled(snapshot: SharedBusinessSnapshot): void { if ((snapshot.head?.protocol || 1) < 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409) }
+  private featureFlags(snapshot: SharedBusinessSnapshot) { return configurationFeatureFlags(snapshot.head?.protocol || 1, snapshot.db.prepare("SELECT value FROM metadata WHERE key='configurationEnabled'").get()?.value, snapshot.db.prepare("SELECT value FROM metadata WHERE key='configurationPolicyEnabled'").get()?.value) }
+  private requireEnabled(snapshot: SharedBusinessSnapshot): void { if (!this.featureFlags(snapshot).enabled) throw new AppError('CONFIGURATION_NOT_ENABLED', 409) }
   private receipt<T>(snapshot: SharedBusinessSnapshot, context: ConfigurationContext, actor: Actor, requestId: string, kind: string, command: unknown): T | null {
     if (!uuid.test(requestId)) throw new AppError('INVALID_INPUT')
     const row = snapshot.db.prepare('SELECT value FROM metadata WHERE key=?').get(`configurationRequest:${requestId}`)
@@ -126,16 +129,16 @@ export class ConfigurationRevisions {
   }
   async enable(context: ConfigurationContext, input: { requestId?: string; reason?: string } = {}): Promise<ComponentTypeCatalog> {
     return this.locked(context, true, async (snapshot, actor) => {
-      if ((snapshot.head?.protocol || 1) < 3) {
+      if (!this.featureFlags(snapshot).enabled) {
         const requestId = input.requestId || randomUUID()
         if (!uuid.test(requestId)) throw new AppError('INVALID_INPUT')
         this.assertContext(context)
         snapshot.db.exec('BEGIN IMMEDIATE')
-        try { this.audit(snapshot, actor, null, 'configuration.enabled', input.reason ? reason(input.reason) : 'Enabled configuration revisions after upgrading the team'); this.remember(snapshot, context, actor, requestId, 'enable', {}, { requestId, enabled: true }); snapshot.db.exec('COMMIT') } catch (error) { snapshot.db.exec('ROLLBACK'); throw error }
+        try { snapshot.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('configurationEnabled', '1'); this.audit(snapshot, actor, null, 'configuration.enabled', input.reason ? reason(input.reason) : 'Enabled configuration revisions after upgrading the team'); this.remember(snapshot, context, actor, requestId, 'enable', {}, { requestId, enabled: true }); snapshot.db.exec('COMMIT') } catch (error) { snapshot.db.exec('ROLLBACK'); throw error }
         await snapshot.publish(context.teamId, 3)
       }
       await this.synchronization.ingestLocked(snapshot)
-      return { enabled: true, policyEnabled: (snapshot.head?.protocol || 1) >= 4, types: componentTypeDefinitions(protectedRecords(snapshot)) }
+      return { enabled: true, policyEnabled: this.featureFlags(snapshot).policyEnabled, types: componentTypeDefinitions(protectedRecords(snapshot)) }
     })
   }
   async createType(context: ConfigurationContext, input: { name: string; description?: string; requestId?: string; reason?: string }): Promise<ComponentTypeDefinition> {
@@ -144,7 +147,7 @@ export class ConfigurationRevisions {
       this.requireEnabled(snapshot)
       const existing = this.receipt<{ requestId: string; type: ComponentTypeDefinition }>(snapshot, context, actor, requestId, 'createType', command)
       if (existing) { await this.synchronization.ingestLocked(snapshot); return existing.type }
-      const records = protectedRecords(snapshot), id = randomUUID(), created = now(), data: ComponentTypeData = (snapshot.head?.protocol || 1) >= 4 ? { schema: 2, name, description, reviewState: 'active', definitionVersion: 1 } : { schema: 1, name, description, disabled: false, definitionVersion: 1 }
+      const records = protectedRecords(snapshot), id = randomUUID(), created = now(), data: ComponentTypeData = this.featureFlags(snapshot).policyEnabled ? { schema: 2, name, description, reviewState: 'active', definitionVersion: 1 } : { schema: 1, name, description, disabled: false, definitionVersion: 1 }
       const record: BusinessRecord = { id, kind: 'componentType', vehicleId: null, archived: false, version: 1, updated: created, data }
       const definition = safe(() => componentTypeDefinitions([...records, record]).find(type => type.id === id)!)
       this.assertContext(context)
@@ -170,9 +173,9 @@ export class ConfigurationRevisions {
       const records = protectedRecords(snapshot), current = records.find(record => record.id === id && record.kind === 'componentType'), builtin = builtinComponentTypes.find(type => type.id === id)
       const currentDefinition = safe(() => componentTypeDefinitions(records).find(type => type.id === id))
       if (!currentDefinition || !current && !builtin) throw new AppError('COMPONENT_TYPE_NOT_FOUND', 404)
-      if (builtin && (!policyRequested && (snapshot.head?.protocol || 1) < 4 || name !== builtin.name || description !== builtin.description)) throw new AppError('INVALID_INPUT')
+      if (builtin && (!policyRequested && !this.featureFlags(snapshot).policyEnabled || name !== builtin.name || description !== builtin.description)) throw new AppError('INVALID_INPUT')
       if (currentDefinition.version !== input.version) { await this.synchronization.ingestLocked(snapshot); throw new AppError('VERSION_CONFLICT', 409) }
-      const policyEnabled = policyRequested || (snapshot.head?.protocol || 1) >= 4
+      const policyEnabled = policyRequested || this.featureFlags(snapshot).policyEnabled
       const data: ComponentTypeData = policyEnabled ? { schema: 2, name, description, reviewState: policyRequested ? input.reviewState! : currentDefinition.reviewState || (currentDefinition.disabled ? 'disabled' : 'active'), definitionVersion: input.version + 1 } : { schema: 1, name, description, disabled: input.disabled!, definitionVersion: input.version + 1 }
       const updated = now(), record: BusinessRecord = { id, kind: 'componentType', vehicleId: null, archived: false, version: (current?.version || 0) + 1, data, updated }
       const nextRecords = [...records.filter(row => row.id !== id), record]
@@ -181,6 +184,7 @@ export class ConfigurationRevisions {
       snapshot.db.exec('BEGIN IMMEDIATE')
       try {
         snapshot.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,version=excluded.version,updated=excluded.updated').run(id, record.kind, null, null, JSON.stringify(data), 0, record.version, updated)
+        if (policyEnabled) snapshot.db.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run('configurationPolicyEnabled', '1')
         this.audit(snapshot, actor, record, 'componentType.updated', explanation, current?.data || null)
         this.remember(snapshot, context, actor, requestId, 'updateType', command, { requestId, type: definition })
         snapshot.db.exec('COMMIT')
@@ -220,7 +224,7 @@ export class ConfigurationRevisions {
       const previous = configurationRevisionSummaries(records).find(row => row.vehicleId === vehicleId)
       if ((previous?.revisionId || null) !== preview.previousRevisionId) throw new AppError('REVISION_PREVIEW_CHANGED', 409)
       const previousRecord = records.find(row => row.id === previous?.revisionId) as ConfigurationRevisionRecord | undefined
-      const types = componentTypeDefinitions(records), sections = configurationSections(records, vehicleId, types, previousRecord?.data), policyEnabled = (snapshot.head?.protocol || 1) >= 4
+      const types = componentTypeDefinitions(records), sections = configurationSections(records, vehicleId, types, previousRecord?.data), policyEnabled = this.featureFlags(snapshot).policyEnabled
       const captured = safe(() => configurationSnapshot(sections, request.decisions, policyEnabled ? configurationReviewScope(records, vehicleId, types, previousRecord?.data) : undefined))
       const number = (previous?.number || 0) + 1, id = randomUUID(), publishedAt = now(), label = configurationRevisionLabel(number)
       const data: ConfigurationRevisionData = { schema: policyEnabled ? 2 : 1, name: label, vehicleId, vin: String(vehicle.data.vin), number, label, title, summary, publishedAt, actor, previousRevisionId: previous?.revisionId || null, sourceFingerprint: configurationSourceFingerprint(sections), snapshot: captured }

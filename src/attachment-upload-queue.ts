@@ -17,11 +17,13 @@ type Options = {
   vehicleId: string
   onRefresh: (signal: AbortSignal) => Promise<void>
   onBusyChange?: (busy: boolean) => void
+  validateFile?: (file: Pick<File, 'name' | 'size'>) => 'FILE_TYPE_NOT_ALLOWED' | 'FILE_TOO_LARGE' | undefined
+  uploadFile?: (file: File, signal: AbortSignal) => Promise<{ id: string; pauseForRefresh?: boolean }>
 }
 
 // Only explicit rejection codes are safe to retry: a lost response can follow a save.
 const rejected = new Set(['FILE_TYPE_NOT_ALLOWED', 'FILE_TOO_LARGE', 'FILE_REQUIRED', 'INVALID_INPUT', 'FILE_CORRUPTED', 'MAINTENANCE_IN_PROGRESS', 'SHARE_UNAVAILABLE', 'SHARE_ACCESS_DENIED', 'SHARE_BUSY'])
-const fatal = new Set(['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'ADMIN_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'WORKSPACE_NOT_FOUND', 'NOT_CONFIGURED', 'PARENT_ARCHIVED', 'RECORD_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND', 'NOT_FOUND'])
+const fatal = new Set(['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'ADMIN_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'WORKSPACE_NOT_FOUND', 'NOT_CONFIGURED', 'PARENT_ARCHIVED', 'RECORD_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND', 'NOT_FOUND', 'MODIFICATION_NOT_ENABLED', 'MODIFICATION_CHANGED', 'MODIFICATION_LINK_CHANGED', 'MODIFICATION_LINKED', 'MODIFICATION_MANAGED', 'MODIFICATION_STALE', 'MODIFICATION_LINKED_ONLINE_REQUIRED', 'MODIFICATION_PENDING_CHANGES', 'MODIFICATION_REQUEST_MISMATCH', 'VERSION_CONFLICT', 'CONFIRM_RESUME'])
 const errorCode = (cause: unknown) => cause instanceof ApiError ? cause.message : 'SERVER_ERROR'
 
 /** A queue belongs to one vehicle and one authenticated workspace for its lifetime. */
@@ -60,7 +62,7 @@ export class AttachmentUploadQueue {
     if (this.disposed || this.snapshot.busy || this.snapshot.inspectionRequired || !files.length) return
     const available = ATTACHMENT_BATCH_LIMIT - this.snapshot.rows.length
     const rows = files.slice(0, available).map(file => {
-      const error = attachmentFileError(file)
+      const error = (this.options.validateFile || attachmentFileError)(file)
       return { id: String(++this.nextId), file, status: error ? 'invalid' as const : 'pending' as const, ...(error ? { error } : {}) }
     })
     this.publish({ rows: [...this.snapshot.rows, ...rows], limited: files.length > available })
@@ -115,12 +117,19 @@ export class AttachmentUploadQueue {
         if (!this.current(controller)) break
         this.updateRow(row.id, { status: 'uploading', error: undefined })
         try {
-          const body = new FormData()
-          body.append('file', row.file, row.file.name)
-          const record = await this.options.scope.request<BusinessRecord>(`/api/business/vehicles/${encodeURIComponent(this.options.vehicleId)}/attachments`, { method: 'POST', body, signal: controller.signal })
+          let record: { id: string; pauseForRefresh?: boolean }
+          if (this.options.uploadFile) record = await this.options.uploadFile(row.file, controller.signal)
+          else {
+            const body = new FormData()
+            body.append('file', row.file, row.file.name)
+            const uploaded = await this.options.scope.request<BusinessRecord>(`/api/business/vehicles/${encodeURIComponent(this.options.vehicleId)}/attachments`, { method: 'POST', body, signal: controller.signal })
+            if (!uploaded || uploaded.kind !== 'attachment' || uploaded.vehicleId !== this.options.vehicleId) throw new ApiError('SERVER_ERROR')
+            record = uploaded
+          }
           if (!this.current(controller)) break
-          if (!record || typeof record.id !== 'string' || !record.id || record.kind !== 'attachment' || record.vehicleId !== this.options.vehicleId) throw new ApiError('SERVER_ERROR')
+          if (!record || typeof record.id !== 'string' || !record.id) throw new ApiError('SERVER_ERROR')
           this.updateRow(row.id, { status: 'uploaded', savedId: record.id, error: undefined })
+          if (record.pauseForRefresh) break
         } catch (cause) {
           if (!this.current(controller)) break
           const code = errorCode(cause), certain = cause instanceof ApiError && (rejected.has(code) || fatal.has(code))

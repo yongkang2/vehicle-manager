@@ -1,6 +1,7 @@
 import { ZipArchive } from 'archiver'
 import type { BusinessRecord } from '../shared/business.js'
 import { configurationRevisionSummaries } from '../shared/configuration-revisions.js'
+import { validateModificationRecords } from '../shared/modifications.js'
 import { exportColumns, exportKinds, matchesExportVehicle, MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, parseExportConfiguration, recordsForExport } from '../shared/csv-export.js'
 import type { CsvExportRequest, ExportRecordKind } from '../shared/csv-export.js'
 import { AppError } from './team.js'
@@ -32,6 +33,7 @@ export async function buildCsvExport(records: BusinessRecord[], request: CsvExpo
   const configuration = parseExportConfiguration(request?.configuration)
   if (!configuration || !Array.isArray(request.vehicleIds) || !request.vehicleIds.length || request.vehicleIds.length > MAX_EXPORT_VEHICLES || Array.from(request.vehicleIds).some(id => typeof id !== 'string' || !id.length || id.length > MAX_EXPORT_ID_LENGTH) || new Set(request.vehicleIds).size !== request.vehicleIds.length) throw new AppError('INVALID_INPUT')
   if (records.length > 200000) throw new AppError('EXPORT_TOO_LARGE', 413)
+  try { validateModificationRecords(records) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
   const vehicles = new Map(records.filter(record => record.kind === 'vehicle').map(record => [record.id, record]))
   for (const id of request.vehicleIds) {
     const vehicle = vehicles.get(id)

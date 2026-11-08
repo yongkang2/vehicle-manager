@@ -19,6 +19,12 @@ type Props = {
   onBusyChange: (busy: boolean) => void
   onCancelReady: (cancel: (() => void) | null) => void
   onError: (cause: unknown) => void
+  queueId?: string
+  extensions?: readonly string[]
+  limitsText?: string
+  uploadBlocked?: boolean
+  validateFile?: (file: Pick<File, 'name' | 'size'>) => 'FILE_TYPE_NOT_ALLOWED' | 'FILE_TOO_LARGE' | undefined
+  uploadFile?: (scope: ReturnType<typeof createWorkspaceScope>, file: File, signal: AbortSignal) => Promise<{ id: string; pauseForRefresh?: boolean }>
 }
 
 function createQueueStore() {
@@ -31,31 +37,33 @@ function createQueueStore() {
   }
 }
 
-export default function AttachmentUpload({ vehicle, language, disabled, onRefresh, onBusyChange, onCancelReady, onError }: Props) {
+export default function AttachmentUpload({ vehicle, language, disabled, onRefresh, onBusyChange, onCancelReady, onError, queueId, extensions, limitsText, uploadBlocked, validateFile, uploadFile }: Props) {
   const [store] = useState(createQueueStore)
   const queue = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const refresh = useEffectEvent(onRefresh), changeBusy = useEffectEvent(onBusyChange), exposeCancel = useEffectEvent(onCancelReady)
+  const sendFile = useEffectEvent((scope: ReturnType<typeof createWorkspaceScope>, file: File, signal: AbortSignal) => uploadFile!(scope, file, signal))
+  const hasUploadFile = Boolean(uploadFile)
   useLayoutEffect(() => {
     const scope = createWorkspaceScope()
-    const next = new AttachmentUploadQueue({ scope, vehicleId: vehicle.id, onRefresh: signal => refresh(scope, signal), onBusyChange: value => changeBusy(value) })
+    const next = new AttachmentUploadQueue({ scope, vehicleId: vehicle.id, onRefresh: signal => refresh(scope, signal), onBusyChange: value => changeBusy(value), validateFile, ...(hasUploadFile ? { uploadFile: (file: File, signal: AbortSignal) => sendFile(scope, file, signal) } : {}) })
     store.replace(next)
     exposeCancel(() => next.dispose())
     return () => { exposeCancel(null); next.dispose(); store.replace(null) }
-  }, [vehicle.id, store])
-  return queue && <AttachmentUploadPanel queue={queue} vehicle={vehicle} language={language} disabled={disabled} onError={onError} />
+  }, [vehicle.id, queueId, store, validateFile, hasUploadFile])
+  return queue && <AttachmentUploadPanel queue={queue} vehicle={vehicle} language={language} disabled={disabled} onError={onError} extensions={extensions} limitsText={limitsText} uploadBlocked={uploadBlocked} />
 }
 
-function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError }: Pick<Props, 'vehicle' | 'language' | 'disabled' | 'onError'> & { queue: AttachmentUploadQueue }) {
+function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, extensions = ATTACHMENT_EXTENSIONS, limitsText, uploadBlocked }: Pick<Props, 'vehicle' | 'language' | 'disabled' | 'onError' | 'extensions' | 'limitsText' | 'uploadBlocked'> & { queue: AttachmentUploadQueue }) {
   const text = translateBusiness(language), input = useRef<HTMLInputElement>(null)
   const snapshot = useSyncExternalStore(queue.subscribe, queue.getSnapshot)
   const { rows, busy, limited, inspectionRequired, refreshError } = snapshot
-  const locked = busy || disabled, readonly = locked || vehicle.archived
+  const locked = busy || disabled, readonly = locked || vehicle.archived || uploadBlocked
   const pending = rows.filter(row => row.status === 'pending').length, failed = rows.filter(row => row.status === 'failed').length
   const uploaded = rows.filter(row => row.status === 'uploaded').length, completed = rows.filter(row => !['pending', 'uploading'].includes(row.status)).length
   const uploading = rows.some(row => row.status === 'uploading')
   const colors = { pending: 'default', invalid: 'error', uploading: 'processing', uploaded: 'success', failed: 'error', unknown: 'warning' } as const
   return <section className="attachment-upload" aria-label={text('attachmentUploadQueue')}>
-    <input ref={input} className="attachment-file-input" type="file" hidden multiple accept={ATTACHMENT_EXTENSIONS.join(',')} aria-label={text('attachmentChooseFiles')} disabled={readonly || inspectionRequired || rows.length >= ATTACHMENT_BATCH_LIMIT} onChange={event => {
+    <input ref={input} className="attachment-file-input" type="file" hidden multiple accept={extensions.join(',')} aria-label={text('attachmentChooseFiles')} disabled={readonly || inspectionRequired || rows.length >= ATTACHMENT_BATCH_LIMIT} onChange={event => {
       queue.add(Array.from(event.target.files || [])); event.target.value = ''
     }} />
     <div className="attachment-upload-toolbar">
@@ -65,7 +73,7 @@ function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError }: 
       <Button type="text" disabled={locked || !rows.length || inspectionRequired} onClick={() => queue.clear()}>{text('clearBatch')}</Button>
       <Button icon={<RefreshCw size={15} />} disabled={locked} loading={busy && !uploading} onClick={() => void queue.refresh().catch(onError)}>{text('attachmentRefreshList')}</Button>
     </div>
-    <p className="attachment-upload-limits">{text('attachmentBatchLimits')}</p>
+    <p className="attachment-upload-limits">{limitsText || text('attachmentBatchLimits')}</p>
     {limited && <Alert type="warning" showIcon title={text('attachmentSelectionLimit')} />}
     {rows.some(row => row.status === 'unknown') && <Alert type="warning" showIcon title={text('attachmentUnknownNotice')} description={inspectionRequired ? text('attachmentInspectBeforeRetry') : text('attachmentInspectionDone')} />}
     {refreshError && <Alert type="warning" showIcon title={text('attachmentRefreshFailed')} description={errorText(refreshError, language)} />}

@@ -1,5 +1,5 @@
 export type WorkingRecordKind = 'vehicle' | 'part' | 'modification' | 'equipment' | 'report' | 'attachment'
-export type RecordKind = WorkingRecordKind | 'configurationRevision' | 'componentType'
+export type RecordKind = WorkingRecordKind | 'configurationRevision' | 'componentType' | 'modificationGroup'
 export type Fields = Record<string, unknown>
 export type BusinessRecord = { id: string; kind: RecordKind; vehicleId: string | null; data: Fields; archived: boolean; version: number; updated: string }
 export type Actor = { id: string; name: string; deviceId: string; role: 'admin' | 'member' }
@@ -16,7 +16,7 @@ export type VehicleDeleteRequest = { previewToken: string; version: number; vin:
 export type QuarantinedOperation = { id: string; vehicleId: string; reason: 'VEHICLE_DELETED'; quarantinedAt: string; operation: Operation }
 export type RestoreResult = { changed: number; skippedVehicles: number; skippedRecords: number; skippedVehicleIds: string[]; syncError?: string }
 export type RestoreEffect = { id: string; vehicleId: string | null; vehicleName?: string; name: string; kind: RecordKind; action: 'add' | 'change' | 'unchanged' | 'skip' | 'archive'; fields: { key: string; before: unknown; after: unknown }[] }
-export type RestoreReceipt = { requestId: string; digest: string; actorId: string; created: string; state: 'prepared' | 'applied' | 'published' | 'failed'; safetyFile?: string; safetySha256?: string; result?: RestoreResult; error?: string }
+export type RestoreReceipt = { requestId: string; digest: string; actorId: string; created: string; state: 'prepared' | 'applied' | 'published' | 'failed'; safetyFile?: string; safetySha256?: string; result?: RestoreResult; error?: string; pendingModificationImportIds?: string[] }
 export type RestorePreview = { source?: { revision: string | null; pending: number; conflicts: number }; format: number; teamId: string; created: string; effects: RestoreEffect[]; appVersion: string | null; records: number; additions: number; changes: number; archiveCandidates: { id: string; kind: RecordKind; name: string; parentName: string | null; relatedRecords: number }[]; droppedFields: { recordId: string; fields: string[] }[]; conflicts: string[]; fingerprint: string }
 export const vehicleFields = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'thermal', 'complianceLevel', 'notes'] as const
 export const thermalSystemTypes = ['Indirect Heat Pump', 'Direct Heat Pump', 'No Heat Pump'] as const
@@ -55,10 +55,12 @@ export function doveRecordedTime(value: unknown): number {
 	return Date.parse(String(value ?? '').trim().replace(/^(\d{4}-\d{2}-\d{2})[ T](\d{2})h(\d{2})$/, '$1T$2:$3:00'))
 }
 export const entryFields = ['name', 'description', 'installedAt', 'removedAt', 'notes'] as const
+export const modificationFields = ['name', 'description', 'requestor', 'lead', 'installedAt', 'removedAt', 'notes'] as const
 export const businessFieldRegistry = {
 	vehicle: { active: vehicleFields, legacy: ['coolingArchitecture'], removed: [] as string[] },
 	part: { active: partFields, legacy: [] as string[], removed: [] as string[] },
 	entry: { active: entryFields, legacy: [] as string[], removed: [] as string[] },
+	modification: { active: modificationFields, legacy: [] as string[], removed: [] as string[] },
 } as const
 export type Controller = { name: string; description: string; network: string; supplier: string; functionalPart: string; productPart: string; software: string; calibrationPart: string; calibrationVersion: string; flashingDate: string; productionDate: string; serial: string }
 export type Fault = { controller: string; code: string; status: string; statusByte: string; description: string; context: string }

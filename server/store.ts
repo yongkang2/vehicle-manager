@@ -100,14 +100,14 @@ export class LocalStore {
     try {
       this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;')
       const version = this.db.prepare('PRAGMA user_version').get()!.user_version as number
-      if (version > 5) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
+      if (version > 6) throw new AppError('LOCAL_VERSION_TOO_NEW', 503)
       const shape = inspectSchema(this.db, version)
       const machine = shape.core ? this.get<string>('machine') : null
       if (machine && machine !== this.deviceName) throw new AppError('COPIED_LOCAL_DATA', 409)
       const selectedDevice = deviceId || (shape.core ? this.get<string>('deviceId') : null) || randomUUID()
       const config = shape.core && !shape.workspace ? this.get<{ teamId: string; sharedPath: string }>('configuration') : null
       if (config && (typeof config.teamId !== 'string' || !config.teamId || typeof config.sharedPath !== 'string' || !config.sharedPath)) throw schemaError()
-      if (version < 5) {
+      if (version < 6) {
         if (version > 0) this.backupBeforeUpgrade(version)
         this.transaction(() => {
           if (!shape.core) this.db.exec(coreSql)
@@ -122,9 +122,9 @@ export class LocalStore {
               this.db.prepare('UPDATE sessions SET workspace_id=?').run(config.teamId)
             }
           }
-          inspectSchema(this.db, 5)
+          inspectSchema(this.db, 6)
           this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
-          this.db.exec('PRAGMA user_version=5')
+          this.db.exec('PRAGMA user_version=6')
         })
       } else {
         this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
@@ -136,7 +136,7 @@ export class LocalStore {
     try {
       const backups = path.join(this.directory, 'migration-backups')
       mkdirSync(backups, { recursive: true })
-      const destination = path.join(backups, `before-schema5-${randomUUID()}.sqlite`)
+      const destination = path.join(backups, `before-schema6-${randomUUID()}.sqlite`)
       this.db.prepare('VACUUM INTO ?').run(destination)
       const snapshot = new DatabaseSync(destination, { readOnly: true })
       try {

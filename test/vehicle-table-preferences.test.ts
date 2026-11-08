@@ -74,7 +74,7 @@ test('personal vehicle layouts persist by local account/workspace without record
     assert.deepEqual(preferences.get('account-b'), defaultVehicleTablePreferences())
     assert.deepEqual(new VehicleTablePreferencesStore(second).get('account-a'), defaultVehicleTablePreferences())
     for (const table of ['records', 'outbox', 'changes', 'conflicts']) assert.equal(first.db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get()!.total, 0)
-    assert.equal(first.db.prepare('PRAGMA user_version').get()!.user_version, 5)
+    assert.equal(first.db.prepare('PRAGMA user_version').get()!.user_version, 6)
     assert.deepEqual(first.db.prepare("SELECT * FROM settings WHERE key NOT LIKE 'vehicleTablePreferences:%' ORDER BY key").all(), beforeSettings)
     assert.throws(() => preferences.put('account-a', { ...chosen, columns: ['actions'] }), { code: 'INVALID_INPUT' })
     assert.deepEqual(preferences.get('account-a'), chosen)

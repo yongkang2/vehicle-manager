@@ -105,14 +105,14 @@ test('deletion and ordinary synchronization retain protocol4 and permanent marke
   } finally { await f.close() }
 })
 
-test('backup field3 preserves policies and mixed revision history without restoring old catalog decisions', async () => {
+test('backup field4 preserves policies and mixed revision history without restoring old catalog decisions', async () => {
   const f = await fixture()
   try {
-    const first = await f.publish(), legacy = await createBackup(f.admin.business, f.team.id)
+    const first = await f.publish(), legacy = await rewrite(await createBackup(f.admin.business, f.team.id), value => { value.format = 4; value.schemaVersion = 5; value.fieldVersion = 2 })
     assert.equal((await manifest(legacy)).fieldVersion, 2)
     await f.policy('emotor', 'removed'); const second = await f.publish(), modern = await createBackup(f.admin.business, f.team.id)
     const content = await manifest(modern)
-    assert.equal(content.format, 4); assert.equal(content.schemaVersion, 5); assert.equal(content.fieldVersion, 3)
+    assert.equal(content.format, 5); assert.equal(content.schemaVersion, 6); assert.equal(content.fieldVersion, 4)
     assert.equal(content.records.find(row => row.id === 'emotor')!.data.reviewState, 'removed')
     assert.equal(content.records.find(row => row.id === first.revisionId)!.data.schema, 1)
     assert.equal(content.records.find(row => row.id === second.revisionId)!.data.schema, 2)
@@ -127,7 +127,7 @@ test('backup field3 preserves policies and mixed revision history without restor
   } finally { await f.close() }
 })
 
-test('field3 restore queues complete history, respects implicit built-in defaults and requires explicit policy activation', async () => {
+test('field4 restore queues complete history, respects implicit built-in defaults and requires explicit policy activation', async () => {
   const f = await fixture(), targetDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-policy-restore-')), store = new LocalStore(targetDirectory), business = new Business(store)
   try {
     await f.publish(); await f.policy('emotor', 'removed'); await f.publish()
@@ -142,7 +142,7 @@ test('field3 restore queues complete history, respects implicit built-in default
     assert.equal(imports[0].records.filter(row => row.kind === 'configurationRevision').length, 2)
     assert(!imports[0].records.some(row => row.id === 'emotor'), 'Implicit current Active must not become Removed from a historical backup')
     const roundtrip = await manifest(await createBackup(business, f.team.id))
-    assert.equal(roundtrip.fieldVersion, 3)
+    assert.equal(roundtrip.fieldVersion, 4)
     assert.equal(roundtrip.records.filter(row => row.kind === 'configurationRevision').length, 2)
   } finally { store.db.close(); await fs.rm(targetDirectory, { recursive: true, force: true }); await f.close() }
 })

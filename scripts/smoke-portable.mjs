@@ -110,7 +110,7 @@ try {
   assert.equal(backup.subarray(0, 2).toString(), 'PK')
   const archive = await appRequire('unzipper').Open.buffer(backup)
   const manifest = JSON.parse((await archive.files.find(file => file.path === 'manifest.json').buffer()).toString())
-  assert.equal(manifest.format, 4); assert.equal(manifest.schemaVersion, 5); assert.equal(manifest.fieldVersion, 3)
+  assert.equal(manifest.format, 5); assert.equal(manifest.schemaVersion, 6); assert.equal(manifest.fieldVersion, 4)
   assert.ok(manifest.records.some(record => record.id === vehicle.id))
   assert.ok(manifest.records.some(record => record.id === report.id))
   assert.deepEqual(manifest.records.find(record => record.id === first.revisionId), frozenFirst)
@@ -140,7 +140,7 @@ try {
   assert.deepEqual(await request(revisions, 'POST', secondCommand), second)
   assert.deepEqual(await request(`/business/component-types/${type.id}`, 'PUT', policyCommand), disabled)
   assert.equal(JSON.parse(await fs.readFile(headPath, 'utf8')).protocol, 4)
-  console.log(JSON.stringify({ restartPersistence: true, packagedDependenciesOnly: true, unicodeDataPath: true, portableRuntime: true, launchReused: true, vehicleCreated: true, isolatedParser: true, originalBytesMatch: true, backupGenerated: true, configurationProtocol3: true, publishedR01: true, componentPolicyProtocol4: true, frozenR02Exclusion: true, backupFormat4Field3: true, schema5Persistence: true, durableConfigurationReceipts: true, version: (await request('/bootstrap')).version }))
+  console.log(JSON.stringify({ restartPersistence: true, packagedDependenciesOnly: true, unicodeDataPath: true, portableRuntime: true, launchReused: true, vehicleCreated: true, isolatedParser: true, originalBytesMatch: true, backupGenerated: true, configurationProtocol3: true, publishedR01: true, componentPolicyProtocol4: true, frozenR02Exclusion: true, backupFormat5Field4: true, schema6Persistence: true, durableConfigurationReceipts: true, version: (await request('/bootstrap')).version }))
 } finally {
   if (started) {
     await execute(executable, [launcher, '--stop'], { cwd: release, env, timeout: 10000 })

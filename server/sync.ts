@@ -8,14 +8,17 @@ import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
 import { AppError, TeamDirectory, assertTeamLock } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
-import type { Actor, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 import { componentTypeDefinitions, isProtectedKind, validateConfigurationRecords, validateConfigurationRevisionRecord, validateComponentTypeRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 import type { ConfigurationImport } from '../shared/configuration-revisions.js'
+import { collectChangeFileKeys, collectRecordFileKeys, modificationFiles, validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
+import type { ModificationImport } from '../shared/modifications.js'
+import { configurationFeatureFlags } from '../shared/business-features.js'
 
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 const fieldKeys = (base: Fields, desired: Fields) => new Set([...Object.keys(base), ...Object.keys(desired)])
 // Legacy records omit these values; materializing a blank is not a change.
-const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus', 'componentTypeId'] : []
+const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus', 'componentTypeId'] : kind === 'modification' ? ['requestor', 'lead'] : []
 const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => blankEquivalentFields(kind).includes(field)
   ? equivalent(left === undefined ? '' : left, right === undefined ? '' : right)
   : equivalent(left, right)
@@ -28,7 +31,7 @@ function equivalentData(kind: RecordKind, left: Fields, right: Fields): boolean 
 }
 const stateOf = (row: RecordRow | undefined) => row ? { data: JSON.parse(row.data) as Fields, archived: Boolean(row.archived) } : null
 const hashKey = (key: string) => /^[a-f0-9]{64}$/.test(key)
-const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'part' THEN 1 ELSE 2 END"
+const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'modificationGroup' THEN 1 WHEN 'part' THEN 2 ELSE 3 END"
 type PreviewState = { vehicleId: string; actorKey: string; graph: string; version: number; vin: string; expires: number }
 
 export async function atomicFile(destination: string, bytes: Buffer | string, beforeRename?: () => void): Promise<void> {
@@ -67,7 +70,8 @@ export class BusinessSync {
     const pendingImports = store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []
     const configurationImports = store.get<ConfigurationImport[]>('pendingConfigurationImports') || []
     const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
-    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
+    const modificationImports = store.get<ModificationImport[]>('pendingModificationImports') || []
+    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length + modificationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
   }
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity, options: { ifChanged?: boolean } = {}): Promise<SyncStatus> {
@@ -148,7 +152,7 @@ export class BusinessSync {
           if (this.business.get(vehicleId).version !== request.version || checksum(JSON.stringify(graph)) !== preview.graph) throw new AppError('DELETE_PREVIEW_CHANGED', 409)
           if (!vehicle.archived) throw new AppError('VEHICLE_NOT_ARCHIVED', 409)
           const revision = randomUUID(), sequence = (snapshot.head?.sequence || 0) + 1, deletedAt = now(), id = randomUUID()
-          const marker: VehicleDeletion = { id, requestId: request.requestId, vehicleId, vin: preview.vin, recordIds: graph.map(row => row.id), fileKeys: [...new Set(graph.filter(row => ['report', 'attachment'].includes(row.kind)).map(row => String(JSON.parse(row.data).checksum)))], actor: liveActor, reason: explanation, deletedAt, revision, sequence }
+          const marker: VehicleDeletion = { id, requestId: request.requestId, vehicleId, vin: preview.vin, recordIds: graph.map(row => row.id), fileKeys: [...new Set(graph.flatMap(row => collectRecordFileKeys(fromRow(row))))], actor: liveActor, reason: explanation, deletedAt, revision, sequence }
           validateVehicleDeletion(marker)
           const change: Change = { id, recordId: vehicleId, vehicleId, kind: 'vehicle', before: JSON.parse(vehicle.data), after: {}, archivedBefore: true, archivedAfter: true, actor: liveActor, reason: explanation, action: 'vehicle.deleted', sourceId: null, created: deletedAt }
           snapshot.db.exec('BEGIN IMMEDIATE')
@@ -176,6 +180,14 @@ export class BusinessSync {
     const row = master.prepare('SELECT * FROM records WHERE id=?').get(first.recordId) as RecordRow | undefined
     const remote = stateOf(row), fields: string[] = []
     if (isProtectedKind(first.kind)) fields.push('_protected')
+    if (first.kind === 'modificationGroup') fields.push('_modificationManaged')
+    if (first.kind === 'modification') {
+      const discard = first.decision && equivalent(remote, last.desired)
+      if (!discard && (remote?.data.groupId || last.desired.data.groupId)) fields.push('_modificationLink')
+      const protocol = Number(master.prepare("SELECT value FROM metadata WHERE key='protocol'").get()?.value || 1)
+      if (!discard && protocol < 5 && last.desired.data.attachments !== undefined) fields.push('_modificationDisabled')
+    }
+    if (first.kind === 'vehicle' && last.desired.archived && master.prepare("SELECT data FROM records WHERE vehicle_id=? AND kind='modification' AND archived=0").all(first.recordId).some(row => Boolean(JSON.parse(String(row.data)).groupId))) fields.push('_modificationLinkedArchive')
     for (const operation of operations) {
       const member = team.members.find(item => item.id === operation.actor.id && item.enabled)
       const binding = team.bindings.find(item => item.memberId === operation.actor.id && item.deviceId === operation.actor.deviceId && item.enabled)
@@ -199,7 +211,8 @@ export class BusinessSync {
     }
     if (first.kind === 'part' && last.desired.data.category === 'component') {
       const protocol = Number(master.prepare("SELECT value FROM metadata WHERE key='protocol'").get()?.value || 1)
-      if (protocol < 3) fields.push('_configurationDisabled')
+      const flags = configurationFeatureFlags(protocol, master.prepare("SELECT value FROM metadata WHERE key='configurationEnabled'").get()?.value, master.prepare("SELECT value FROM metadata WHERE key='configurationPolicyEnabled'").get()?.value)
+      if (!flags.enabled) fields.push('_configurationDisabled')
       const definitions = componentTypeDefinitions((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow))
       if (!definitions.some(type => type.id === last.desired.data.componentTypeId && !['hv-battery', 'emotor', 'controllers'].includes(type.id))) fields.push('_componentType')
     }
@@ -228,7 +241,7 @@ export class BusinessSync {
     }
   }
   private async filesToShare(directory: string, operations: Operation[]): Promise<void> {
-    for (const key of new Set(operations.flatMap(operation => operation.files))) {
+    for (const key of new Set(operations.flatMap(operation => [...operation.files, ...operation.changes.flatMap(collectChangeFileKeys)]))) {
       if (!hashKey(key)) throw new AppError('INVALID_INPUT')
       const bytes = await this.business.readBlob(key)
       await immutableFile(path.join(directory, 'blobs', key), bytes)
@@ -251,14 +264,30 @@ export class BusinessSync {
     this.acceptCanonical(master)
     const records = master.prepare(`SELECT * FROM records ORDER BY ${kinds},id`).all() as RecordRow[]
     if (head.protocol >= 3) { try { const view = records.map(fromRow); assertConfigurationProtocol(view, head.protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
-    for (const row of records.filter(item => ['report', 'attachment'].includes(item.kind))) {
-      const data = JSON.parse(row.data) as { checksum: string; size: number }
-      if (!hashKey(data.checksum)) throw new AppError('INVALID_INPUT')
-      const localPath = path.join(this.business.store.directory, 'blobs', data.checksum)
+    try { validateModificationRecords(records.map(fromRow), head.protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
+    const files = new Map<string, number>()
+    for (const row of records) {
+      const record = fromRow(row)
+      const references = ['report', 'attachment'].includes(record.kind) ? [{ checksum: String(record.data.checksum), size: Number(record.data.size) }] : modificationFiles(record)
+      for (const file of references) {
+        if (!hashKey(file.checksum) || files.has(file.checksum) && files.get(file.checksum) !== file.size) throw new AppError('FILE_CORRUPTED', 409)
+        files.set(file.checksum, file.size)
+      }
+    }
+    for (const row of master.prepare('SELECT payload FROM changes').all()) {
+      const change = JSON.parse(String(row.payload)) as Change
+      if (!['modification', 'modificationGroup'].includes(change.kind)) continue
+      for (const data of [change.before, change.after]) if (data) for (const file of modificationFiles({ kind: change.kind, data } as BusinessRecord)) {
+        if (files.has(file.checksum) && files.get(file.checksum) !== file.size) throw new AppError('FILE_CORRUPTED', 409)
+        files.set(file.checksum, file.size)
+      }
+    }
+    for (const [key, size] of files) {
+      const localPath = path.join(this.business.store.directory, 'blobs', key)
       const local = await optionalRead(localPath)
-      if (local && checksum(local) === data.checksum) continue
-      const bytes = await fs.readFile(path.join(directory, 'blobs', data.checksum))
-      if (checksum(bytes) !== data.checksum || bytes.length !== data.size) throw new AppError('FILE_CORRUPTED', 409)
+      if (local && checksum(local) === key && local.length === size) continue
+      const bytes = await fs.readFile(path.join(directory, 'blobs', key))
+      if (checksum(bytes) !== key || bytes.length !== size) throw new AppError('FILE_CORRUPTED', 409)
       await fs.mkdir(path.dirname(localPath), { recursive: true })
       await atomicFile(localPath, bytes)
     }
@@ -275,18 +304,27 @@ export class BusinessSync {
         }
         const local = store.db.prepare('SELECT * FROM records WHERE id=?').get(row.id) as RecordRow | undefined
         if (row.kind === 'configurationRevision' && local && (local.kind !== row.kind || local.vehicle_id !== row.vehicle_id || local.data !== row.data || local.archived !== row.archived)) throw new AppError('CONFIGURATION_CORRUPTED', 409)
-        if (!local) store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, row.vehicle_id, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.data, row.archived, 1, row.updated)
+        if (row.kind === 'modificationGroup') {
+          if (!local) store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, null, null, row.data, row.archived, row.version, row.updated)
+          else store.db.prepare('UPDATE records SET data=?,archived=?,version=?,updated=? WHERE id=?').run(row.data, row.archived, row.version, row.updated, row.id)
+        }
+        else if (!local) store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, row.vehicle_id, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.data, row.archived, 1, row.updated)
         else if (row.data !== local.data || row.archived !== local.archived) store.db.prepare('UPDATE records SET data=?,vin=?,archived=?,version=version+1,updated=? WHERE id=?').run(row.data, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.archived, row.updated, row.id)
       }
       for (const change of master.prepare('SELECT * FROM changes').all()) store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
       store.db.exec('DELETE FROM conflicts')
       for (const conflict of conflicts) store.db.prepare('INSERT INTO conflicts VALUES(?,?)').run(conflict.recordId, JSON.stringify(conflict))
       store.set('businessRevision', head.revision); store.set('businessSequence', head.sequence); store.set('businessProtocol', head.protocol); store.set('businessLastSync', now())
+      const flags = configurationFeatureFlags(head.protocol, master.prepare("SELECT value FROM metadata WHERE key='configurationEnabled'").get()?.value, master.prepare("SELECT value FROM metadata WHERE key='configurationPolicyEnabled'").get()?.value)
+      store.set('configurationEnabled', flags.enabled); store.set('configurationPolicyEnabled', flags.policyEnabled)
       store.set('configurationReceipts', master.prepare("SELECT key,value FROM metadata WHERE key LIKE 'configurationRequest:%'").all().map(row => ({ key: String(row.key), value: String(row.value) })))
+      store.set('modificationReceipts', master.prepare("SELECT key,value FROM metadata WHERE key LIKE 'modificationRequest:%'").all().map(row => ({ key: String(row.key), value: String(row.value) })))
       const imports = store.get<ConfigurationImport[]>('pendingConfigurationImports') || []
       if (imports.length) store.set('pendingConfigurationImports', imports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`configurationImport:${entry.id}`)))
       const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
       if (historyImports.length) store.set('pendingHistoryImports', historyImports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`historyImport:${entry.id}`)))
+      const modificationImports = store.get<ModificationImport[]>('pendingModificationImports') || []
+      if (modificationImports.length) store.set('pendingModificationImports', modificationImports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`modificationImport:${entry.id}`)))
     })
   }
   private async cycle(shared: string, team: TeamDocument, ifChanged = false): Promise<SyncStatus> {
@@ -306,7 +344,7 @@ export class BusinessSync {
       const master = snapshot.db, directory = snapshot.directory, store = this.business.store
       const markers = snapshot.deletions()
       this.acceptCanonical(master)
-      let changed = !snapshot.head, protocol: 1 | 2 | 3 | 4 = snapshot.head?.protocol || 1
+      let changed = !snapshot.head, protocol: 1 | 2 | 3 | 4 | 5 = snapshot.head?.protocol || 1
       for (const entry of store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []) {
         const marker = validateVehicleDeletion(entry.deletion), existing = markers.find(item => item.vehicleId === marker.vehicleId)
         if (existing) { if (existing.id !== marker.id) throw new AppError('BACKUP_DELETION_CONFLICT', 409); continue }
@@ -316,11 +354,12 @@ export class BusinessSync {
         if (master.prepare('SELECT vehicle_id FROM vehicle_deletions WHERE request_id=?').get(marker.requestId) || snapshot.graph(marker.vehicleId).length || marker.recordIds.some(id => master.prepare('SELECT id FROM records WHERE id=?').get(id))) throw new AppError('BACKUP_DELETION_CONFLICT', 409)
         master.prepare('INSERT INTO vehicle_deletions VALUES(?,?,?)').run(marker.vehicleId, marker.requestId, JSON.stringify(marker))
         for (const change of store.db.prepare('SELECT * FROM changes WHERE vehicle_id=?').all(marker.vehicleId)) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
-        markers.push(marker); changed = true; protocol = Math.max(protocol, 2) as 2 | 3 | 4
+        markers.push(marker); changed = true; protocol = Math.max(protocol, 2) as 2 | 3 | 4 | 5
       }
       const configurationImports = (store.get<ConfigurationImport[]>('pendingConfigurationImports') || []).filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`configurationImport:${entry.id}`))
-      if (configurationImports.length && protocol < 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
-      if (protocol < 4 && configurationImports.some(entry => entry.records.some(record => isProtectedKind(record.kind) && record.data.schema === 2))) throw new AppError('CONFIGURATION_POLICY_NOT_ENABLED', 409)
+      const configurationFlags = configurationFeatureFlags(protocol, master.prepare("SELECT value FROM metadata WHERE key='configurationEnabled'").get()?.value, master.prepare("SELECT value FROM metadata WHERE key='configurationPolicyEnabled'").get()?.value)
+      if (configurationImports.length && !configurationFlags.enabled) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+      if (!configurationFlags.policyEnabled && configurationImports.some(entry => entry.records.some(record => isProtectedKind(record.kind) && record.data.schema === 2))) throw new AppError('CONFIGURATION_POLICY_NOT_ENABLED', 409)
       for (const entry of configurationImports) {
         const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
         const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
@@ -335,6 +374,42 @@ export class BusinessSync {
       }
       try { componentTypeDefinitions((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)) }
       catch (error) { throw new AppError(error instanceof Error && 'code' in error && error.code === 'COMPONENT_TYPE_EXISTS' ? 'COMPONENT_TYPE_EXISTS' : 'CONFIGURATION_CORRUPTED', 409) }
+      const modificationImports = (store.get<ModificationImport[]>('pendingModificationImports') || []).filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`modificationImport:${entry.id}`))
+      if (modificationImports.length && protocol < 5) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
+      const deferredModifications: BusinessRecord[] = []
+      const deletedRecord = (record: BusinessRecord) => markers.some(marker => marker.recordIds.includes(record.id) || marker.vehicleId === record.vehicleId)
+      const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => [key, stable(child)])) : value
+      const applyModificationImportRecord = (record: BusinessRecord) => {
+        if (deletedRecord(record)) return
+        if (!['modification', 'modificationGroup'].includes(record.kind)) throw new AppError('INVALID_BACKUP', 422)
+        const existing = master.prepare('SELECT * FROM records WHERE id=?').get(record.id) as RecordRow | undefined
+        if (existing && (existing.kind !== record.kind || existing.vehicle_id !== record.vehicleId)) throw new AppError('MODIFICATION_RESTORE_CONFLICT', 409)
+        if (existing) master.prepare('UPDATE records SET data=?,archived=?,version=version+1,updated=? WHERE id=?').run(JSON.stringify(record.data), record.archived ? 1 : 0, now(), record.id)
+        else master.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(record.id, record.kind, record.vehicleId, null, JSON.stringify(record.data), record.archived ? 1 : 0, 1, now())
+        for (const change of store.db.prepare('SELECT * FROM changes WHERE record_id=?').all(record.id)) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
+        changed = true
+      }
+      for (const entry of modificationImports) {
+        const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
+        const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
+        if (!member || !binding) throw new AppError('ADMIN_REQUIRED', 403)
+        for (const record of entry.records.filter(record => !deletedRecord(record))) {
+          const current = master.prepare('SELECT * FROM records WHERE id=?').get(record.id) as RecordRow | undefined
+          if (!entry.baseStates || !Object.hasOwn(entry.baseStates, record.id) || JSON.stringify(stable(stateOf(current))) !== JSON.stringify(stable(entry.baseStates[record.id]))) throw new AppError('MODIFICATION_RESTORE_CONFLICT', 409)
+          if (record.kind === 'modificationGroup' && (current?.version ?? null) !== entry.baseVersions[record.id]) throw new AppError('MODIFICATION_RESTORE_CONFLICT', 409)
+          for (const key of collectRecordFileKeys(record)) await immutableFile(path.join(directory, 'blobs', key), await this.business.readBlob(key))
+        }
+        for (const receipt of entry.receipts || []) {
+          try { validateModificationReceiptEntry(receipt) } catch { throw new AppError('INVALID_BACKUP', 422) }
+          const existing = master.prepare('SELECT value FROM metadata WHERE key=?').get(receipt.key)
+          if (existing && existing.value !== receipt.value) throw new AppError('MODIFICATION_RESTORE_CONFLICT', 409)
+        }
+      }
+      for (const entry of modificationImports) for (const record of [...entry.records].sort((left, right) => Number(right.kind === 'modificationGroup') - Number(left.kind === 'modificationGroup'))) {
+        if (deletedRecord(record)) continue
+        if (record.vehicleId && !master.prepare("SELECT id FROM records WHERE id=? AND kind='vehicle'").get(record.vehicleId)) deferredModifications.push(record)
+        else applyModificationImportRecord(record)
+      }
       const pending = this.business.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY seq").all().map(row => JSON.parse(row.payload as string) as Operation)
       const groups = new Map<string, Operation[]>()
       for (const operation of pending) {
@@ -350,10 +425,19 @@ export class BusinessSync {
       for (const operations of ordered) {
         const conflict = this.checkConflict(master, operations, team)
         if (conflict && !operations[0].decision) { conflicts.push(conflict); continue }
-        if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType'].includes(field))) { conflicts.push(conflict); continue }
+        if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive'].includes(field))) { conflicts.push(conflict); continue }
         await this.filesToShare(directory, operations)
         master.exec('BEGIN IMMEDIATE')
         try { this.apply(master, operations); master.exec('COMMIT'); changed = true } catch (error) { master.exec('ROLLBACK'); throw error }
+      }
+      for (const record of deferredModifications) {
+        if (!record.vehicleId || !master.prepare("SELECT id FROM records WHERE id=? AND kind='vehicle'").get(record.vehicleId)) throw new AppError('MODIFICATION_RESTORE_CONFLICT', 409)
+        applyModificationImportRecord(record)
+      }
+      for (const entry of modificationImports) {
+        for (const receipt of entry.receipts || []) master.prepare('INSERT OR IGNORE INTO metadata VALUES(?,?)').run(receipt.key, receipt.value)
+        master.prepare('INSERT OR REPLACE INTO metadata VALUES(?,?)').run(`modificationImport:${entry.id}`, '1')
+        changed = true
       }
       for (const entry of configurationImports) {
         for (const record of entry.records.filter(row => row.kind === 'configurationRevision')) {
@@ -378,11 +462,15 @@ export class BusinessSync {
         const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
         const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
         if (!member || !binding) throw new AppError('ADMIN_REQUIRED', 403)
-        for (const change of entry.changes) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
+        for (const change of entry.changes) {
+          for (const key of collectChangeFileKeys(change)) await immutableFile(path.join(directory, 'blobs', key), await this.business.readBlob(key))
+          master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
+        }
         master.prepare('INSERT INTO metadata VALUES(?,?)').run(`historyImport:${entry.id}`, '1')
         changed = true
       }
       if (protocol >= 3) { try { const view = (master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow); assertConfigurationProtocol(view, protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
+      try { validateModificationRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow), protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
       if (changed) {
         await snapshot.publish(team.id, protocol)
       }
@@ -407,6 +495,8 @@ export class BusinessSync {
     const operations = store.db.prepare("SELECT payload FROM outbox WHERE record_id=? AND state='pending' ORDER BY seq").all(recordId).map(row => JSON.parse(row.payload as string) as Operation)
     const current = this.business.get(recordId)
     if (isProtectedKind(current.kind) || conflict.fields.includes('_protected')) throw new AppError('CONFIGURATION_IMMUTABLE', 409)
+    if (current.kind === 'modificationGroup' || conflict.fields.includes('_modificationManaged')) throw new AppError('MODIFICATION_MANAGED', 409)
+    if (conflict.fields.some(field => ['_modificationLink', '_modificationDisabled', '_modificationLinkedArchive'].includes(field) && choices[field] !== 'shared')) throw new AppError('MODIFICATION_LINKED', 409)
     if (!equivalent(conflict.local, { data: current.data, archived: current.archived }) || !equivalent(conflict.operationIds, operations.map(operation => operation.id))) throw new AppError('CONFLICT_CHANGED', 409)
     const discard = conflict.fields.some(field => field.startsWith('_') && choices[field] === 'shared')
     if (conflict.fields.includes('_vin') && !discard) throw new AppError('VIN_EXISTS', 409)
