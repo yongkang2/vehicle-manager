@@ -12,7 +12,7 @@ import { appVersion } from '../shared/version.js'
 import { configurationFeatureFlags } from '../shared/business-features.js'
 import { randomUUID } from 'node:crypto'
 import { builtinComponentTypes, isProtectedKind, validateComponentTypeRecord, validateConfigurationRecords, validateConfigurationRevisionRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
-import { collectChangeFileKeys, collectModificationImportFileKeys, collectRecordFileKeys, modificationFiles, modificationGroupId, modificationView, validateModificationFiles, validateModificationReceiptEntry, validateModificationRecords } from '../shared/modifications.js'
+import { collectChangeFileKeys, collectModificationImportFileKeys, collectRecordFileKeys, hasEnhancedModificationText, modificationFiles, modificationGroupId, modificationView, validateModificationFiles, validateModificationReceiptEntry, validateModificationRecords } from '../shared/modifications.js'
 import type { AbandonedModificationImport, ModificationImport, ModificationReceiptEntry } from '../shared/modifications.js'
 import { validateModificationFile } from './modification-files.js'
 
@@ -215,7 +215,10 @@ function requireRestoreProtocol(business: Business, records: BusinessRecord[], n
   const flags = configurationFeatureFlags(protocol, business.store.get('configurationEnabled'), business.store.get('configurationPolicyEnabled'))
   if (needsConfiguration && !flags.enabled) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
   if (records.some(record => isProtectedKind(record.kind) && record.data.schema === 2) && !flags.policyEnabled) throw new AppError('CONFIGURATION_POLICY_NOT_ENABLED', 409)
-  if (records.some(managedModification) && protocol < 5) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
+  if (protocol < 5) {
+    const current = new Map(business.list('modification').map(record => [record.id, record]))
+    if (records.some(record => managedModification(record) || record.kind === 'modification' && (hasEnhancedModificationText(record.data) || hasEnhancedModificationText(current.get(record.id)?.data || {})))) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
+  }
 }
 function validDeletion(value: unknown): value is VehicleDeletion {
   if (!object(value) || !uuid(value.id) || !uuid(value.requestId) || !uuid(value.vehicleId) || typeof value.vin !== 'string' || !/^[A-HJ-NPR-Z0-9]{17}$/.test(value.vin) || !actorValue(value.actor) || value.actor.role !== 'admin' || typeof value.reason !== 'string' || !value.reason.trim() || value.reason.length > 500 || !timestamp(value.deletedAt) || !uuid(value.revision) || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 1) return false
@@ -519,6 +522,9 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
   const archiveCandidates = currentRecords.filter(record => !isProtectedKind(record.kind) && record.kind !== 'modificationGroup' && !(manifest.format < 5 && managedModification(record)) && !record.archived && !ids.has(record.id) && !deletedIds.has(record.id) && (record.kind === 'vehicle' || Boolean(record.vehicleId && ids.has(record.vehicleId))))
   if (!Array.isArray(archiveRecordIds) || archiveRecordIds.some(id => typeof id !== 'string') || new Set(archiveRecordIds).size !== archiveRecordIds.length || archiveRecordIds.some(id => !archiveCandidates.some(record => record.id === id))) throw new AppError('RESTORE_PREVIEW_CHANGED', 409)
   if (archiveCandidates.some(record => !archiveRecordIds.includes(record.id))) throw new AppError('RESTORE_ARCHIVE_CONFIRMATION_REQUIRED', 409)
+  const archivedIds = new Set(archiveRecordIds)
+  for (const record of currentRecords) if (!isProtectedKind(record.kind) && record.kind !== 'modificationGroup' && !(manifest.format < 5 && managedModification(record)) && record.vehicleId && archivedIds.has(record.vehicleId)) archivedIds.add(record.id)
+  requireRestoreProtocol(business, currentRecords.filter(record => !record.archived && archivedIds.has(record.id)), false)
   const skippedIds = new Set(skipped.map(record => record.id))
   const modificationImport = prepareModificationImport(currentRecords, manifest.records, deletedIds, deletedVehicles, modReceipts, knownModificationReceipts(business), manifest.format, new Set(archiveRecordIds))
   if ((modificationImport.records.length || modificationImport.receipts.length) && (business.store.get<number>('businessProtocol') || 1) < 5) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
@@ -584,8 +590,6 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
       }
       business.store.set('pendingModificationImports', [{ id: randomUUID(), records: modificationImport.records, receipts: modificationImport.receipts, baseVersions: modificationImport.baseVersions, baseStates: modificationImport.baseStates, actor, reason } satisfies ModificationImport])
     }
-    const archivedIds = new Set(archiveRecordIds)
-    for (const record of currentRecords) if (!isProtectedKind(record.kind) && record.kind !== 'modificationGroup' && !(manifest.format < 5 && managedModification(record)) && record.vehicleId && archivedIds.has(record.vehicleId)) archivedIds.add(record.id)
     const extras = business.list().filter(record => !isProtectedKind(record.kind) && record.kind !== 'modificationGroup' && !managedIds.has(record.id) && !(manifest.format < 5 && managedModification(record)) && !ids.has(record.id) && !record.archived && archivedIds.has(record.id)).sort((left, right) => Number(left.kind === 'vehicle') - Number(right.kind === 'vehicle'))
     for (const record of extras) { business.write({ id: record.id, kind: record.kind, vehicleId: record.vehicleId, data: record.data, version: record.version, archived: true, actor, reason: `Restore archive: ${reason}`, internal: ['report', 'attachment'].includes(record.kind), maintenance: 'restore' }); changed++ }
     for (const record of ordered.filter(record => record.kind === 'vehicle' && record.archived)) {

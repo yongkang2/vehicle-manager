@@ -43,7 +43,7 @@ const errorPairs: Record<string, [string, string]> = {
   MODIFICATION_ALREADY_LINKED: ['A selected vehicle is already linked. Refresh the selection.', '所选车辆已关联，请刷新选择。'],
   MODIFICATION_RESTORE_CONFLICT: ['Shared modifications changed after the restore review. Retain the payload in Restore history and create a fresh preview.', '共享改装在恢复审核后发生变化。请在恢复记录中保留载荷，再重新预览。'],
   MODIFICATION_RESTORE_REVIEW_REQUIRED: ['Desired shared data and files were retained. Other pending work remains; synchronize and review a fresh backup preview.', '待恢复的共享数据及文件已保留，其他待同步修改仍在。请同步后重新预览备份。'],
-  MODIFICATION_NOT_ENABLED: ['Ask an administrator to enable modification files and sharing after all clients upgrade.', '请在全部客户端升级后，由管理员启用改装文件及共享。'],
+  MODIFICATION_NOT_ENABLED: ['Ask an administrator to enable enhanced modifications after all clients upgrade. Requestor, Lead, files and Linked mode require activation.', '全部客户端升级后，请由管理员启用增强车辆改装。申请人、负责人、文件及关联模式均需启用后使用。'],
   MODIFICATION_LINKED_ONLINE_REQUIRED: ['Linked modifications require connectivity and resumed team synchronization.', '关联改装操作需要网络连接，并已恢复团队同步。'],
   MODIFICATION_PENDING_CHANGES: ['Synchronize pending modification changes and resolve conflicts before changing shared links.', '请先同步待处理改装修改并解决冲突，再更改共享关联。'],
   MODIFICATION_STALE: ['The modification or shared group changed. Refresh and review before retrying.', '改装记录或共享组已变化，请刷新核对后重试。'],

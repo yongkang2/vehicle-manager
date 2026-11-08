@@ -12,7 +12,14 @@ function text(value: unknown, max: number): string {
   return value
 }
 const display = (value: unknown) => value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value)
-type HistoryFilters = { vehicleId?: unknown; q?: unknown; page?: unknown; kind?: unknown; date?: unknown; offset?: unknown; endOffset?: unknown }
+function populated(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value === 'string') return Boolean(value.trim())
+  if (Array.isArray(value)) return value.some(populated)
+  if (typeof value === 'object') return Object.values(value).some(populated)
+  return true
+}
+type HistoryFilters = { vehicleId?: unknown; q?: unknown; page?: unknown; kind?: unknown; date?: unknown; offset?: unknown; endOffset?: unknown; summary?: unknown }
 
 export class History {
   constructor(private store: LocalStore) {}
@@ -32,8 +39,9 @@ export class History {
       const midnight = Date.parse(`${date}T00:00:00.000Z`)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== date || input.offset === undefined) throw new AppError('INVALID_INPUT')
       const start = midnight + Number(offsetText) * 60000
-      clauses.push('julianday(changes.created)>=julianday(?) AND julianday(changes.created)<julianday(?)')
-      values.push(new Date(start).toISOString(), new Date(midnight + 86400000 + Number(endOffsetText) * 60000).toISOString())
+      const end = new Date(midnight + 86400000 + Number(endOffsetText) * 60000).toISOString()
+      clauses.push("((julianday(CASE WHEN changes.created <> 'now' THEN changes.created END)>=julianday(?) AND julianday(CASE WHEN changes.created <> 'now' THEN changes.created END)<julianday(?)) OR (changes.created='now' AND julianday(changes.created)>=julianday(?) AND julianday(changes.created)<julianday(?)))")
+      values.push(new Date(start).toISOString(), end, new Date(start).toISOString(), end)
     }
     const fieldAliases: Record<string, string> = { 软件: 'software', 软件版本: 'software', 硬件: 'hardware', 硬件版本: 'hardware', 序列号: 'serial', 名称: 'name', 车型: 'model', 负责人: 'owner', 状态: 'status', 标定版本: 'calibrationVersion', 说明: 'description', 备注: 'notes' }
     for (const term of q ? q.split(/\s+/) : []) {
@@ -52,20 +60,54 @@ export class History {
     const pageText = text(input.page, 20) || '1', page = Number(pageText)
     if (!/^[1-9]\d*$/.test(pageText) || !Number.isSafeInteger(page) || !Number.isSafeInteger(page * 50)) throw new AppError('INVALID_INPUT')
     const total = Number(this.store.db.prepare(`SELECT count(*) AS total ${from} ${where}`).get(...values)!.total)
+    const selected = this.store.db.prepare(`SELECT changes.payload ${from} ${where} ORDER BY changes.created DESC,changes.rowid DESC LIMIT 50 OFFSET ?`).all(...values, (page - 1) * 50).map(row => JSON.parse(row.payload as string) as Change)
+    const summary = input.summary === '1'
+    const labels = this.labels(summary ? [...new Set(selected.map(change => change.vehicleId))] : undefined)
+    const items = selected.map(change => {
+      const vehicleLabel = labels.get(change.vehicleId)?.model || labels.get(change.vehicleId)?.vin || change.vehicleId
+      if (!summary) return { ...change, vehicleLabel, changedFieldCount: undefined, statusChanged: undefined }
+      const changedFieldCount = [...new Set([...Object.keys(change.before || {}), ...Object.keys(change.after)])].filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key]) && (change.before !== null || populated(change.after[key]))).length
+      const after = Object.fromEntries(['name', 'category'].map(key => [key, change.after[key] ?? change.before?.[key]]).filter(([,value]) => value !== undefined))
+      return { ...change, before: null, after, vehicleLabel, changedFieldCount, statusChanged: change.archivedBefore !== null && change.archivedBefore !== change.archivedAfter }
+    })
+    return { items, total, page, pageSize: 50, ...(summary ? {} : this.optionsFromLabels(labels)) }
+  }
+
+  private labels(ids?: string[]) {
     const nonblank = (value: unknown) => typeof value === 'string' ? value.trim() : ''
     const labels = new Map<string, { model: string; vin: string }>()
-    const rows = this.store.db.prepare(`SELECT ids.vehicle_id, vehicle.data, CASE WHEN vehicle.data IS NULL THEN (SELECT payload FROM changes historical WHERE historical.vehicle_id=ids.vehicle_id AND json_extract(historical.payload,'$.kind')='vehicle' ORDER BY historical.created DESC,historical.rowid DESC LIMIT 1) END AS historical FROM (SELECT DISTINCT vehicle_id FROM changes) ids LEFT JOIN records vehicle ON vehicle.id=ids.vehicle_id AND vehicle.kind='vehicle' ORDER BY ids.vehicle_id`).all()
+    if (ids && !ids.length) return labels
+    const rows = this.store.db.prepare(`SELECT ids.vehicle_id, vehicle.data, CASE WHEN vehicle.data IS NULL THEN (SELECT payload FROM changes historical WHERE historical.vehicle_id=ids.vehicle_id AND json_extract(historical.payload,'$.kind')='vehicle' ORDER BY historical.created DESC,historical.rowid DESC LIMIT 1) END AS historical FROM (${ids ? ids.map(() => 'SELECT ? AS vehicle_id').join(' UNION ALL ') : 'SELECT DISTINCT vehicle_id FROM changes'}) ids LEFT JOIN records vehicle ON vehicle.id=ids.vehicle_id AND vehicle.kind='vehicle' ORDER BY ids.vehicle_id`).all(...(ids || []))
     for (const row of rows) {
       const current = row.data ? JSON.parse(row.data as string) : null
       const historical = row.historical ? JSON.parse(row.historical as string) as Change : null
       labels.set(String(row.vehicle_id), current ? { model: nonblank(current.model), vin: nonblank(current.vin) } : { model: nonblank(historical?.after.model) || nonblank(historical?.before?.model), vin: nonblank(historical?.after.vin) || nonblank(historical?.before?.vin) })
     }
-    const items = this.store.db.prepare(`SELECT changes.payload ${from} ${where} ORDER BY changes.created DESC,changes.rowid DESC LIMIT 50 OFFSET ?`).all(...values, (page - 1) * 50).map(row => {
-      const change = JSON.parse(row.payload as string) as Change, label = labels.get(change.vehicleId)
-      return { ...change, vehicleLabel: label?.model || label?.vin || change.vehicleId }
-    })
-    const vehicleOptions = [...labels].map(([id, label]) => ({ id, label: [label.model, label.vin].filter(Boolean).join(' · ') || id }))
-    return { items, total, page, pageSize: 50, vehicleOptions }
+    return labels
+  }
+
+  private optionsFromLabels(labels: Map<string, { model: string; vin: string }>) {
+    return { vehicleOptions: [...labels].map(([id, label]) => ({ id, label: [label.model, label.vin].filter(Boolean).join(' · ') || id })) }
+  }
+
+  options() {
+    const deleted = new Set(this.store.deletionRows().map(marker => marker.vehicleId))
+    const labels = new Map<string, { model: string; vin: string }>()
+    for (const row of this.store.db.prepare("SELECT id,data FROM records WHERE kind='vehicle' ORDER BY id").all()) {
+      if (deleted.has(String(row.id))) continue
+      const data = JSON.parse(String(row.data))
+      const clean = (value: unknown) => typeof value === 'string' ? value.trim() : ''
+      labels.set(String(row.id), { model: clean(data.model), vin: clean(data.vin) })
+    }
+    return this.optionsFromLabels(labels)
+  }
+
+  detail(id: unknown) {
+    const row = this.store.db.prepare('SELECT payload FROM changes WHERE id=?').get(text(id, 200))
+    if (!row) throw new AppError('NOT_FOUND', 404)
+    const change = JSON.parse(row.payload as string) as Change
+    const label = this.labels([change.vehicleId]).get(change.vehicleId)
+    return { ...change, vehicleLabel: label?.model || label?.vin || change.vehicleId }
   }
 
   async export(input: HistoryFilters = {}) {

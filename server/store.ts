@@ -129,6 +129,12 @@ export class LocalStore {
       } else {
         this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
       }
+      // Derived indexes are additive and preserve the published database schema.
+      this.db.exec(`CREATE INDEX IF NOT EXISTS changes_created ON changes(created DESC);
+        CREATE INDEX IF NOT EXISTS changes_vehicle_created ON changes(vehicle_id,created DESC);
+        CREATE INDEX IF NOT EXISTS changes_day ON changes(julianday(CASE WHEN created <> 'now' THEN created END));
+        CREATE INDEX IF NOT EXISTS changes_vehicle_day ON changes(vehicle_id,julianday(CASE WHEN created <> 'now' THEN created END));
+        CREATE INDEX IF NOT EXISTS changes_vehicle_kind_created ON changes(vehicle_id,json_extract(payload,'$.kind'),created DESC);`)
       this.deviceId = selectedDevice
     } catch (error) { this.db.close(); throw error }
   }

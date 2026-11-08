@@ -1,4 +1,6 @@
 import express from 'express'
+import { ZipArchive } from 'archiver'
+import { once } from 'node:events'
 import { backupReminderDue } from '../shared/backup-reminder.js'
 import type { Request, RequestHandler } from 'express'
 import multer from 'multer'
@@ -114,13 +116,17 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const localPath = req.path.toLowerCase()
         const localExport = localPath.startsWith('/backup/reminder') || localPath === '/backup/status' || (localPath === '/backup' && req.query.source === 'local') || localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/') || localPath === '/vehicle-table-preferences' || localPath === '/vehicle-table-preferences/'
         const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
+        // History uses the authorized local snapshot; the existing workspace tick
+        // refreshes shared data without making every search/page hash all blobs.
+        const reportCompare = req.method === 'GET' && localPath === '/reports/compare'
+        const historyRead = req.method === 'GET' && localPath.startsWith('/history/')
         const localDraftBinding = req.method === 'POST' && /^\/dove\/[^/]+\/vehicle\/?$/.test(localPath)
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const configurationMutation = ['POST', 'PUT'].includes(req.method) && (localPath === '/configuration-revisions/enable' || localPath === '/component-types' || localPath.startsWith('/component-types/') || /^\/vehicles\/[^/]+\/configuration-revisions(?:\/preview)?\/?$/.test(localPath))
         const canonicalMaintenance = deletePreview || configurationMutation || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && (req.path === '/restore' || /^\/restore\/[^/]+\/publish$/.test(req.path)))
         const workspaceRead = req.method === 'GET' && req.path === '/workspace'
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !(workspaceRead && req.query.local === '1')) {
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
           const state = await (workspaceRead && req.query.full !== '1' ? checkForUpdates(req.businessContext) : sync(req.businessContext))
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
@@ -201,7 +207,15 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   router.get('/history', (req, res) => res.json(business.history(req.query.vehicleId ? String(req.query.vehicleId) : undefined)))
   router.get('/history/query', (req: BusinessRequest, res) => {
     sessionGuard(req)()
-    res.json(new History(store).query(req.query))
+    res.json({ ...new History(store).query(req.query), sync: synchronization.status() })
+  })
+  router.get('/history/options', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(new History(store).options())
+  })
+  router.get('/history/changes/:id', (req: BusinessRequest, res) => {
+    sessionGuard(req)()
+    res.json(new History(store).detail(String(req.params.id)))
   })
   writeRoute('get', '/history/export', async (req: BusinessRequest, res) => {
     const verify = finalAccess(req, res)
@@ -345,6 +359,29 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       catch (error) { results.push({ draftId, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
     }
     res.status(201).json(results)
+  })
+  writeRoute('post', '/reports/download', async (req: BusinessRequest, res) => {
+    const ids: unknown = req.body?.ids
+    if (!Array.isArray(ids) || !ids.length || ids.length > 1000 || ids.some(id => typeof id !== 'string') || new Set(ids).size !== ids.length) throw new AppError('INVALID_INPUT')
+    const reports = ids.map(id => business.get(id as string))
+    if (reports.some(record => record.kind !== 'report')) throw new AppError('INVALID_INPUT')
+    const archive = new ZipArchive({ zlib: { level: 1 } })
+    archive.on('error', error => res.destroy(error))
+    const cancelled = new AbortController()
+    res.on('close', () => { cancelled.abort(); archive.abort() })
+    // Read one blob at a time and honor stream backpressure through archiver.
+    res.attachment('reports.zip').type('application/zip')
+    archive.pipe(res)
+    for (const [index, record] of reports.entries()) {
+      const bytes = await business.readBlob(String(record.data.checksum))
+      if (res.destroyed) return
+      const entry = once(archive, 'entry', { signal: cancelled.signal })
+      archive.append(bytes, { name: `${index + 1}-${path.basename(String(record.data.name)).replace(/[\\/:*?"<>|]/g, '_')}` })
+      try { await entry } catch (error) { if (res.destroyed) return; throw error }
+    }
+    store.event(req.businessContext!.actor.id, 'file.downloaded', { recordIds: ids })
+    if (res.destroyed) return
+    await Promise.race([archive.finalize(), once(res, 'close')])
   })
   router.get('/reports/compare', (req, res) => res.json(compareReports(business.get(String(req.query.left || '')), business.get(String(req.query.right || '')))))
   writeRoute('post', '/reports/:id/configuration', async (req: BusinessRequest, res) => {

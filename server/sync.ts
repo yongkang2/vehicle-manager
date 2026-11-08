@@ -11,10 +11,12 @@ import type { Identity, TeamDocument } from '../shared/types.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 import { componentTypeDefinitions, isProtectedKind, validateConfigurationRecords, validateConfigurationRevisionRecord, validateComponentTypeRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 import type { ConfigurationImport } from '../shared/configuration-revisions.js'
-import { collectChangeFileKeys, collectRecordFileKeys, modificationFiles, validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
+import { collectChangeFileKeys, collectRecordFileKeys, hasEnhancedModificationText, modificationFiles, validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
 import type { ModificationImport } from '../shared/modifications.js'
 import { configurationFeatureFlags } from '../shared/business-features.js'
 
+const changeHasEnhancedModificationText = (change: Change): boolean => ['modification', 'modificationGroup'].includes(change.kind) && [change.before, change.after].some(data => data && hasEnhancedModificationText(data))
+const operationHasEnhancedModificationText = (operation: Operation): boolean => hasEnhancedModificationText(operation.desired.data) || Boolean(operation.base && hasEnhancedModificationText(operation.base.data)) || operation.changes.some(changeHasEnhancedModificationText)
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 const fieldKeys = (base: Fields, desired: Fields) => new Set([...Object.keys(base), ...Object.keys(desired)])
 // Legacy records omit these values; materializing a blank is not a change.
@@ -185,7 +187,8 @@ export class BusinessSync {
       const discard = first.decision && equivalent(remote, last.desired)
       if (!discard && (remote?.data.groupId || last.desired.data.groupId)) fields.push('_modificationLink')
       const protocol = Number(master.prepare("SELECT value FROM metadata WHERE key='protocol'").get()?.value || 1)
-      if (!discard && protocol < 5 && last.desired.data.attachments !== undefined) fields.push('_modificationDisabled')
+      const protectedText = remote && hasEnhancedModificationText(remote.data) || operations.some(operationHasEnhancedModificationText)
+      if (protocol < 5 && (protectedText || !discard && last.desired.data.attachments !== undefined)) fields.push('_modificationDisabled')
     }
     if (first.kind === 'vehicle' && last.desired.archived && master.prepare("SELECT data FROM records WHERE vehicle_id=? AND kind='modification' AND archived=0").all(first.recordId).some(row => Boolean(JSON.parse(String(row.data)).groupId))) fields.push('_modificationLinkedArchive')
     for (const operation of operations) {
@@ -353,7 +356,23 @@ export class BusinessSync {
         if (!member || !binding) throw new AppError('ADMIN_REQUIRED', 403)
         if (master.prepare('SELECT vehicle_id FROM vehicle_deletions WHERE request_id=?').get(marker.requestId) || snapshot.graph(marker.vehicleId).length || marker.recordIds.some(id => master.prepare('SELECT id FROM records WHERE id=?').get(id))) throw new AppError('BACKUP_DELETION_CONFLICT', 409)
         master.prepare('INSERT INTO vehicle_deletions VALUES(?,?,?)').run(marker.vehicleId, marker.requestId, JSON.stringify(marker))
-        for (const change of store.db.prepare('SELECT * FROM changes WHERE vehicle_id=?').all(marker.vehicleId)) master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
+        const deferredHistory: Change[] = []
+        for (const row of store.db.prepare('SELECT * FROM changes WHERE vehicle_id=?').all(marker.vehicleId)) {
+          const change = JSON.parse(String(row.payload)) as Change
+          if (protocol < 5 && changeHasEnhancedModificationText(change)) { deferredHistory.push(change); continue }
+          master.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(row.id, row.record_id, row.vehicle_id, row.payload, row.created)
+        }
+        if (deferredHistory.length) {
+          const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
+          const queued = new Set(historyImports.flatMap(historyImport => historyImport.changes.map(change => change.id)))
+          const missing = deferredHistory.filter(change => !queued.has(change.id))
+          if (missing.length) {
+            const historyImport = historyImports.find(historyImport => historyImport.id === marker.id)
+            if (historyImport) historyImport.changes.push(...missing)
+            else historyImports.push({ id: marker.id, actor: entry.actor, changes: missing })
+            store.set('pendingHistoryImports', historyImports)
+          }
+        }
         markers.push(marker); changed = true; protocol = Math.max(protocol, 2) as 2 | 3 | 4 | 5
       }
       const configurationImports = (store.get<ConfigurationImport[]>('pendingConfigurationImports') || []).filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`configurationImport:${entry.id}`))
@@ -415,7 +434,7 @@ export class BusinessSync {
       for (const operation of pending) {
         const deleted = markers.find(marker => marker.recordIds.includes(operation.recordId) || marker.vehicleId === operation.vehicleId || marker.vehicleId === operation.recordId)
         if (deleted) { store.quarantineOperation(operation, deleted.vehicleId); continue }
-        await immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))
+        if (!(protocol < 5 && operation.kind === 'modification' && operationHasEnhancedModificationText(operation))) await immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))
         if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) continue
         if (!groups.has(operation.recordId)) groups.set(operation.recordId, [])
         groups.get(operation.recordId)!.push(operation)
@@ -458,6 +477,7 @@ export class BusinessSync {
         changed = true
       }
       for (const entry of store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []) {
+        if (protocol < 5 && entry.changes.some(changeHasEnhancedModificationText)) continue
         if (master.prepare('SELECT key FROM metadata WHERE key=?').get(`historyImport:${entry.id}`)) continue
         const member = team.members.find(item => item.id === entry.actor.id && item.enabled && item.role === 'admin')
         const binding = team.bindings.find(item => item.memberId === entry.actor.id && item.deviceId === entry.actor.deviceId && item.enabled)
@@ -496,6 +516,7 @@ export class BusinessSync {
     const current = this.business.get(recordId)
     if (isProtectedKind(current.kind) || conflict.fields.includes('_protected')) throw new AppError('CONFIGURATION_IMMUTABLE', 409)
     if (current.kind === 'modificationGroup' || conflict.fields.includes('_modificationManaged')) throw new AppError('MODIFICATION_MANAGED', 409)
+    if (current.kind === 'modification' && (store.get<number>('businessProtocol') || 1) < 5 && (hasEnhancedModificationText(current.data) || conflict.remote && hasEnhancedModificationText(conflict.remote.data) || operations.some(operationHasEnhancedModificationText))) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
     if (conflict.fields.some(field => ['_modificationLink', '_modificationDisabled', '_modificationLinkedArchive'].includes(field) && choices[field] !== 'shared')) throw new AppError('MODIFICATION_LINKED', 409)
     if (!equivalent(conflict.local, { data: current.data, archived: current.archived }) || !equivalent(conflict.operationIds, operations.map(operation => operation.id))) throw new AppError('CONFLICT_CHANGED', 409)
     const discard = conflict.fields.some(field => field.startsWith('_') && choices[field] === 'shared')

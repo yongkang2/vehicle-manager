@@ -3,7 +3,7 @@ import { Alert, App, Button, Descriptions, Empty, Input, Modal, Radio, Select, S
 import { Archive, Copy, Download, Link2, Pencil, Plus, RotateCcw, Unlink } from 'lucide-react'
 import { modificationFields } from '../shared/business'
 import type { BusinessRecord, Fields } from '../shared/business'
-import { MODIFICATION_EXTENSIONS, MODIFICATION_MAX_FILE_BYTES, MODIFICATION_MAX_TARGETS, modificationView } from '../shared/modifications'
+import { hasEnhancedModificationText, MODIFICATION_EXTENSIONS, MODIFICATION_MAX_FILE_BYTES, MODIFICATION_MAX_TARGETS, modificationView } from '../shared/modifications'
 import type { ModificationFile, ModificationMutation, ModificationReceipt, ModificationView } from '../shared/modifications'
 import AttachmentUpload from './AttachmentUpload'
 import { ApiError, createWorkspaceScope } from './api'
@@ -197,7 +197,9 @@ export default function VehicleModificationSection(props: Props) {
     })
   }
   const dialogLinked = dialog?.kind === 'populate' ? mode === 'linked' : dialog?.kind === 'enable' || dialog?.kind === 'unlink' || dialog?.view?.mode === 'linked'
-  const dialogReady = Boolean(dialog && !locked && (dialog.submitted || !dialog.stale && reason.trim() && (dialog.kind !== 'populate' || selectedTargets)) && (!dialogLinked || onlineAllowed))
+  const protectedDialog = !enabled && Boolean(dialog?.view && hasEnhancedModificationText(dialog.view.record.data))
+  const protectedEditor = !enabled && Boolean(editor?.view && hasEnhancedModificationText(editor.view.record.data))
+  const dialogReady = Boolean(dialog && !locked && !protectedDialog && (dialog.submitted || !dialog.stale && reason.trim() && (dialog.kind !== 'populate' || selectedTargets)) && (!dialogLinked || onlineAllowed))
   return <section className="vehicle-modification-section">
     <div className="section-toolbar"><h3>{text('modifications')}</h3><Space wrap>{!enabled && admin && <Button disabled={locked || !onlineAllowed} onClick={() => void openDialog('enable')}>{text('modificationEnable')}</Button>}<Button icon={<Plus size={15} />} disabled={locked || vehicle.archived} onClick={() => void openEditor()}>{text('addEntry')}</Button></Space></div>
     {!enabled && <Alert type="info" showIcon title={text('modificationActivationNotice')} />}
@@ -214,10 +216,11 @@ export default function VehicleModificationSection(props: Props) {
         {!view.record.archived && <Tooltip title={text('edit')}><Button type="text" icon={<Pencil size={15} />} aria-label={`${text('edit')} ${value(view.record.data.name)}`} disabled={locked || vehicle.archived || view.mode === 'linked' && !onlineAllowed} onClick={() => void openEditor(view.record.id)} /></Tooltip>}
         {!view.record.archived && <Button size="small" icon={<Copy size={14} />} disabled={locked || vehicle.archived} onClick={() => void openDialog('populate', view.record.id)}>{text('modificationPopulate')}</Button>}
         {view.mode === 'linked' && <Tooltip title={text('modificationUnlink')}><Button type="text" icon={<Unlink size={15} />} aria-label={text('modificationUnlink')} disabled={locked || vehicle.archived || !onlineAllowed} onClick={() => void openDialog('unlink', view.record.id)} /></Tooltip>}
-        {admin && <Tooltip title={text(view.record.archived ? 'restore' : 'archive')}><Button type="text" icon={view.record.archived ? <RotateCcw size={15} /> : <Archive size={15} />} disabled={locked || vehicle.archived || !online || view.mode === 'linked' && syncPaused} aria-label={`${text(view.record.archived ? 'restore' : 'archive')} ${value(view.record.data.name)}`} onClick={() => void openDialog('archive', view.record.id, !view.record.archived)} /></Tooltip>}
+        {admin && <Tooltip title={text(view.record.archived ? 'restore' : 'archive')}><Button type="text" icon={view.record.archived ? <RotateCcw size={15} /> : <Archive size={15} />} disabled={locked || vehicle.archived || !online || !enabled && hasEnhancedModificationText(view.record.data) || view.mode === 'linked' && syncPaused} aria-label={`${text(view.record.archived ? 'restore' : 'archive')} ${value(view.record.data.name)}`} onClick={() => void openDialog('archive', view.record.id, !view.record.archived)} /></Tooltip>}
       </Space> },
     ]} expandable={{ expandedRowKeys: expanded, onExpand: (open, view) => { if (!locked) { uploadCancel.current?.(); setExpanded(open ? [view.record.id] : []) } }, expandedRowRender: view => <div className="modification-details"><Descriptions size="small" column={{ xs: 1, sm: 2 }} items={modificationFields.map(field => ({ key: field, label: text(field), children: <span className="preserve-text">{value(view.record.data[field])}</span> }))} /><ModificationFiles {...props} view={view} onCancelReady={cancel => { uploadCancel.current = cancel }} onArchive={(current, file) => { if (fileAction?.submitted) { setFileAction({ ...fileAction, open: true }); return }; setReason(''); setError(null); setFileAction({ view: current, file, requestId: crypto.randomUUID() }) }} /></div> }} />
-    {editor && editor.open !== false && <RecordEditor kind="modification" record={editor.view?.record || null} language={language} busy={working} saveBlocked={Boolean(editor.unknown || editor.stale || editor.view?.mode === 'linked' && !onlineAllowed)} onCancel={() => { if (!working) { setEditor(editor.unknown ? { ...editor, open: false } : null); setError(null) } }} onSave={(data, explanation) => void saveEditor(data, explanation)} notice={<>
+    {editor && editor.open !== false && <RecordEditor kind="modification" record={editor.view?.record || null} language={language} busy={working} modificationEnabled={enabled} saveBlocked={Boolean(editor.unknown || editor.stale || protectedEditor || editor.view?.mode === 'linked' && !onlineAllowed)} onCancel={() => { if (!working) { setEditor(editor.unknown ? { ...editor, open: false } : null); setError(null) } }} onSave={(data, explanation) => void saveEditor(data, explanation)} notice={<>
+      {!enabled && <Alert type={protectedEditor ? 'warning' : 'info'} showIcon title={text(protectedEditor ? 'modificationExistingTextActivation' : 'modificationTextActivation')} />}
       {editor.view && <LinkedScope view={editor.view} language={language} />}
       {editor.unknown && <Alert type="warning" showIcon title={text(editor.committed ? 'modificationSavedRefresh' : 'modificationUnknown')} action={editor.view ? <Button onClick={() => void saveEditor()}>{text(editor.committed ? 'modificationRefreshSaved' : 'modificationRetry')}</Button> : <Button onClick={() => void reviewEditor()}>{text('refresh')}</Button>} />}
       {editor.stale && <Alert type="warning" showIcon title={text('modificationRefreshRequired')} action={<Button onClick={() => void reviewEditor()}>{text('refresh')}</Button>} />}
@@ -227,6 +230,7 @@ export default function VehicleModificationSection(props: Props) {
       <div className="modification-dialog">
         {dialog?.view && <><p className="operation-name"><span className="mono">{value(vehicle.data.vin)}</span> · {value(dialog.view.record.data.name)}</p><LinkedScope view={dialog.view} language={language} /></>}
         {dialog?.kind === 'enable' && <Alert type="warning" showIcon title={text('modificationEnableWarning')} />}
+        {protectedDialog && <Alert type="warning" showIcon title={text('modificationExistingTextActivation')} />}
         {dialog?.kind === 'populate' && <>
           <Radio.Group value={mode} disabled={working || Boolean(dialog.submitted)} onChange={event => setMode(event.target.value)} options={[{ value: 'oneTime', label: text('modificationOneTime') }, { value: 'linked', label: text('modificationLinked'), disabled: !enabled }]} />
           <Alert type={mode === 'linked' ? 'warning' : 'info'} showIcon title={text(mode === 'linked' ? 'modificationLinkedNotice' : 'modificationCopyNotice')} />

@@ -165,3 +165,41 @@ test('format5 archives omitted linked memberships as independent frozen copies i
     assert.equal(target.business.get(group.id).version, group.version + 1, 'Membership-only restores must invalidate older shared-scope reviews')
   } finally { await source.close(); await target.close() }
 })
+
+
+for (const format of [4, 5]) test(`format${format} restores with independent enhanced text require activation before any local mutation`, async () => {
+  const source = await fixture(), target = await fixture()
+  try {
+    const car = source.car()
+    const modification = source.business.write({ kind: 'modification', vehicleId: car.id, data: { name: 'Text-only modification', requestor: 'Restored requestor', lead: 'Restored lead' }, actor: source.actor, reason: 'Retain enhanced text without attachments' })
+    source.sent(); target.store.set('businessProtocol', 1)
+    const original = await createBackup(source.business, teamId)
+    const bytes = format === 5 ? original : await rewrite(original, manifest => { manifest.format = 4; manifest.schemaVersion = 5; manifest.fieldVersion = 3 })
+    const before = target.fingerprint()
+    await assert.rejects(previewBackup(target.business, bytes, teamId), { code: 'MODIFICATION_NOT_ENABLED' })
+    await assert.rejects(restoreBackup(target.business, bytes, teamId, target.actor, 'Restore only after explicit activation'), { code: 'MODIFICATION_NOT_ENABLED' })
+    assert.equal(target.fingerprint(), before)
+    target.store.set('businessProtocol', 5)
+    await restoreBackup(target.business, bytes, teamId, target.actor, 'Activated restoration retains enhanced text')
+    assert.equal(target.business.get(modification.id).data.requestor, 'Restored requestor')
+    assert.equal(target.business.get(modification.id).data.lead, 'Restored lead')
+  } finally { await source.close(); await target.close() }
+})
+
+for (const action of ['overwrite', 'archive', 'archiveParent']) test(`restoration cannot ${action} pre-fix enhanced text before activation`, async () => {
+  const source = await fixture(), target = await fixture()
+  try {
+    const car = source.car(); target.car(car.id)
+    const modification = target.insert({ id: randomUUID(), kind: 'modification', vehicleId: car.id, archived: false, version: 1, updated: date, data: { name: 'Pre-fix text-only modification', requestor: 'Keep existing requestor', lead: 'Keep existing lead' } })
+    if (action === 'overwrite') source.insert({ ...modification, data: { name: 'Older snapshot with omitted fields' } })
+    if (action === 'archiveParent') source.store.db.prepare('UPDATE records SET archived=1 WHERE id=?').run(car.id)
+    source.sent(); target.sent(); target.store.set('businessProtocol', 1)
+    const bytes = await createBackup(source.business, teamId), before = target.fingerprint()
+    const archive = action === 'overwrite' ? [] : [modification.id]
+    await assert.rejects(previewBackup(target.business, bytes, teamId), { code: 'MODIFICATION_NOT_ENABLED' })
+    await assert.rejects(restoreBackup(target.business, bytes, teamId, target.actor, 'Do not modify protected pre-fix values', archive), { code: 'MODIFICATION_NOT_ENABLED' })
+    assert.equal(target.fingerprint(), before)
+    assert.equal(target.business.get(modification.id).data.requestor, 'Keep existing requestor')
+    assert.equal(target.business.get(modification.id).data.lead, 'Keep existing lead')
+  } finally { await source.close(); await target.close() }
+})

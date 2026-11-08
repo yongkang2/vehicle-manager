@@ -17,6 +17,9 @@ export type AbandonedModificationImport = { id: string; abandonedAt: string; act
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const uuid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value)
 const fail = (): never => { throw Object.assign(new Error('MODIFICATION_CORRUPTED'), { code: 'MODIFICATION_CORRUPTED' }) }
+export function hasEnhancedModificationText(data: Fields): boolean {
+  return ['requestor', 'lead'].some(field => String(data[field] ?? '').trim().length > 0)
+}
 export function modificationGroupId(record: BusinessRecord): string | null {
   if (record.kind !== 'modification' || record.data.groupId === undefined || record.data.groupId === '') return null
   if (!uuid(record.data.groupId)) return fail()

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
 import { batteryLifeStatuses, businessFieldRegistry, complianceLevels, controllerTypes, entryFields, keyControllerName, modificationFields, partFields, vehicleFields } from '../shared/business.js'
-import { collectRecordFileKeys, modificationGroupId, validateModificationFiles } from '../shared/modifications.js'
+import { collectRecordFileKeys, hasEnhancedModificationText, modificationGroupId, validateModificationFiles } from '../shared/modifications.js'
 import type { ModificationFile } from '../shared/modifications.js'
 import { configurationFeatureFlags } from '../shared/business-features.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
@@ -129,6 +129,7 @@ export class Business {
       if (before && (before.kind !== kind || before.vehicleId !== vehicleId || before.version !== version)) throw new AppError('VERSION_CONFLICT', 409)
       if (kind === 'modification') {
         if (before && modificationGroupId(before)) throw new AppError('MODIFICATION_LINKED', 409)
+        if ((this.store.get<number>('businessProtocol') || 1) < 5 && (hasEnhancedModificationText(normalized) || before && hasEnhancedModificationText(before.data))) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
         delete normalized.groupId
         const attachments = modificationAttachments ?? (maintenance === 'restore' && Object.hasOwn(data, 'attachments') ? data.attachments : before?.data.attachments)
         if (attachments !== undefined) {

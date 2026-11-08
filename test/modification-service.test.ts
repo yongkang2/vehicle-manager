@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { Business } from '../server/business.js'
-import { BusinessSync } from '../server/sync.js'
+import { atomicFile, BusinessSync } from '../server/sync.js'
 import { LocalStore } from '../server/store.js'
 import { AppError, TeamDirectory } from '../server/team.js'
 import { ConfigurationRevisions } from '../server/configuration-revisions.js'
@@ -17,7 +17,7 @@ import { abandonModificationRestore, exportModificationRestore } from '../server
 import unzipper from 'unzipper'
 import type { ModificationImport } from '../shared/modifications.js'
 import type { ModificationContext } from '../server/modifications.js'
-import type { Actor, BusinessRecord, Change } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, Operation, RestoredHistoryImport, VehicleDeletion } from '../shared/business.js'
 import type { ModificationFile, ModificationMutation, ModificationPopulateRequest, ModificationView } from '../shared/modifications.js'
 
 async function fixture() {
@@ -37,10 +37,15 @@ async function fixture() {
     client.context = { directory: shared, teamId: team.id, identity: client.identity, actor, syncEnabled: true, online: true, scopeKey: client.identity.localUserId }
   }
   const cars = [1, 2, 3].map(number => admin.business.write({ kind: 'vehicle', data: { name: `Fictional ${number}`, vin: `TEST000000000000${number}`, status: 'available', complianceLevel: 'Eu7' }, actor: admin.context!.actor, reason: 'Create fictional vehicle' }))
-  const modification = admin.business.write({ kind: 'modification', vehicleId: cars[0].id, data: { name: 'Fictional retrofit', description: 'Supplier change', requestor: '  External requester  ', lead: '  Test lead  ', installedAt: '2026-04-01', removedAt: '', notes: 'Retain original dates' }, actor: admin.context!.actor, reason: 'Record fictional work' })
+  const modification = admin.business.write({ kind: 'modification', vehicleId: cars[0].id, data: { name: 'Fictional retrofit', description: 'Supplier change', requestor: '', lead: '', installedAt: '2026-04-01', removedAt: '', notes: 'Retain original dates' }, actor: admin.context!.actor, reason: 'Record fictional work' })
   const synchronize = async (index = 0) => { const state = await clients[index].sync.synchronize(shared, team.id, clients[index].identity); assert.equal(state.error, null); assert.equal(state.phase, 'ready'); return state }
   await synchronize(); await synchronize(1)
-  const enable = async () => { await admin.modifications.enable(admin.context!, { requestId: randomUUID(), reason: 'Team clients upgraded' }); await synchronize(1) }
+  const enable = async () => {
+    await admin.modifications.enable(admin.context!, { requestId: randomUUID(), reason: 'Team clients upgraded' })
+    const current = admin.business.get(modification.id)
+    admin.business.write({ id: current.id, kind: 'modification', vehicleId: current.vehicleId, data: { ...current.data, requestor: '  External requester  ', lead: '  Test lead  ' }, version: current.version, actor: admin.context!.actor, reason: 'Record enhanced fields after activation' })
+    await synchronize(); await synchronize(1)
+  }
   const head = async () => fs.readFile(path.join(shared, 'business', 'HEAD.json'), 'utf8')
   const close = async () => { for (const client of clients) { await client.sync.settle(); client.store.db.close() }; await fs.rm(root, { recursive: true, force: true }) }
   return { root, shared, team, clients, admin, member, cars, modification, synchronize, enable, head, close }
@@ -134,16 +139,19 @@ test('managed restore publishes its complete graph once and retains a stale over
   } finally { await f.close() }
 })
 
-test('activation permissions, text-only legacy compatibility and independent file bytes/metadata', async () => {
+test('activation permissions, legacy blank fields and independent file bytes/metadata', async () => {
   const f = await fixture()
   try {
-    const { admin, member } = f, initial = admin.modifications.detail(f.modification.id)
-    assert.equal(initial.record.data.requestor, 'External requester'); assert.equal(initial.record.data.lead, 'Test lead')
+    const { admin, member } = f
+    let initial = admin.modifications.detail(f.modification.id)
+    assert.equal(initial.record.data.requestor, ''); assert.equal(initial.record.data.lead, '')
     await assert.rejects(member.modifications.enable(member.context!, { requestId: randomUUID(), reason: 'Denied member activation' }), rejects('ADMIN_REQUIRED'))
     await assert.rejects(admin.modifications.enable({ ...admin.context!, syncEnabled: false }, { requestId: randomUUID(), reason: 'Paused activation' }), rejects('CONFIRM_RESUME'))
     await assert.rejects(admin.modifications.upload(initial.record.id, { ...mutation(initial), name: 'request.txt', bytes: Buffer.from('not enabled') }, admin.context!), rejects('MODIFICATION_NOT_ENABLED'))
     await f.enable()
     assert.equal(admin.store.get('businessProtocol'), 5)
+    initial = admin.modifications.detail(f.modification.id)
+    assert.equal(initial.record.data.requestor, 'External requester'); assert.equal(initial.record.data.lead, 'Test lead')
     const catalog = new ConfigurationRevisions(admin.business, admin.sync).catalog()
     assert.equal(catalog.enabled, false); assert.equal(catalog.policyEnabled, false)
     const bytes = Buffer.from('中文\r\nOriginal modification request\r\n'), request = { ...mutation(initial), name: 'REQUEST.TXT', bytes }
@@ -369,4 +377,146 @@ test('membership changes invalidate reviewed shared scopes and command retries d
     await admin.sync.deleteVehicle(f.shared, f.team.id, admin.identity, admin.context!.actor, car.id, { previewToken: preview.token, version: preview.version, vin: preview.vin, confirmation: 'DELETE', reason: 'Remove archived independent membership', requestId: randomUUID() })
     assert.equal(admin.business.get(linked.groupId!).version, editedVersion + 3, 'Deletion removes a frozen independent row after archival already invalidated the shared scope')
   } finally { await f.close() }
+})
+
+
+test('legacy blank modifications remain editable and copyable before activation while enhanced text writes are atomic failures', async () => {
+  const f = await fixture()
+  try {
+    const { admin } = f, actor = admin.context!.actor, original = admin.business.get(f.modification.id)
+    const legacy = Object.fromEntries(Object.entries(original.data).filter(([key]) => !['requestor', 'lead'].includes(key)))
+    admin.store.db.prepare('UPDATE records SET data=? WHERE id=?').run(JSON.stringify(legacy), original.id)
+    const edited = admin.business.write({ id: original.id, kind: 'modification', vehicleId: original.vehicleId, data: { ...legacy, name: 'Legacy text edit', requestor: '  ', lead: '\t' }, version: original.version, actor, reason: 'Edit basic legacy fields before activation' })
+    assert.equal(edited.data.requestor, ''); assert.equal(edited.data.lead, '')
+    const offline = { ...admin.context!, directory: path.join(f.root, 'unavailable'), online: false, syncEnabled: false }
+    const result = await admin.modifications.populate(edited.id, populate(admin.modifications.detail(edited.id), [f.cars[1]], 'oneTime'), offline)
+    assert.equal(admin.business.get(result.recordIds[0]).data.name, 'Legacy text edit')
+    assert.equal(admin.business.get(result.recordIds[0]).data.lead, '')
+    const before = JSON.stringify(['records', 'changes', 'outbox'].map(table => admin.store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
+    for (const field of ['requestor', 'lead']) {
+      assert.throws(() => admin.business.write({ kind: 'modification', vehicleId: f.cars[2].id, data: { name: 'Blocked enhanced creation', [field]: 'New protected text' }, actor, reason: 'Must activate before creating enhanced text' }), rejects('MODIFICATION_NOT_ENABLED'))
+      const view = admin.modifications.detail(edited.id)
+      await assert.rejects(admin.modifications.edit(edited.id, { ...mutation(view), data: { ...fieldsOf(view), [field]: 'New protected text' } }, offline), rejects('MODIFICATION_NOT_ENABLED'))
+    }
+    assert.equal(JSON.stringify(['records', 'changes', 'outbox'].map(table => admin.store.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())), before)
+  } finally { await f.close() }
+})
+
+test('pre-fix canonical enhanced text remains readable and recoverable through explicit activation', async () => {
+  const f = await fixture()
+  try {
+    const { admin } = f, original = admin.business.get(f.modification.id)
+    // Reproduce a record already published by the earlier unguarded client.
+    const data = { ...original.data, requestor: 'Retained pre-fix requestor', lead: 'Retained pre-fix lead' }
+    const snapshot = await SharedBusinessSnapshot.open(admin.business, f.shared, f.team.id, atomicFile)
+    try {
+      snapshot.db.prepare('UPDATE records SET data=? WHERE id=?').run(JSON.stringify(data), original.id)
+      await snapshot.publish(f.team.id, 1)
+    } finally { await snapshot.close() }
+    await f.synchronize(); await f.synchronize(1)
+    const view = admin.modifications.detail(original.id), before = JSON.stringify(admin.business.get(original.id)), head = await f.head()
+    assert.equal(view.record.data.requestor, data.requestor); assert.equal(view.record.data.lead, data.lead)
+    await createBackup(admin.business, f.team.id)
+    assert.throws(() => admin.business.write({ id: original.id, kind: 'modification', vehicleId: original.vehicleId, data: { name: 'Old client omits new fields' }, version: view.record.version, actor: admin.context!.actor, reason: 'Protect existing enhanced fields from omission' }), rejects('MODIFICATION_NOT_ENABLED'))
+    await assert.rejects(admin.modifications.edit(original.id, { ...mutation(view), data: { name: 'Do not clear existing text', requestor: '', lead: '' } }, admin.context!), rejects('MODIFICATION_NOT_ENABLED'))
+    await assert.rejects(admin.modifications.populate(original.id, populate(view, [f.cars[1]], 'oneTime'), admin.context!), rejects('MODIFICATION_NOT_ENABLED'))
+    await assert.rejects(admin.modifications.archiveMember(original.id, { ...mutation(view), archived: true }, admin.context!), rejects('MODIFICATION_NOT_ENABLED'))
+    assert.equal(JSON.stringify(admin.business.get(original.id)), before); assert.equal(await f.head(), head)
+    await admin.modifications.enable(admin.context!, { requestId: randomUUID(), reason: 'All clients upgraded before recovering pre-fix data' })
+    await f.synchronize(1)
+    assert.equal(admin.store.get('businessProtocol'), 5)
+    const recovered = f.member.modifications.detail(original.id)
+    assert.equal(recovered.record.data.requestor, data.requestor); assert.equal(recovered.record.data.lead, data.lead)
+    const offline = { ...admin.context!, directory: path.join(f.root, 'unavailable'), online: false, syncEnabled: false }
+    const updated = await admin.modifications.edit(original.id, { ...mutation(admin.modifications.detail(original.id)), data: { ...fieldsOf(view), lead: 'Offline enhanced lead' } }, offline)
+    assert.equal(updated.modification!.record.data.lead, 'Offline enhanced lead')
+  } finally { await f.close() }
+})
+
+for (const historyOnly of [false, true]) test(`pre-fix queued enhanced ${historyOnly ? 'history' : 'text'} stays local until activation and then publishes intact`, async () => {
+  const f = await fixture()
+  try {
+    const { admin } = f, original = admin.business.get(f.modification.id), actor = admin.context!.actor, created = new Date().toISOString()
+    const protectedData = { ...original.data, requestor: 'Queued requestor', lead: 'Queued lead' }
+    const after = historyOnly ? { ...original.data, name: 'Later legacy edit' } : protectedData
+    const first: Change = { id: randomUUID(), recordId: original.id, vehicleId: original.vehicleId!, kind: 'modification', before: original.data, after: protectedData, archivedBefore: false, archivedAfter: false, actor, reason: 'Earlier unguarded enhanced edit', action: 'updated', sourceId: null, created }
+    const second: Change = { ...first, id: randomUUID(), before: protectedData, after, reason: 'Later legacy edit omits protected fields' }
+    const changes = historyOnly ? [first, second] : [first]
+    const operation: Operation = { id: randomUUID(), recordId: original.id, kind: 'modification', vehicleId: original.vehicleId, base: { data: original.data, archived: false }, desired: { data: after, archived: false }, changes, actor, files: [], created }
+    admin.store.db.prepare('UPDATE records SET data=?,version=version+1 WHERE id=?').run(JSON.stringify(after), original.id)
+    for (const change of changes) admin.store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(change.id, original.id, original.vehicleId, JSON.stringify(change), created)
+    admin.store.db.prepare('INSERT INTO outbox(id,record_id,payload) VALUES(?,?,?)').run(operation.id, original.id, JSON.stringify(operation))
+    const retainedHistory: RestoredHistoryImport = { id: randomUUID(), actor, changes: [{ ...first, id: randomUUID(), action: 'restored' }] }
+    admin.store.set('pendingHistoryImports', [retainedHistory])
+    const head = await f.head(), state = await admin.sync.synchronize(f.shared, f.team.id, admin.identity)
+    assert.equal(state.phase, 'conflict'); assert.equal(state.error, null)
+    assert(state.conflicts.find(conflict => conflict.recordId === original.id)!.fields.includes('_modificationDisabled'))
+    assert.equal(await f.head(), head)
+    assert.equal(admin.store.db.prepare("SELECT state FROM outbox WHERE id=?").get(operation.id)!.state, 'pending')
+    assert.deepEqual(admin.store.get('pendingHistoryImports'), [retainedHistory])
+    assert.equal(await fs.stat(path.join(f.shared, 'business', 'operations', `${operation.id}.json`)).then(() => true, () => false), false)
+    assert.equal(admin.business.get(original.id).data.requestor, after.requestor)
+    const conflict = state.conflicts.find(entry => entry.recordId === original.id)!
+    await assert.rejects(admin.sync.resolve(f.shared, f.team.id, admin.identity, actor, original.id, conflict.token, Object.fromEntries(conflict.fields.map(field => [field, 'shared'])), 'Retain text until activation'), rejects('MODIFICATION_NOT_ENABLED'))
+    await admin.modifications.enable(admin.context!, { requestId: randomUUID(), reason: 'All clients upgraded; publish retained edits safely' })
+    const published = await admin.sync.synchronize(f.shared, f.team.id, admin.identity)
+    assert.equal(published.phase, 'ready'); assert.equal(published.pending, 0)
+    await f.synchronize(1)
+    assert.deepEqual(f.member.business.get(original.id).data, after)
+    for (const change of [...changes, ...retainedHistory.changes]) assert.deepEqual(JSON.parse(String(f.member.store.db.prepare('SELECT payload FROM changes WHERE id=?').get(change.id)!.payload)), change)
+    assert.deepEqual(admin.store.get('pendingHistoryImports'), [])
+  } finally { await f.close() }
+})
+
+
+for (const existingHistoryQueue of [false, true]) test(`deleted-vehicle imports retain enhanced history with ${existingHistoryQueue ? 'an existing' : 'no existing'} history queue until activation`, async () => {
+  const f = await fixture(), sourceStore = new LocalStore(path.join(f.root, 'deleted-history-source'))
+  try {
+    const { admin } = f, actor = admin.context!.actor, source = new Business(sourceStore)
+    sourceStore.set('businessProtocol', 5)
+    for (const record of admin.business.list().toSorted((left, right) => Number(right.kind === 'vehicle') - Number(left.kind === 'vehicle'))) sourceStore.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(record.id, record.kind, record.vehicleId, record.kind === 'vehicle' ? String(record.data.vin) : null, JSON.stringify(record.data), Number(record.archived), record.version, record.updated)
+    const car = source.write({ kind: 'vehicle', data: { name: 'Deleted historical vehicle', vin: 'TEST0000000000004', status: 'available' }, actor, reason: 'Create historical backup vehicle' })
+    const modification = source.write({ kind: 'modification', vehicleId: car.id, data: { name: 'Pre-fix historical modification', requestor: 'Retained historical requestor', lead: 'Retained historical lead' }, actor, reason: 'Retain enhanced deleted-vehicle history' })
+    const historical = source.history(car.id), enhanced = historical.find(change => change.recordId === modification.id)!, basic = historical.find(change => change.recordId === car.id)!
+    sourceStore.db.exec("UPDATE outbox SET state='sent'")
+    const marker: VehicleDeletion = { id: randomUUID(), requestId: randomUUID(), vehicleId: car.id, vin: String(car.data.vin), recordIds: [car.id, modification.id], fileKeys: [], actor, reason: 'Deleted before this backup', deletedAt: new Date().toISOString(), revision: randomUUID(), sequence: 1 }
+    sourceStore.applyDeletions([marker])
+    const bytes = await createBackup(source, f.team.id)
+    assert.deepEqual((await previewBackup(admin.business, bytes, f.team.id)).conflicts, [])
+    assert.equal((await restoreBackup(admin.business, bytes, f.team.id, actor, 'Restore absent vehicle deletion and its retained history')).changed, 0)
+    const initialHistory = admin.store.get<RestoredHistoryImport[]>('pendingHistoryImports')!
+    assert(initialHistory.some(entry => entry.changes.some(change => change.id === enhanced.id)))
+    if (!existingHistoryQueue) admin.store.set('pendingHistoryImports', [])
+    await f.synchronize(); await f.synchronize(1)
+    assert.equal(admin.store.get('businessProtocol'), 2)
+    assert.deepEqual(admin.store.get('pendingDeletionImports'), [])
+    const retainedHistory = admin.store.get<RestoredHistoryImport[]>('pendingHistoryImports')!
+    assert.deepEqual(retainedHistory, existingHistoryQueue ? initialHistory : [{ id: marker.id, actor, changes: [enhanced] }])
+    await f.synchronize()
+    assert.deepEqual(admin.store.get('pendingHistoryImports'), retainedHistory, 'Repeated sync does not duplicate deferred history')
+    assert.deepEqual(JSON.parse(String(admin.store.db.prepare('SELECT payload FROM changes WHERE id=?').get(enhanced.id)!.payload)), enhanced)
+    let snapshot = await SharedBusinessSnapshot.open(admin.business, f.shared, f.team.id, atomicFile)
+    try {
+      assert.deepEqual(snapshot.deletions(), [marker])
+      assert(snapshot.db.prepare('SELECT id FROM changes WHERE id=?').get(basic.id), 'Basic deletion history still publishes before activation')
+      assert.equal(snapshot.db.prepare('SELECT id FROM changes WHERE id=?').get(enhanced.id), undefined)
+      assert.equal(snapshot.db.prepare('SELECT id FROM records WHERE id=? OR vehicle_id=?').get(car.id, car.id), undefined)
+    } finally { await snapshot.close() }
+    for (const client of f.clients) for (const id of marker.recordIds) assert.throws(() => client.business.get(id), rejects('VEHICLE_DELETED'))
+    await admin.modifications.enable(admin.context!, { requestId: randomUUID(), reason: 'All clients upgraded; publish retained historical fields' })
+    const published = await f.synchronize(); await f.synchronize(1)
+    assert.equal(published.pending, 0)
+    assert.equal(admin.store.get('businessProtocol'), 5)
+    assert.deepEqual(admin.store.get('pendingHistoryImports'), [])
+    snapshot = await SharedBusinessSnapshot.open(admin.business, f.shared, f.team.id, atomicFile)
+    try {
+      assert.deepEqual(snapshot.deletions(), [marker])
+      assert.deepEqual(JSON.parse(String(snapshot.db.prepare('SELECT payload FROM changes WHERE id=?').get(enhanced.id)!.payload)), enhanced)
+      assert.equal(snapshot.db.prepare('SELECT id FROM records WHERE id=? OR vehicle_id=?').get(car.id, car.id), undefined)
+    } finally { await snapshot.close() }
+    for (const client of f.clients) {
+      assert.deepEqual(JSON.parse(String(client.store.db.prepare('SELECT payload FROM changes WHERE id=?').get(enhanced.id)!.payload)), enhanced)
+      for (const id of marker.recordIds) assert.throws(() => client.business.get(id), rejects('VEHICLE_DELETED'))
+    }
+  } finally { sourceStore.db.close(); await f.close() }
 })

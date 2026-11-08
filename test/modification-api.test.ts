@@ -36,11 +36,16 @@ async function fixture() {
       const created = await request('/business/records', 'POST', { kind: 'vehicle', data: { name: `Fictional ${number}`, vin: `TEST000000000000${number}`, status: 'available', complianceLevel: 'Eu7' }, reason: 'Register fictional target' })
       assert.equal(created.status, 201); cars.push(created.data)
     }
-    const created = await request('/business/records', 'POST', { kind: 'modification', vehicleId: cars[0].id, data: { name: 'Fictional retrofit', description: 'Review only', requestor: '  External requestor  ', lead: '  Test lead  ', installedAt: '2026-11-01', removedAt: '', notes: 'Fictional component' }, reason: 'Record fictional modification' })
+    const created = await request('/business/records', 'POST', { kind: 'modification', vehicleId: cars[0].id, data: { name: 'Fictional retrofit', description: 'Review only', requestor: '', lead: '', installedAt: '2026-11-01', removedAt: '', notes: 'Fictional component' }, reason: 'Record fictional modification' })
     assert.equal(created.status, 201)
     const endpoint = (id = created.data.id) => `/business/modifications/${id}`
     const detail = async (id = created.data.id, session = 'owner'): Promise<ModificationView> => { const result = await request(endpoint(id), 'GET', undefined, session); assert.equal(result.status, 200, JSON.stringify(result.data)); return result.data }
-    const enable = async () => { const result = await request('/business/modifications/enable', 'POST', { requestId: randomUUID(), reason: 'All fictional clients support protocol five' }); assert.equal(result.status, 200, JSON.stringify(result.data)) }
+    const enable = async () => {
+      const result = await request('/business/modifications/enable', 'POST', { requestId: randomUUID(), reason: 'All fictional clients support protocol five' }); assert.equal(result.status, 200, JSON.stringify(result.data))
+      const current = await detail()
+      const edited = await request(`/business/records/${current.record.id}`, 'PUT', { version: current.record.version, data: { ...current.record.data, requestor: '  External requestor  ', lead: '  Test lead  ' }, reason: 'Record enhanced fields after activation' })
+      assert.equal(edited.status, 200, JSON.stringify(edited.data))
+    }
     return { root, client, sessions, request, close, shared, cars, endpoint, detail, enable, modification: created.data, workspace: client.workspaces.get(configured.data.teamId) }
   } catch (error) { await close(); throw error }
 }
@@ -55,12 +60,24 @@ test('modification HTTP fields, activation, Unicode filenames and ordinary-form 
   const f = await fixture()
   try {
     let view = await f.detail()
-    assert.equal(view.record.data.requestor, 'External requestor'); assert.equal(view.record.data.lead, 'Test lead')
+    assert.equal(view.record.data.requestor, ''); assert.equal(view.record.data.lead, '')
+    for (const field of ['requestor', 'lead']) {
+      const blocked = await f.request('/business/records', 'POST', { kind: 'modification', vehicleId: f.cars[2].id, data: { name: 'Blocked enhanced creation', [field]: 'Requires activation' }, reason: 'Protect mixed-client teams' })
+      assert.equal(blocked.status, 409); assert.equal(blocked.data.error, 'MODIFICATION_NOT_ENABLED')
+      const edit = await f.request(`/business/records/${view.record.id}`, 'PUT', { version: view.record.version, data: { ...view.record.data, [field]: 'Requires activation' }, reason: 'Do not publish protected text yet' })
+      assert.equal(edit.status, 409); assert.equal(edit.data.error, 'MODIFICATION_NOT_ENABLED')
+      const enhanced = await f.request(f.endpoint(), 'PUT', { ...mutation(view), data: { ...view.record.data, [field]: 'Requires activation' } })
+      assert.equal(enhanced.status, 409); assert.equal(enhanced.data.error, 'MODIFICATION_NOT_ENABLED')
+    }
+    const basic = await f.request(`/business/records/${view.record.id}`, 'PUT', { version: view.record.version, data: { ...view.record.data, notes: 'Legacy edit before activation' }, reason: 'Basic modification fields remain available' })
+    assert.equal(basic.status, 200); view = await f.detail()
     const equipment = await f.request('/business/records', 'POST', { kind: 'equipment', vehicleId: f.cars[0].id, data: { name: 'Equipment', requestor: 'Do not add this field' }, reason: 'Equipment stays unchanged' })
     assert.equal(equipment.status, 201); assert.equal(equipment.data.data.requestor, undefined)
     assert.equal((await f.request(`${f.endpoint()}/files`, 'POST', form(view, 'request.txt'))).data.error, 'MODIFICATION_NOT_ENABLED')
     assert.equal((await f.request('/business/modifications/enable', 'POST', { requestId: randomUUID(), reason: 'Denied member activation' }, 'member')).status, 403)
     await f.enable()
+    view = await f.detail()
+    assert.equal(view.record.data.requestor, 'External requestor'); assert.equal(view.record.data.lead, 'Test lead')
     assert.equal((await f.request('/business/working-view')).data.modificationEnabled, true)
     assert.equal((await f.request('/business/working-view')).data.catalog.enabled, false, 'File activation must not activate configuration revisions')
     const bytes = Buffer.from('Fictional request\r\n申请人：甲'), name = '改装申请.TXT'
