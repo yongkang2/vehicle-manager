@@ -2,6 +2,10 @@
 
 遵循用户全局指令：最少假设、最简单实现、最小改动、可验证结果。
 
+## Branch naming
+
+- Do not use the `codex/` prefix for new branches. Use concise, descriptive English names, such as `ai-assisted-intake`.
+
 ## Documentation layout
 
 - Keep the root README.md concise and use it as the documentation entry point. User guides and detailed engineering documents belong in docs/.
