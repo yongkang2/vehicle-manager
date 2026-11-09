@@ -39,7 +39,17 @@ export default function IntakeAssist({ language, allowed, disabled, onApply }: {
       const result = await createWorkspaceScope().request<{ fields: IntakeFields; matches: unknown[] }>('/api/business/intake/recognize', { method: 'POST', body: form, signal: controller.signal })
       setFields(result.fields); setCount(result.matches.length)
     } catch (failure) {
-      if (!controller.signal.aborted) setError(failure instanceof Error && failure.message === 'AI_NOT_CONFIGURED' ? (zh ? '管理员尚未配置统一识别服务。' : 'The shared recognition service is not configured.') : (zh ? '识别失败，请重试或手动填写。' : 'Recognition failed. Retry or enter values manually.'))
+      const messages: Record<string, [string, string]> = {
+        AI_NOT_CONFIGURED: ['管理员尚未配置统一识别服务。', 'The shared recognition service is not configured.'],
+        AI_PROVIDER_AUTH: ['AI 服务的供应商密钥无效，请管理员更新密钥。', 'The provider key is invalid. Ask the administrator to update it.'],
+        AI_PROVIDER_BALANCE: ['AI 账户余额不足，请管理员检查账户。', 'The AI account has insufficient balance. Contact the administrator.'],
+        AI_DEVICE_UNAUTHORIZED: ['此设备的 AI 凭证无效，请重新配置。', 'This device credential is invalid. Configure the device again.'],
+        AI_DAILY_LIMIT: ['此设备今天的 AI 调用次数已用完。', 'This device has reached its daily AI call limit.'],
+        AI_BUSY: ['AI 服务繁忙，请稍后重试。', 'The AI service is busy. Try again later.'],
+        AI_MODEL_UNAVAILABLE: ['当前供应商账户不支持所需识别模型。', 'The required recognition model is unavailable for this account.'],
+        AI_INVALID_CONFIGURATION: ['AI 服务配置无效，请管理员检查地址和设备凭证。', 'The AI configuration is invalid. Check the endpoint and device credential.'],
+      }
+      if (!controller.signal.aborted) setError(messages[failure instanceof Error ? failure.message : '']?.[zh ? 0 : 1] || (zh ? '识别失败，请重试或手动填写。' : 'Recognition failed. Retry or enter values manually.'))
     } finally { if (!controller.signal.aborted) setBusy(false) }
   }
   const entries = Object.entries(fields).filter(([key]) => allowed.includes(key))

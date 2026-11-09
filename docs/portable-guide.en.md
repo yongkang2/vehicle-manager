@@ -4,6 +4,12 @@ This guide covers application **1.6.0**. Use the release page and the installed 
 
 ## Installation
 
+### Experimental local AI setup
+
+In builds containing the assisted-intake experiment, Configure-AI.cmd stores the provider key encrypted for the current Windows user and creates a local device credential. Start-AI-Gateway.cmd starts the local recognition gateway and checks provider access; Stop-AI-Gateway.cmd stops that gateway. AI_PROVIDER_AUTH indicates that the provider rejected the key: stop the gateway, run Configure-AI.cmd with a valid key, then start it again.
+
+Start-AI-Trial.cmd opens an isolated application data directory for testing. Use Stop-AI-Trial.cmd to stop that trial application; ordinary Start.cmd / Stop.cmd operate on the normal business data directory. Local trial configuration does not enable access from other computers. Provider keys, local configuration and trial data are never included in delivery packages.
+
 Download the latest official Windows x64 ZIP from:
 https://github.com/yongkang2/vehicle-manager/releases/latest
 

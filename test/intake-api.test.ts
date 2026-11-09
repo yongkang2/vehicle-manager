@@ -27,7 +27,7 @@ test('intake requires workspace access, returns suggestions without writing and 
   const gateway = express(); gateway.use(express.json()); gateway.post('/v1/recognitions', (_req, res) => res.json({ fields: { vin: 'TEST0000000000001' } }))
   const mock = gateway.listen(0, '127.0.0.1'); await once(mock, 'listening')
   const oldUrl = process.env.VEHICLE_AI_GATEWAY_URL, oldToken = process.env.VEHICLE_AI_DEVICE_TOKEN
-  process.env.VEHICLE_AI_GATEWAY_URL = `http://127.0.0.1:${(mock.address() as { port: number }).port}`; process.env.VEHICLE_AI_DEVICE_TOKEN = 'fictional-device-token'
+  process.env.VEHICLE_AI_GATEWAY_URL = `http://127.0.0.1:${(mock.address() as { port: number }).port}`; process.env.VEHICLE_AI_DEVICE_TOKEN = 'fictional-device-token-'.repeat(2)
   let cookie = '', token = ''
   const request = async (route: string, body?: unknown, suppliedToken = token) => {
     const response = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api${route}`, { method: body === undefined ? 'GET' : 'POST', headers: { Cookie: cookie, 'X-App-Request': 'vehicle-manager', 'X-Workspace-Token': suppliedToken, ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body) })
@@ -46,7 +46,7 @@ test('intake requires workspace access, returns suggestions without writing and 
     assert.deepEqual(result.data, { fields: { vin: 'TEST0000000000001' }, matches: [] })
     assert.deepEqual((await request('/business/records')).data, before.data)
     assert.equal((await request('/business/intake/recognize', upload(), 'stale')).status, 409)
-    delete process.env.VEHICLE_AI_GATEWAY_URL
+    process.env.VEHICLE_AI_GATEWAY_URL = ''; process.env.VEHICLE_AI_DEVICE_TOKEN = ''
     assert.equal((await request('/business/intake/recognize', upload())).status, 503)
   } finally {
     if (oldUrl === undefined) delete process.env.VEHICLE_AI_GATEWAY_URL; else process.env.VEHICLE_AI_GATEWAY_URL = oldUrl

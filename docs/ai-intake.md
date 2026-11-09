@@ -14,6 +14,19 @@ Exact matches are counted in the current authorized workspace. Shared part numbe
 
 ## Gateway deployment
 
+### Windows local trial
+
+1. Build this branch, then double-click **Configure-AI.cmd** and enter the provider key in the hidden prompt. It is encrypted using Windows user-bound protection under %LOCALAPPDATA%/VehicleManagerAI/provider-key.xml. Copying this encrypted file to another Windows account/device is not supported.
+2. Double-click **Start-AI-Gateway.cmd**. The service runs hidden on 127.0.0.1:4420. The script performs a non-recognition provider/model status check. AI_PROVIDER_AUTH means that the saved key was rejected; AI_PROVIDER_BALANCE means insufficient balance. No image is sent by this check.
+3. Double-click **Start-AI-Trial.cmd**. This opens the normal application with isolated trial data under %LOCALAPPDATA%/VehicleManagerAI/trial-data. Create a trial account/team to test without modifying production records.
+   Use **Stop-AI-Trial.cmd** to stop this trial application. The ordinary Stop.cmd targets the normal application data directory.
+4. The client automatically reads %LOCALAPPDATA%/VehicleManager/ai-client.json. It contains only the local gateway address and a device credential. Local ACLs restrict the configuration to this Windows user and SYSTEM. Environment overrides remain available for managed deployments.
+5. Use **Stop-AI-Gateway.cmd** before changing the provider key, then run Configure-AI.cmd and Start-AI-Gateway.cmd again. The device credential is retained. Stop scripts verify the recorded process before stopping it.
+
+The local setup defaults to 20 attempted calls/device/UTC day. It is restricted to this computer: another device cannot reach its loopback address. This is not a completed team deployment. Keep the gateway computer running during a trial. Logs, PID metadata and usage.sqlite reside under %LOCALAPPDATA%/VehicleManagerAI, outside the application/package. Never distribute this folder.
+
+For diagnostics only, run powershell.exe -NoProfile -File scripts/start-ai-gateway.ps1 -CheckOnly. A rejected provider key leaves the gateway running but not provider-ready; no successful recognition is claimed. Endpoint, key and device credentials are never placed in repository files or automatically copied into release assets.
+
 Use a dedicated server checkout with Node.js 24 and dependencies installed. Run `npm run build` first. Configure environment variables in the service manager; never commit keys or place them in a portable package:
 
 | Server variable | Meaning |

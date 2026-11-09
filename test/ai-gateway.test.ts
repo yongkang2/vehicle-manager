@@ -16,6 +16,22 @@ function image() {
   return 'data:image/png;base64,' + Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(Buffer.from([0, 255, 0, 0, 255]))), chunk('IEND', Buffer.alloc(0))]).toString('base64')
 }
 
+test('status identifies invalid provider credentials without leaking secrets', async () => {
+  const token = 'z'.repeat(40), secret = 'private-provider-secret'
+  let calls = 0
+  const app = createAiGateway({ apiKey: secret, deviceTokens: [token], fetcher: async (url) => {
+    assert.equal(url, 'https://api.deepseek.com/models'); calls++
+    return new Response(JSON.stringify({ error: { message: secret } }), { status: 401 })
+  } })
+  const server = app.listen(0, '127.0.0.1'); await once(server, 'listening')
+  try {
+    const response = await fetch('http://127.0.0.1:' + (server.address() as { port: number }).port + '/v1/status', { headers: { Authorization: 'Bearer ' + token } })
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), { error: 'AI_PROVIDER_AUTH' })
+    assert.equal(calls, 1)
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
+})
+
 test('gateway authenticates devices, rejects nonimages and isolates provider failures', async () => {
   let calls = 0
   const token = 'x'.repeat(40)
