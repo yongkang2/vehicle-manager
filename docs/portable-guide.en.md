@@ -1,6 +1,6 @@
 # Vehicle Manager: Portable User Guide
 
-Development scope: the checked-out application is **1.6.0, unreleased**. The Vehicle Modification workflow below describes this development source, not an available official release or completed real-SMB acceptance. Use the release page and the installed application's version display to identify a published package.
+This guide covers application **1.6.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
 
 ## Installation
 
@@ -59,7 +59,7 @@ After all collaborating installations upgrade, an administrator can enable confi
 
 Administrators can disable, remove or restore any configuration component type, including the four built-ins. This changes future revision reviews only: vehicle sections, installed components and published history remain available. Removed types can be found through Show removed and restored with their original identity. Catalog changes invalidate open reviews. Published revisions stay read-only; corrections create another revision.
 
-Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Development application 1.6.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
+Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.6.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
 
 
 ## Backups and upgrades
@@ -84,7 +84,7 @@ Commit messages, PR titles and descriptions, release titles and notes, asset nam
 
 Administrators choose Back up data to synchronize team data and download a complete business backup. Synchronization failures or unresolved conflicts stop the download. The local-only backup remains available for maintenance through the API and never starts synchronization. Backups remain unencrypted.
 
-Restore previews validate originals and display searchable effects and field differences. Confirm all archive effects together. Before applying, the service saves and read-back verifies a local safety ZIP under the workspace data directory's `restore-backups/`; failure prevents application. Copies are retained until manually removed and do not replace independent cold backups. Current development backups use format 5 with field version 4; formats 1–4 remain readable.
+Restore previews validate originals and display searchable effects and field differences. Confirm all archive effects together. Before applying, the service saves and read-back verifies a local safety ZIP under the workspace data directory's `restore-backups/`; failure prevents application. Copies are retained until manually removed and do not replace independent cold backups. Current business backups use format 5 with field version 4; formats 1–4 remain readable.
 
 Restore history and results are local administrator records. Durable request IDs prevent reapplication after a lost response; the applied receipt and business changes commit in one transaction. Query results before retrying. Applied results can retry shared publication without applying the ZIP again. Prepared or failed requests require a fresh preview. Published means shared publication completed, not that all clients have refreshed. Permissions, permanent deletions and immutable configuration history are not rolled back. Continue pausing other clients and keeping independent backups for recovery operations.
 
