@@ -1,5 +1,7 @@
 # Vehicle Intelligence Architecture and Implementation Checklist
 
+> **执行记录：** 用户随后授权按本方案开发。当前在原仓库试验分支先实现可验证的智能录入流程；阶段结果与尚未完成的生产化工作见 [execution progress](2026-11-09-ai-intake-progress.md)。下文最初的提案/待确认措辞保留用于解释设计来源，不代表本次执行已暂停。
+
 > **2026-11-09 工作方式更新：** 用户决定在 `yongkang2/vehicle-manager` 的 `codex/ai-assisted-intake` 分支试验智能录入，不再维护独立的 vehicle-intelligence 仓库。分支基于 `afd3574`（1.6.0），原方案所述补齐 #38–#40 已由此基线满足。以下独立品牌、独立仓库发布和 VehicleIntelligence 数据目录建议不再作为本次要求；试验仍使用隔离测试数据，不接管生产数据。保留完整原功能和统一 AI 服务方向；全面重构、接口合同及具体实施范围尚待确认。本文件保留原架构提案供后续收敛，不能直接作为全部已批准的实施清单。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement approved tasks. This is a first architecture proposal, not an approved execution specification. Resolve the decisions in section 10 before implementation; expand each phase into executable test-first tasks as it begins.

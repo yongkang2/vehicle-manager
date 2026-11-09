@@ -7,6 +7,8 @@
 
 ## Development and product conventions
 
+- [AI-assisted intake experiment](ai-intake.md): client workflow, shared gateway setup and current acceptance limits.
+
 - [Development and implementation notes](developer-guide.md): setup, domain workflows, compatibility and technical details.
 - [Product, design and interaction conventions](design.md): product scope, visual tokens, component ownership and interface behavior.
 - [HV battery notes](hv-battery.md)

@@ -20,6 +20,9 @@ import { buildCsvExport } from './csv-export.js'
 import { ExportTemplates } from './export-templates.js'
 import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
 import { VehiclePhotos } from './vehicle-photos.js'
+import { recognizeLabel } from './intake-client.js'
+import { matchIntakeRecords } from '../shared/intake.js'
+import { inspectVehiclePhoto } from '../shared/vehicle-photo.js'
 import { ConfigurationRevisions } from './configuration-revisions.js'
 import { Modifications } from './modifications.js'
 import { installModificationRoutes } from './modification-routes.js'
@@ -102,6 +105,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     return store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || accounts.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id }))
   }
   const router = express.Router()
+  const intakeUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0 } })
   function writeRoute(method: 'post' | 'put' | 'get' | 'delete', route: string, ...handlers: RequestHandler[]) {
     const action = handlers.pop()!
     router[method](route, ...handlers, (req, res, next) => {
@@ -140,6 +144,17 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       // Maintenance handlers must start outside the normal-write context.
       next()
     } catch (error) { next(error) }
+  })
+  router.post('/intake/recognize', intakeUpload.single('file'), async (req: BusinessRequest, res) => {
+    const verify = finalAccess(req, res)
+    await verify()
+    if (!req.file) throw new AppError('FILE_REQUIRED')
+    const photo = inspectVehiclePhoto(req.file.buffer)
+    if (!photo) throw new AppError('INVALID_INPUT')
+    const fields = await recognizeLabel(req.file.buffer, photo.mime)
+    await verify()
+    const matches = matchIntakeRecords(business.list(), fields).map(row => ({ id: row.id, vehicleId: row.vehicleId, kind: row.kind, data: row.data }))
+    res.json({ fields, matches })
   })
   // One authorized, synchronous local snapshot replaces separate records,
   // history and sync reads. The fingerprint includes unsynchronized local edits.

@@ -31,6 +31,10 @@ components:
 ---
 # Stellantis vehicle workspace
 
+## Experimental assisted intake
+
+Vehicle and part editors can prepare an image or a selected PDF page, inspect local decoded text and optionally request the shared AI service. Existing Ant Design controls own selection, loading, errors and explicit field application. Applying selected fields replaces current form values; saving remains a separate existing business action. No automatic match selection, component transfer, configuration publication or classification inference is allowed. A source preview stays visible for verification. Requests use the initiating workspace scope and are aborted on editor unmount. Recognition failures leave manual editing available. See ai-intake.md for deployment and the experiment's acceptance limits.
+
 ## Product scope and maintained evidence
 
 Vehicle Manager is a local Windows engineering workspace for vehicle records, controller and battery configurations, DOVE reports, attachments, history and shared-folder collaboration. English and Chinese interfaces are supported. Preserve permissions, offline/sync recovery, confirmations, pagination, exports and existing workflows. Do not ship populated accounts or sample business databases.
