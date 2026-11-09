@@ -1,0 +1,61 @@
+.vehicle-modification-section {
+    min-width: 0
+}
+
+.vehicle-modification-section > .ant-alert,
+.modification-details > .ant-alert,
+.modification-dialog > .ant-alert {
+    margin-block: 12px
+}
+
+.modification-details {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+    padding: 8px
+}
+
+.modification-linked-summary {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px
+}
+
+.modification-vins {
+    margin: 0;
+    padding-inline-start: 18px;
+    max-height: 180px;
+    overflow-y: auto;
+    overflow-wrap: anywhere
+}
+
+.modification-dialog {
+    display: grid;
+    gap: 14px
+}
+
+.modification-dialog .ant-select {
+    width: 100%
+}
+
+.modification-dialog-label,
+.modification-file-reason {
+    display: grid;
+    gap: 6px
+}
+
+.modification-details .attachment-upload {
+    margin-top: 0
+}
+
+@media (max-width: 700px) {
+    .modification-details {
+        padding: 0
+    }
+
+    .vehicle-modification-section .section-toolbar {
+        flex-wrap: wrap;
+        gap: 10px
+    }
+}

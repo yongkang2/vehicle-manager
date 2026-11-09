@@ -48,6 +48,27 @@
     vertical-align: middle
 }
 
+.vehicles-table .vehicle-vcu-type {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    max-width: 100%;
+    vertical-align: middle
+}
+
+.vehicles-table .vehicle-vcu-type-icon {
+    display: block;
+    flex: none
+}
+
+.vehicles-table .vehicle-vcu-type-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
 .vehicle-table-region .vehicles-table .ant-table .ant-table-thead>tr>th.vehicle-column-filter-header {
     padding-inline: 34px
 }

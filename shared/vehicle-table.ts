@@ -1,6 +1,6 @@
 import { businessFieldRegistry, vehicleFields } from './business.js'
 
-export const vehicleColumnIds = ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType', 'name', 'vin', 'plateExpiry', 'complianceLevel', 'coolingArchitecture'] as const
+export const vehicleColumnIds = ['vehicle', 'project', 'plate', 'status', 'physicalLocation', 'hvBatteryMaturityLevel', 'owner', 'latestDove', 'updated', 'actions', 'model', 'color', 'thermal', 'notes', 'hvBatteryPartNumber', 'hvBatterySerialNumber', 'vcuType', 'name', 'vin', 'plateExpiry', 'complianceLevel', 'coolingArchitecture', 'configurationRevision'] as const
 export type VehicleColumnId = typeof vehicleColumnIds[number]
 export type VehicleTablePreferences = { version: 1; columns: VehicleColumnId[]; widths: Partial<Record<VehicleColumnId, number>> }
 

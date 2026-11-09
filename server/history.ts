@@ -28,7 +28,7 @@ export class History {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('INVALID_INPUT')
     const vehicleId = text(input.vehicleId, 200), q = text(input.q, 1000).trim()
     const kind = text(input.kind, 32), date = text(input.date, 10), offsetText = text(input.offset, 5)
-    if (kind && !['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment', 'configurationRevision', 'componentType'].includes(kind)) throw new AppError('INVALID_INPUT')
+    if (kind && !['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment', 'configurationRevision', 'componentType', 'modificationGroup'].includes(kind)) throw new AppError('INVALID_INPUT')
     if (input.offset !== undefined && (!/^-?\d+$/.test(offsetText) || !Number.isInteger(Number(offsetText)) || Math.abs(Number(offsetText)) > 840)) throw new AppError('INVALID_INPUT')
     const endOffsetText = input.endOffset === undefined ? offsetText : text(input.endOffset, 5)
     if (input.endOffset !== undefined && (!/^-?\d+$/.test(endOffsetText) || !Number.isInteger(Number(endOffsetText)) || Math.abs(Number(endOffsetText)) > 840)) throw new AppError('INVALID_INPUT')

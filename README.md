@@ -17,6 +17,8 @@ Before upgrading, save your work, stop the old service and independently back up
 - [Release history and publishing rules](docs/releases.md)
 - [All documentation](docs/README.md)
 
+Configuration revisions and administrator-managed component review policies are described in the user and development guides. Existing component records remain editable when their type is excluded from configuration review.
+
 ## Development
 
 Node.js 24 or newer is required. Install dependencies with `npm ci`, then run `npm run build`.

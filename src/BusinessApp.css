@@ -1113,7 +1113,7 @@
 .business-table-controls .report-filters > .ant-select { width: 320px; min-width: 0; max-width: 100%; }
 .business-table-controls .report-filters > .ant-select .ant-select-selection-item { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .report-selection-summary { display: flex; align-items: center; gap: 16px; min-height: 32px; flex-wrap: wrap; }
-.report-bulk-actions { flex-shrink: 0; }
+.report-bulk-actions { flex-shrink: 0; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .report-bulk-actions .ant-btn { min-width: 84px; }
 .report-bulk-actions .ant-btn:last-child { min-width: 132px; }
 .report-selection-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; flex-wrap: wrap; }

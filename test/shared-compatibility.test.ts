@@ -8,12 +8,12 @@ import { LocalStore } from '../server/store.js'
 import { Business } from '../server/business.js'
 import { SharedBusinessSnapshot } from '../server/deletions.js'
 
-for (const protocol of [1, 2, 3]) test(`protocol ${protocol} opens, publishes without downgrade and preserves records`, async () => {
+for (const protocol of [1, 2, 3, 4, 5]) test(`protocol ${protocol} opens, publishes without downgrade and preserves records`, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-compat-')), store = new LocalStore(path.join(root, 'local')), business = new Business(store), team = randomUUID()
   const atomic = async (file: string, bytes: Buffer | string) => { await fs.writeFile(file, bytes) }
   try {
     let snapshot = await SharedBusinessSnapshot.open(business, root, team, atomic)
-    await snapshot.publish(team, protocol as 1 | 2 | 3); await snapshot.close()
+    await snapshot.publish(team, protocol as 1 | 2 | 3 | 4 | 5); await snapshot.close()
     snapshot = await SharedBusinessSnapshot.open(business, root, team, atomic)
     assert.equal(snapshot.head?.protocol, protocol)
     await snapshot.publish(team, 1); assert.equal(snapshot.head?.protocol, protocol); await snapshot.close()
@@ -25,7 +25,7 @@ test('future shared protocol requires upgrade without changing local rows, pendi
   try {
     business.write({ kind: 'vehicle', data: { vin: 'TEST0000000000001', status: 'available' }, actor: { id: 'admin', name: 'Admin', deviceId: store.deviceId, role: 'admin' }, reason: 'Fictional pending record' })
     await fs.mkdir(path.join(root, 'business'))
-    const file = path.join(root, 'business', 'HEAD.json'), bytes = JSON.stringify({ protocol: 4, teamId: team, revision: randomUUID(), sequence: 1, checksum: 'a'.repeat(64) })
+    const file = path.join(root, 'business', 'HEAD.json'), bytes = JSON.stringify({ protocol: 6, teamId: team, revision: randomUUID(), sequence: 1, checksum: 'a'.repeat(64) })
     await fs.writeFile(file, bytes)
     const before = JSON.stringify(['records', 'outbox', 'settings'].map(table => store.db.prepare(`SELECT * FROM ${table}`).all()))
     await assert.rejects(SharedBusinessSnapshot.readHead(business, root, team), { code: 'CLIENT_UPGRADE_REQUIRED' })
@@ -34,13 +34,13 @@ test('future shared protocol requires upgrade without changing local rows, pendi
   } finally { store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
 })
 
-test('schema5 databases reopen without changing their version or existing records', async () => {
+test('schema5 upgrades retain existing records and schema6 reopens safely', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-schema5-'))
   let store = new LocalStore(root)
   try {
     store.set('sentinel', { preserved: true }); store.db.exec('PRAGMA user_version=5'); store.db.close()
     store = new LocalStore(root)
-    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 5)
+    assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 6)
     assert.deepEqual(store.get('sentinel'), { preserved: true })
   } finally { store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
 })

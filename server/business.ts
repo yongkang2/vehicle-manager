@@ -3,7 +3,10 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
-import { batteryLifeStatuses, businessFieldRegistry, complianceLevels, controllerTypes, entryFields, keyControllerName, partFields, vehicleFields } from '../shared/business.js'
+import { batteryLifeStatuses, businessFieldRegistry, complianceLevels, controllerTypes, entryFields, keyControllerName, modificationFields, partFields, vehicleFields } from '../shared/business.js'
+import { collectRecordFileKeys, hasEnhancedModificationText, modificationGroupId, validateModificationFiles } from '../shared/modifications.js'
+import type { ModificationFile } from '../shared/modifications.js'
+import { configurationFeatureFlags } from '../shared/business-features.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
 import { parsePhotoAttachmentId, PHOTO_MAX_BYTES, PHOTO_MAX_DIMENSION, PHOTO_MAX_PIXELS } from '../shared/vehicle-photo.js'
 
@@ -17,7 +20,7 @@ export function normalizeVin(value: string): string { return value.toUpperCase()
 export function normalizeFields(kind: RecordKind, input: unknown): Fields {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('INVALID_INPUT')
   const source = input as Fields
-  const names = kind === 'vehicle' ? vehicleFields : kind === 'part' ? partFields : kind === 'modification' || kind === 'equipment' ? entryFields : null
+  const names = kind === 'vehicle' ? vehicleFields : kind === 'part' ? partFields : kind === 'modification' ? modificationFields : kind === 'equipment' ? entryFields : null
   const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : businessFieldRegistry.entry.legacy
   if (!names) throw new AppError('INVALID_INPUT')
   const data: Fields = {}
@@ -101,12 +104,17 @@ export class Business {
   history(vehicleId?: string): Change[] {
     return this.store.db.prepare('SELECT payload FROM changes WHERE (? IS NULL OR vehicle_id=?) ORDER BY created DESC,rowid DESC LIMIT 1000').all(vehicleId || null, vehicleId || null).map(row => JSON.parse(row.payload as string) as Change)
   }
-  write({ id = randomUUID(), kind, vehicleId = null, data, actor, reason: explanation, version, archived, sourceId = null, internal = false, maintenance, photoAttachmentId }: {
-    id?: string; kind: RecordKind; vehicleId?: string | null; data: Fields; actor: Actor; reason: unknown; version?: number; archived?: boolean; sourceId?: string | null; internal?: boolean; maintenance?: 'restore'; photoAttachmentId?: string
+  write({ id = randomUUID(), kind, vehicleId = null, data, actor, reason: explanation, version, archived, sourceId = null, internal = false, maintenance, photoAttachmentId, modificationAttachments }: {
+    id?: string; kind: RecordKind; vehicleId?: string | null; data: Fields; actor: Actor; reason: unknown; version?: number; archived?: boolean; sourceId?: string | null; internal?: boolean; maintenance?: 'restore'; photoAttachmentId?: string; modificationAttachments?: ModificationFile[]
   }): BusinessRecord {
     this.store.assertWritable()
     // Published configuration history and the team catalog have canonical-only writers.
     if (kind === 'configurationRevision' || kind === 'componentType') throw new AppError('CONFIGURATION_IMMUTABLE', 409)
+    if (kind === 'modificationGroup') throw new AppError('MODIFICATION_MANAGED', 409)
+    if (kind === 'modification') {
+      const current = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
+      if (current && modificationGroupId(fromRow(current))) throw new AppError('MODIFICATION_LINKED', 409)
+    }
     this.store.assertNotDeleted(id, vehicleId)
     const why = reason(explanation)
     if (photoAttachmentId !== undefined && (kind !== 'vehicle' || parsePhotoAttachmentId(photoAttachmentId) === null)) throw new AppError('INVALID_INPUT')
@@ -119,14 +127,25 @@ export class Business {
       const row = this.store.db.prepare('SELECT * FROM records WHERE id=?').get(id) as RecordRow | undefined
       const before = row ? fromRow(row) : null
       if (before && (before.kind !== kind || before.vehicleId !== vehicleId || before.version !== version)) throw new AppError('VERSION_CONFLICT', 409)
+      if (kind === 'modification') {
+        if (before && modificationGroupId(before)) throw new AppError('MODIFICATION_LINKED', 409)
+        if ((this.store.get<number>('businessProtocol') || 1) < 5 && (hasEnhancedModificationText(normalized) || before && hasEnhancedModificationText(before.data))) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
+        delete normalized.groupId
+        const attachments = modificationAttachments ?? (maintenance === 'restore' && Object.hasOwn(data, 'attachments') ? data.attachments : before?.data.attachments)
+        if (attachments !== undefined) {
+          if ((this.store.get<number>('businessProtocol') || 1) < 5) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
+          normalized.attachments = validateModificationFiles(attachments)
+        } else delete normalized.attachments
+      }
       if (kind === 'part' && normalized.category === 'component') {
-        if ((this.store.get<number>('businessProtocol') || 1) < 3) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
+        const flags = configurationFeatureFlags(this.store.get<number>('businessProtocol') || 1, this.store.get('configurationEnabled'), this.store.get('configurationPolicyEnabled'))
+        if (!flags.enabled) throw new AppError('CONFIGURATION_NOT_ENABLED', 409)
         const typeId = String(normalized.componentTypeId)
         if (typeId !== 'thermal-management') {
           const definition = this.store.db.prepare("SELECT kind,data,archived FROM records WHERE id=?").get(typeId)
           const imported = maintenance === 'restore' ? (this.store.get<{ records: BusinessRecord[] }[]>('pendingConfigurationImports') || []).flatMap(entry => entry.records).find(record => record.kind === 'componentType' && record.id === typeId) : undefined
           if ((!definition || definition.kind !== 'componentType') && !imported) throw new AppError('COMPONENT_TYPE_NOT_FOUND', 409)
-          if (maintenance !== 'restore' && (!before || before.data.componentTypeId !== typeId) && definition && (definition.archived || JSON.parse(String(definition.data)).disabled)) throw new AppError('COMPONENT_TYPE_DISABLED', 409)
+          if (!flags.policyEnabled && maintenance !== 'restore' && (!before || before.data.componentTypeId !== typeId) && definition && (definition.archived || JSON.parse(String(definition.data)).disabled)) throw new AppError('COMPONENT_TYPE_DISABLED', 409)
         }
       }
       if (before) {
@@ -154,6 +173,10 @@ export class Business {
         else delete normalized.photoAttachmentId
       }
       const targetArchived = archived ?? before?.archived ?? false
+      if (kind === 'vehicle' && targetArchived && !before?.archived) {
+        const linked = this.store.db.prepare("SELECT data FROM records WHERE vehicle_id=? AND kind='modification' AND archived=0").all(id).some(row => Boolean(JSON.parse(String(row.data)).groupId))
+        if (linked) throw new AppError('MODIFICATION_LINKED', 409)
+      }
       if (before?.archived && archived !== false) throw new AppError('RECORD_ARCHIVED', 409)
       if (before && targetArchived !== before.archived && actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
       if (kind !== 'vehicle') {
@@ -170,7 +193,7 @@ export class Business {
       else this.store.db.prepare('UPDATE records SET data=?,vin=?,archived=?,version=version+1,updated=? WHERE id=?').run(JSON.stringify(normalized), vin, targetArchived ? 1 : 0, timestamp, id)
       const change: Change = { id: randomUUID(), recordId: id, vehicleId: vehicleId || id, kind, before: before?.data || null, after: normalized, archivedBefore: before?.archived ?? null, archivedAfter: targetArchived, actor, reason: why, action: !before ? 'created' : before.archived !== targetArchived ? targetArchived ? 'archived' : 'restored' : 'updated', sourceId, created: timestamp }
       this.store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(change.id, id, vehicleId || id, JSON.stringify(change), timestamp)
-      const operation: Operation = { id: change.id, recordId: id, kind, vehicleId, base: before ? { data: before.data, archived: before.archived } : null, desired: { data: normalized, archived: targetArchived }, changes: [change], actor, files: ['attachment', 'report'].includes(kind) ? [String(normalized.checksum)] : [], created: timestamp, ...(maintenance ? { maintenance } : {}) }
+      const operation: Operation = { id: change.id, recordId: id, kind, vehicleId, base: before ? { data: before.data, archived: before.archived } : null, desired: { data: normalized, archived: targetArchived }, changes: [change], actor, files: collectRecordFileKeys({ id, kind, vehicleId, data: normalized, archived: targetArchived, version: 1, updated: timestamp }), created: timestamp, ...(maintenance ? { maintenance } : {}) }
       this.store.db.prepare('INSERT INTO outbox(id,record_id,payload) VALUES(?,?,?)').run(operation.id, id, JSON.stringify(operation))
     })
     return this.get(id)
