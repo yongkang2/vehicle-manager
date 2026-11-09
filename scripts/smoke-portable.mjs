@@ -122,7 +122,7 @@ try {
   assert.equal(existsSync(path.join(data, 'service.json')), false)
   const database = new DatabaseSync(path.join(data, 'local.sqlite'), { readOnly: true })
   try {
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 5)
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 6)
     for (const revision of [frozenFirst, frozenSecond]) assert.deepEqual(JSON.parse(database.prepare('SELECT data FROM records WHERE id=?').get(revision.id).data), revision.data)
   } finally { database.close() }
   await execute(executable, [launcher, '--no-browser'], { cwd: release, env, timeout: 30000 }); started = true
