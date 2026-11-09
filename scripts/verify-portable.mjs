@@ -83,7 +83,7 @@ async function extractAndVerify(zip) {
   const destination = await fs.mkdtemp(path.join(os.tmpdir(), 'vehicle-manager-acceptance-'))
   try {
     const escape = value => value.replaceAll("'", "''")
-    const command = `$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath '${escape(zip)}' -DestinationPath '${escape(destination)}'`
+    const command = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; Expand-Archive -LiteralPath '${escape(zip)}' -DestinationPath '${escape(destination)}'`
     execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], { stdio: 'inherit' })
     const entries = await fs.readdir(destination, { withFileTypes: true })
     const folders = entries.filter(entry => entry.isDirectory())
