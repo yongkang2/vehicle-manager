@@ -147,7 +147,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   // history and sync reads. The fingerprint includes unsynchronized local edits.
   router.get('/workspace', (req: BusinessRequest, res) => {
     if (req.query.audit === '1' && req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
-    const data = { ...configurationRevisions.workingView(), audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }
+    const data = { ...configurationRevisions.workingView(), historyRevision: store.get<number>('historyRevision') || 0, audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }
     const revision = checksum(JSON.stringify(data))
     res.json({ revision, ...(req.query.known === revision ? {} : { data }), sync: synchronization.status() })
   })
