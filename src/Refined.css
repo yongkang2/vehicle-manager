@@ -38,7 +38,18 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
 .workspace-topbar { min-height: 70px; padding-inline: 36px; background: var(--surface); border-color: var(--line) }
 .current-team-label { color: var(--ink); font-size: 12px }
 .page-content { padding: 34px 36px 28px; max-width: 1680px }
-.business-workspace .page-heading { margin-bottom: 25px }
+/* Operational controls follow the same hierarchy throughout the workspace. */
+.page-heading { min-height: 40px; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+.page-heading h1 { margin: 0; }
+.page-heading > .ant-space, .page-heading > .row-actions, .page-heading > .ant-btn { margin-inline-start: auto; }
+.page-heading > .ant-space, .page-heading > .row-actions { max-width: 100%; justify-content: flex-end; }
+.section-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; min-height: 40px; gap: 16px; margin: 24px 0 16px; }
+.section-toolbar h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.ant-table .ant-btn:not(.ant-btn-lg) { height: 32px; min-height: 32px; font-size: 13px; }
+.ant-modal .ant-modal-footer { margin-top: 24px; }
+.ant-modal .ant-modal-footer > .ant-space { justify-content: flex-end; flex-wrap: wrap; }
+.connection-result > .ant-btn-primary { display: flex; margin-inline-start: auto; }
+
 .page-heading .ant-btn-primary { padding-inline: 20px }
 .workspace-layout .fleet-stats { background: var(--surface); border: 1px solid #e6eaf1; border-radius: 10px; padding: 22px 0; margin-bottom: 25px }
 .workspace-layout .fleet-stats>div, .workspace-layout .fleet-stats>div:first-child { padding: 0 24px }
@@ -117,4 +128,52 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
     * { scrollbar-color: auto }
     .sidebar nav button.active { outline: 1px solid Highlight }
     .sidebar-brand img { filter: none }
+}
+
+/* Vehicle details share one operational rhythm across tabs. */
+.vehicle-detail-tabs > .ant-tabs-nav { margin-bottom: 24px; }
+.vehicle-detail-tabs [role="tabpanel"] { min-width: 0; min-height: 480px; }
+.vehicle-detail-tabs .section-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    min-height: 40px; gap: 16px; margin: 0 0 20px; flex-wrap: wrap;
+}
+.vehicle-detail-tabs h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; color: var(--ink); }
+.vehicle-detail-tabs .section-toolbar > .ant-btn { flex-shrink: 0; }
+.vehicle-detail-tabs .ant-btn:not(.ant-btn-sm) { height: 40px; min-height: 40px; border-radius: 6px; font-size: 14px; box-shadow: none; }
+.vehicle-detail-tabs .ant-table-thead > tr > th { height: 48px; background: var(--canvas); font-weight: 600; }
+.vehicle-detail-tabs .ant-table-thead > tr > th::before { display: none; }
+.vehicle-detail-tabs .ant-table-tbody > tr > td { padding-block: 12px; }
+.vehicle-detail-tabs .ant-table-tbody > .ant-table-placeholder > td { height: 160px; padding-block: 32px; }
+.vehicle-detail-tabs .ant-table .ant-btn { min-width: 32px; min-height: 32px; height: 32px; font-size: 13px; }
+.vehicle-detail-tabs .ant-empty { margin-block: 0; }
+.vehicle-detail-tabs .ant-empty-description { color: var(--muted); }
+.vehicle-detail-tabs .vehicle-controller-section { margin-top: 0; }
+
+.component-section-heading { display: flex; align-items: center; gap: 24px; min-width: 0; flex-wrap: wrap; }
+.component-system-type { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; line-height: 1.5; }
+.component-system-label { color: var(--muted); }
+.thermal-system-select { width: 180px; }
+.thermal-system-change { margin: 0 0 16px; color: var(--ink); }
+.vehicle-detail-tabs .component-section > .ant-alert { margin-bottom: 16px; }
+.vehicle-info-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); column-gap: 32px; margin: 0 0 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.vehicle-info-field { display: grid; grid-template-columns: 128px minmax(0,1fr); align-items: start; gap: 12px; padding-block: 10px; min-width: 0; }
+.vehicle-info-field dt, .vehicle-info-field dd { margin: 0; font-size: 14px; line-height: 24px; overflow-wrap: anywhere; }
+.vehicle-info-field dt { color: var(--muted); }
+.vehicle-info-field dd { display: flex; align-items: center; min-height: 24px; min-width: 0; color: var(--ink); }
+.vehicle-info-field .ant-tag { margin-inline-end: 0; }
+.vehicle-info-field-wide { grid-column: 1 / -1; }
+
+.vehicle-detail-tabs .attachment-upload-limits { font-size: 12px; }
+.vehicle-detail-tabs .attachment-upload-toolbar { gap: 8px; }
+.vehicle-detail-tabs .attachment-upload:has(+ .ant-table-wrapper) { margin-bottom: 20px; }
+.vehicle-detail-tabs .attachment-upload-limits { margin: 0; }
+.vehicle-detail-tabs .attachment-upload-limits:has(+ .ant-alert), .vehicle-detail-tabs .attachment-upload-limits:has(+ .attachment-upload-count) { margin-bottom: 12px; }
+@media(max-width:700px) {
+    .vehicle-info-grid { grid-template-columns: minmax(0,1fr); }
+    .vehicle-info-field { grid-template-columns: 120px minmax(0,1fr); }
+    .vehicle-detail-tabs .section-toolbar { gap: 12px; }
+    .vehicle-detail-tabs .section-toolbar > .ant-space { max-width: 100%; }
+    .vehicle-detail-tabs .section-toolbar > .ant-space, .vehicle-detail-tabs .attachment-upload-toolbar { flex-wrap: wrap; }
+    .component-section-heading { gap: 12px; }
+    .component-system-type { gap: 6px; }
 }
