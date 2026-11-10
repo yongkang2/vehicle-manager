@@ -38,7 +38,7 @@ export class ConfigurationRevisions {
     return all
   }
   private localCatalog(records: BusinessRecord[]): ComponentTypeCatalog {
-    const committed = new Set(this.business.list().filter(record => record.kind === 'componentType').map(record => record.id))
+    const committed = new Set(this.business.list('componentType').filter(record => record.kind === 'componentType').map(record => record.id))
     const pending = new Map((this.business.store.get<ConfigurationImport[]>('pendingConfigurationImports') || []).flatMap(entry => entry.records).filter(record => record.kind === 'componentType' && !committed.has(record.id)).map(record => [record.id, record]))
     const flags = configurationFeatureFlags(this.business.store.get<number>('businessProtocol') || 1, this.business.store.get('configurationEnabled'), this.business.store.get('configurationPolicyEnabled'))
     return { ...flags, types: componentTypeDefinitions(records).map(type => {
@@ -58,15 +58,17 @@ export class ConfigurationRevisions {
   }
   history(vehicleId: string): ConfigurationRevisionSummary[] {
     return safe(() => {
-      this.vehicle(this.localRecords(), vehicleId, false)
-      const all = this.localRecords(); validateConfigurationRecords(all)
+      const all = this.localRecords()
+      this.vehicle(all, vehicleId, false)
+      validateConfigurationRecords(all)
       return (all.filter(record => record.kind === 'configurationRevision' && record.vehicleId === vehicleId) as ConfigurationRevisionRecord[]).sort((left, right) => right.data.number - left.data.number).map(record => ({ vehicleId, revisionId: record.id, number: record.data.number, label: record.data.label, publishedAt: record.data.publishedAt, actor: record.data.actor, title: record.data.title, summary: record.data.summary, hasChanges: false }))
     })
   }
   detail(vehicleId: string, revisionId: string): ConfigurationRevisionRecord {
     return safe(() => {
-      this.vehicle(this.localRecords(), vehicleId, false)
-      const all = this.localRecords(); validateConfigurationRecords(all)
+      const all = this.localRecords()
+      this.vehicle(all, vehicleId, false)
+      validateConfigurationRecords(all)
       const record = all.find(row => row.id === revisionId && row.kind === 'configurationRevision' && row.vehicleId === vehicleId)
       if (!record) throw new AppError('RECORD_NOT_FOUND', 404)
       validateConfigurationRevisionRecord(record)

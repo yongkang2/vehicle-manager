@@ -45,7 +45,7 @@ async function checkedImageAddress(file: Blob, signal: AbortSignal): Promise<str
 
 export default function VehiclePhoto(props: Props) {
   const { vehicle } = props
-  return <VehiclePhotoPanel key={`${vehicle.id}:${vehicle.version}:${String(vehicle.data.photoAttachmentId ?? '')}`} {...props} />
+  return <VehiclePhotoPanel key={`${vehicle.id}:${String(vehicle.data.photoAttachmentId ?? '')}`} {...props} />
 }
 
 function VehiclePhotoPanel({ vehicle, language, onChanged, onError, onBusyChange }: Props) {

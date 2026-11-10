@@ -115,6 +115,8 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         req.businessContext = await access(req)
         const localPath = req.path.toLowerCase()
         const localExport = localPath.startsWith('/backup/reminder') || localPath === '/backup/status' || (localPath === '/backup' && req.query.source === 'local') || localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/') || localPath === '/vehicle-table-preferences' || localPath === '/vehicle-table-preferences/'
+        // Viewing published revisions uses the authorized local copy; explicit workspace refresh still synchronizes.
+        const revisionRead = req.query.full !== '1' && req.method === 'GET' && /^\/vehicles\/[^/]+\/configuration-revisions(?:\/[^/]+)?\/?$/.test(localPath)
         const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
         // History uses the authorized local snapshot; the existing workspace tick
         // refreshes shared data without making every search/page hash all blobs.
@@ -126,7 +128,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const canonicalMaintenance = deletePreview || configurationMutation || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && (req.path === '/restore' || /^\/restore\/[^/]+\/publish$/.test(req.path)))
         const workspaceRead = req.method === 'GET' && req.path === '/workspace'
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
+        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !revisionRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
           const state = await (workspaceRead && req.query.full !== '1' ? checkForUpdates(req.businessContext) : sync(req.businessContext))
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
@@ -145,7 +147,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   // history and sync reads. The fingerprint includes unsynchronized local edits.
   router.get('/workspace', (req: BusinessRequest, res) => {
     if (req.query.audit === '1' && req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
-    const data = { ...configurationRevisions.workingView(), changes: business.history(), audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }
+    const data = { ...configurationRevisions.workingView(), audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }
     const revision = checksum(JSON.stringify(data))
     res.json({ revision, ...(req.query.known === revision ? {} : { data }), sync: synchronization.status() })
   })
