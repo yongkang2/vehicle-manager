@@ -111,7 +111,7 @@ export default function HistoryPanel({ language, vehicleId, refreshToken, report
     } catch (cause) { if (!controller.signal.aborted) setExportError(cause instanceof Error ? cause.message : 'SERVER_ERROR') }
     finally { if (exportController.current === controller) { exportController.current = null; setExporting(false) } }
   }
-  return <section className="history-panel" aria-label={text('history')}>
+  return <section className={vehicleId ? 'history-panel' : 'history-panel workspace-panel'} aria-label={text('history')}>
     <div className="history-toolbar">
       {!vehicleId && <Select className="history-vehicle-filter" aria-label={zh ? '车辆' : 'Vehicle'} placeholder={zh ? '全部车辆' : 'All vehicles'} allowClear showSearch optionFilterProp="label" value={selectedVehicle} options={vehicleOptions.map(option => ({ value: option.id, label: option.label }))} onChange={next => { setSelectedVehicle(next); setPage(1) }} />}
 
