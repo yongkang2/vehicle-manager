@@ -1,5 +1,12 @@
 import type { Language } from './i18n'
 const labels: Record<string, [string, string]> = {
+  setWatchedVehicles: ['Choose favorite vehicles', '设置关注车辆'],
+  watchVehicleHint: ['Click the star beside a vehicle to add it here. Favorites are private to this account and workspace in this browser.', '点击车辆旁的星标，将常用车辆放到这里。关注仅保存在本浏览器的当前账号和工作区中。'],
+  vehicleWatchView: ['Vehicle view', '车辆视图'], allVehicles: ['All vehicles', '全部车辆'], myWatchedVehicles: ['My favorites', '我的关注'],
+  watchVehicle: ['Follow vehicle', '关注车辆'], unwatchVehicle: ['Unfollow vehicle', '取消关注'], personalVehicleMark: ['Personal marker color', '个人标记颜色'], openVehicleDetails: ['Open vehicle details', '打开车辆档案'],
+  watchColorgold: ['Gold', '金色'], watchColorblue: ['Blue', '蓝色'], watchColorpurple: ['Purple', '紫色'], watchColorteal: ['Teal', '青色'], watchColororange: ['Orange', '橙色'],
+
+  doveImportRequirements: ['File requirements', '文件要求'],
   equipmentType: ['Type', '类型'],
   equipmentSaveBlocked: ['Close this editor, refresh or sign in again as needed, and inspect the equipment list before starting another save.', '请关闭此窗口，按需刷新或重新登录，并先核对设备列表，再开始新的保存。'],
   equipmentInstalledOptional: ['Installed on (optional)', '安装日期（可选）'], equipmentRemovedOptional: ['Removed on (optional)', '拆除日期（可选）'],

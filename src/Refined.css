@@ -177,3 +177,43 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
     .component-section-heading { gap: 12px; }
     .component-system-type { gap: 6px; }
 }
+
+/* List and workflow pages use the vehicle overview's quiet working surface. */
+.workspace-panel { min-width: 0; padding: 20px; background: var(--surface); border-radius: 10px; }
+.workspace-panel .ant-table-thead > tr > th { height: 48px; background: var(--canvas); font-weight: 600; }
+.workspace-panel .ant-table-thead > tr > th::before { display: none; }
+.workspace-panel > .business-table-controls { margin: 0 0 16px; }
+.workspace-panel .business-list-heading { min-height: 32px; margin-bottom: 16px; }
+.workspace-panel .business-list-heading h3 { font-size: 16px; font-weight: 600; }
+.workspace-panel .dove-batch-toolbar { align-items: center; gap: 12px 24px; }
+.dove-batch-guidance { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.dove-batch-guidance .ant-btn { color: var(--muted); padding-inline: 0; }
+.dove-batch-help { max-width: 340px; line-height: 1.7; margin: 0; }
+.dove-batch-import > .ant-empty { margin: 0; padding: 40px 0; }
+.workspace-panel .history-toolbar { flex-wrap: wrap; gap: 12px; }
+.workspace-panel .history-vehicle-filter { width: 240px; }
+.workspace-panel .history-toolbar .ant-input-search { flex: 1 1 280px; }
+.workspace-panel .history-result-meta { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; }
+.audit-panel > .business-list-heading { border-top: 1px solid var(--line); padding-top: 12px; }
+.team-workspace > .ant-tabs-nav { margin-bottom: 20px; }
+.team-workspace .team-toolbar { gap: 16px; margin-bottom: 16px; }
+.team-workspace .team-toolbar > .ant-input-affix-wrapper { width: 320px; max-width: 100%; }
+.sync-update-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 20px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sync-update-meta > span { display: inline-flex; align-items: center; gap: 6px; }
+.sync-update-meta > span:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+@media (max-width: 700px) {
+  .workspace-panel { padding: 16px; }
+  .workspace-panel .history-vehicle-filter { width: 100%; }
+  .dove-batch-toolbar > .business-control-actions { margin-left: 0; justify-content: flex-start; }
+}
+
+.vehicle-details-link { flex: 1; min-width: 0; border-radius: 6px; padding: 6px 2px; }
+.vehicle-details-link strong { color: var(--brand); }
+.vehicle-details-link > span:nth-child(2) { flex: 1; min-width: 0; }
+.vehicle-details-link:hover { background: var(--canvas); }
+.vehicle-details-link:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.vehicle-details-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.vehicle-details-chevron { flex-shrink: 0; color: var(--muted); }
+/* One passive personal marker; no extra row controls. */
+.car-symbol-watched { position: relative; color: #9a6700; background: #faf3df; }
+.vehicle-watch-badge { position: absolute; right: -2px; bottom: -2px; background: var(--surface); border-radius: 50%; box-sizing: content-box; padding: 2px; }

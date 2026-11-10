@@ -1,7 +1,9 @@
+import { parseWatch } from './vehicle-watch'
+import type { VehicleWatch, WatchColor } from './vehicle-watch'
 import { lazy, Suspense, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
-import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
+import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, Clock3, ChevronRight, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Star, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
 import { api, ApiError, createWorkspaceScope, download } from './api'
 import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
@@ -137,9 +139,25 @@ function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel,
   </Modal>
 }
 
-export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef }: { view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
+export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef, personalScope }: { personalScope?: string; view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
   const text = translateBusiness(language), { message, modal } = App.useApp()
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
+  const watchStorageKey = personalScope ? `vdm-vehicle-watch:${personalScope}` : null
+  const readWatch = () => { try { return parseWatch(watchStorageKey ? localStorage.getItem(watchStorageKey) : null) } catch { return parseWatch(null) } }
+  const [watchState, setWatchState] = useState(() => ({ key: watchStorageKey, value: readWatch() }))
+  const watch = watchState.key === watchStorageKey ? watchState.value : readWatch()
+  function saveWatch(next: VehicleWatch) {
+    try {
+      if (watchStorageKey) localStorage.setItem(watchStorageKey, JSON.stringify(next))
+      setWatchState({ key: watchStorageKey, value: next })
+    } catch { message.error(language === 'zh' ? '无法保存个人关注，请检查浏览器存储权限。' : 'Could not save personal favorites. Check browser storage permissions.') }
+  }
+  function markVehicle(id: string, color?: WatchColor) {
+    const vehicles = { ...watch.vehicles }
+    if (color) vehicles[id] = color; else delete vehicles[id]
+    saveWatch({ ...watch, vehicles })
+  }
+
   const { filters: vehicleColumnFilters, setFilters: setVehicleColumnFilters } = useVehicleTableFilterSession()
   const [records, setRecords] = useState<BusinessRecord[]>([]), [historyRevision, setHistoryRevision] = useState(0), [sync, setSync] = useState<SyncStatus>(emptySync)
   const [catalog, setCatalog] = useState<ComponentTypeCatalog>({ enabled: false, types: builtinComponentTypes })
@@ -468,15 +486,18 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         toolbarFilters={filters}
         toolbarActions={<><Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button></>}
         toolbarMenu={<Dropdown trigger={['click']} menu={{
-          items: admin ? [
+          items: [{ key: 'personal-watch', label: text('setWatchedVehicles'), icon: <Star size={15} />, children: cars.filter(car => !car.archived).map(car => ({key:`watch-${car.id}`,label:<span>{Object.hasOwn(watch.vehicles,car.id) ? '✓ ' : ''}{display(car.data.name)}</span>,onClick:()=>markVehicle(car.id,Object.hasOwn(watch.vehicles,car.id)?undefined:'gold')})) }, ...(admin ? [
             { key: 'backup', label: language === 'zh' ? '备份数据' : 'Back up data', icon: <Download size={16} />, disabled: !online, onClick: () => void startBackup() },
             { key: 'restore', label: text('restoreBackup'), icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
             { key: 'restore-results', label: language === 'zh' ? '恢复记录' : 'Restore history', icon: <ClipboardCheck size={16} />, onClick: () => void showReceipts() },
-          ] : []
+          ] : [])]
         }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
         filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
         rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
-          { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => <button className="record-link" onClick={() => openVehicle(record.id)}><span className="car-symbol"><CarFront size={21} /></span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span></button> },
+          { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => {
+            const watched = Object.hasOwn(watch.vehicles, record.id)
+            return <button className="record-link vehicle-details-link" title={text('openVehicleDetails')} onClick={() => openVehicle(record.id)}><span className={`car-symbol${watched ? ' car-symbol-watched' : ''}`}><CarFront size={21} />{watched && <Star size={9} fill="currentColor" className="vehicle-watch-badge" aria-label={text('watchVehicle')} />}</span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span><ChevronRight size={14} className="vehicle-details-chevron" aria-hidden="true" /></button>
+          } },
           { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
           { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
           { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
@@ -522,14 +543,14 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
           } },
         ]} /></>}
     <DoveImport active={view === 'dove'} language={language} vehicles={cars} disabled={busy} onBusyChange={setBusy} onRetained={loadScoped} onOpenReport={async (id, scope, signal) => { await loadScoped(scope, signal); scope.assertCurrent(signal); setReportId(id) }} onError={onError} />
-    {view === 'reports' && <section className="report-archive"><div className="business-table-controls"><div className="business-filters report-filters"><Select showSearch allowClear optionFilterProp="label" aria-label={text('selectReportVehicle')} placeholder={text('selectReportVehicle')} value={reportVehicle} onChange={value => { setReportVehicle(value); setReportSelection([]) }} options={cars.map(car => ({ value: car.id, label: `${display(car.data.model || car.data.name)} · ${display(car.data.vin)}` }))} /><Input allowClear prefix={<Search size={15} />} aria-label={text('reportCompoundSearch')} placeholder={text('reportCompoundSearch')} value={query} onChange={event => { setQuery(event.target.value); setReportSelection([]) }} /></div></div><div className="report-selection-bar"><div className="report-selection-summary"><span>{text('reports')} · {visibleReports.length}</span><span className="muted">{text('selected')}: {reportSelection.length}</span><Button type="text" size="small" disabled={!reportSelection.length || busy} onClick={() => setReportSelection([])}>{text('clearSelection')}</Button></div><Space className="report-bulk-actions"><Button size="small" disabled={!reportSelection.length || busy} icon={<Download size={16} />} onClick={() => void downloadReports()}>{text('downloadSelected')}</Button>{admin && <Button size="small" disabled={!online || busy || !selectedReports.some(record => !record.archived)} onClick={() => { setBatchReason(''); setBatchArchive(true) }}>{text('archive')}</Button>}<Tooltip title={!canCompare ? text('selectTwoReports') : ''}><Button size="small" disabled={!canCompare || busy} icon={<GitCompare size={16} />} onClick={() => void compare()}>{text('compare')}</Button></Tooltip></Space></div>{reportTable(visibleReports, true)}</section>}
+    {view === 'reports' && <section className="report-archive workspace-panel"><div className="business-table-controls"><div className="business-filters report-filters"><Select showSearch allowClear optionFilterProp="label" aria-label={text('selectReportVehicle')} placeholder={text('selectReportVehicle')} value={reportVehicle} onChange={value => { setReportVehicle(value); setReportSelection([]) }} options={cars.map(car => ({ value: car.id, label: `${display(car.data.model || car.data.name)} · ${display(car.data.vin)}` }))} /><Input allowClear prefix={<Search size={15} />} aria-label={text('reportCompoundSearch')} placeholder={text('reportCompoundSearch')} value={query} onChange={event => { setQuery(event.target.value); setReportSelection([]) }} /></div></div><div className="report-selection-bar"><div className="report-selection-summary"><span>{text('reports')} · {visibleReports.length}</span><span className="muted">{text('selected')}: {reportSelection.length}</span><Button type="text" size="small" disabled={!reportSelection.length || busy} onClick={() => setReportSelection([])}>{text('clearSelection')}</Button></div><Space className="report-bulk-actions"><Button size="small" disabled={!reportSelection.length || busy} icon={<Download size={16} />} onClick={() => void downloadReports()}>{text('downloadSelected')}</Button>{admin && <Button size="small" disabled={!online || busy || !selectedReports.some(record => !record.archived)} onClick={() => { setBatchReason(''); setBatchArchive(true) }}>{text('archive')}</Button>}<Tooltip title={!canCompare ? text('selectTwoReports') : ''}><Button size="small" disabled={!canCompare || busy} icon={<GitCompare size={16} />} onClick={() => void compare()}>{text('compare')}</Button></Tooltip></Space></div>{reportTable(visibleReports, true)}</section>}
 
     {view === 'history' && <HistoryPanel language={language} refreshToken={historyRevision} reportIds={records.filter(record => record.kind === 'report').map(record => record.id)} onOpenReport={setReportId} />}
-    {view === 'audit' && <><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></>}
-    {view === 'sync' && <>
+    {view === 'audit' && <section className="workspace-panel audit-panel"><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></section>}
+    {view === 'sync' && <section className="workspace-panel sync-panel">
       <Alert type={sync.error || sync.conflicts.length || sync.quarantined ? 'warning' : 'success'} showIcon icon={sync.error ? <CloudOff size={18} /> : undefined} title={sync.error ? errorText(sync.error, language) : text(sync.phase)} />
       <div className="sync-metrics">{[{ key: 'pending', value: sync.pending }, { key: 'conflicts', value: sync.conflicts.length }, { key: 'quarantined', value: sync.quarantined }].map(item => <div key={item.key}><span>{text(item.key)}</span><strong>{item.value}</strong></div>)}</div>
-      <Descriptions className="sync-summary" column={{ xs: 1, sm: 2 }} items={[{ key: 'lastSync', label: text('lastSync'), children: sync.lastSync ? date(sync.lastSync) : '—' }, { key: 'revision', label: text('revision'), children: <span className="mono">{sync.revision || '—'}</span> }]} />
+      <div className="sync-update-meta"><Tooltip title={`${text('lastSync')}: ${sync.lastSync ? date(sync.lastSync) : '—'}`}><span tabIndex={0}><Clock3 size={13} aria-hidden="true" />{text('lastSync')} · {sync.lastSync ? new Date(sync.lastSync).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}</span></Tooltip><span>{text('revision')} · {sync.revision || '—'}</span></div>
       <div className="business-list-heading"><h3>{text('conflicts')}</h3><span>{sync.conflicts.length}</span></div>
       {sync.conflicts.length ? sync.conflicts.map(conflict => <ConflictForm key={conflict.token} conflict={conflict} language={language} admin={admin} onResolve={async (item, choices, reason) => { try { setSync(await api<SyncStatus>(`/api/business/sync/${item.recordId}/resolve`, { method: 'POST', body: { token: item.token, choices, reason } })); await load() } catch (error) { onError(error) } }} />) : <Empty description={text('noRecords')} />}
       <div className="section-toolbar"><h3>{text('quarantined')}</h3><Button icon={<Download size={15} />} disabled={!quarantined.length} onClick={() => void download('/api/business/sync/quarantined/export', 'quarantined-operations.json').catch(onError)}>{text('exportQuarantined')}</Button></div>
@@ -541,7 +562,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
         { title: text('quarantineReason'), width: 240, render: (_, entry) => errorText(entry.reason, language) },
         { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><pre className="quarantined-operation-data">{JSON.stringify(entry.operation, null, 2)}</pre></details> },
       ]} />
-    </>}
+    </section>}
 
     <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} closable={!revisionBusy} onClose={() => { if (revisionBusy) return; attachmentCancel.current?.(); equipmentCancel.current?.(); setEditor(current => current?.kind === 'equipment' ? null : current); setSelectedId(null) }} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && recordActions(selected)}><Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
       { key: 'overview', label: text('overview'), children: <VehicleOverview vehicle={selected} language={language} busy={busy} onEdit={() => setEditor({ kind: 'vehicle', vehicleId: null, record: selected })} onChanged={load} onError={onError} onBusyChange={setBusy} /> },

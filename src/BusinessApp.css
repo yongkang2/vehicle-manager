@@ -345,12 +345,6 @@
     overflow: auto
 }
 
-.sync-summary {
-    padding: 28px 0;
-    margin-bottom: 15px;
-    border-bottom: 1px solid var(--line)
-}
-
 .sync-title {
     margin-bottom: 22px
 }
