@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { Alert, Button, Descriptions, Form, Input, Modal, Space, Table, Tag } from 'antd'
+import { Alert, Button, Empty, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
 import { Pencil, Plus, RefreshCw, Wrench } from 'lucide-react'
 import type { BusinessRecord, Fields } from '../shared/business'
 import { thermalSystemTypes } from '../shared/business'
@@ -12,12 +12,12 @@ import { componentTypeBlocksNewEntries } from './component-review-policy'
 type Scope = ReturnType<typeof createWorkspaceScope>
 export type ComponentSectionsProps = {
   vehicle: BusinessRecord; records: BusinessRecord[]; typeId: string; language: Language; catalog: ComponentTypeCatalog; disabled?: boolean; includeArchived?: boolean
-  onChanged: (scope: Scope, signal: AbortSignal) => Promise<void>; onBusyChange: (busy: boolean) => void; onError: (error: unknown) => void; onEditThermal?: () => void
+  onChanged: (scope: Scope, signal: AbortSignal) => Promise<void>; onBusyChange: (busy: boolean) => void; onError: (error: unknown) => void
 }
-type Editor = { record: BusinessRecord | null; removal: boolean }
+type Editor = { record: BusinessRecord | null; removal: boolean; thermal?: string }
 const value = (item: unknown) => item === undefined || item === null || item === '' ? '—' : String(item)
 
-export default function ComponentSections({ vehicle, records, typeId, language, catalog, disabled = false, includeArchived = false, onChanged, onBusyChange, onError, onEditThermal }: ComponentSectionsProps) {
+export default function ComponentSections({ vehicle, records, typeId, language, catalog, disabled = false, includeArchived = false, onChanged, onBusyChange, onError }: ComponentSectionsProps) {
   const text = translateBusiness(language), at = language === 'zh' ? 1 : 0, type = catalog.types.find(item => item.id === typeId)
   const [scope] = useState(createWorkspaceScope), controller = useRef(new AbortController()), [form] = Form.useForm()
   const active = useRef(true), admitted = useRef(false)
@@ -26,7 +26,7 @@ export default function ComponentSections({ vehicle, records, typeId, language, 
   useEffect(() => { active.current = true; if (controller.current.signal.aborted) controller.current = new AbortController(); const current = controller.current; return () => { active.current = false; current.abort(); finishBusy() } }, [])
   useEffect(() => {
     if (!editor) return
-    form.resetFields(); form.setFieldsValue({ ...editor.record?.data, removedAt: new Date().toISOString().slice(0, 10), reason: '' })
+    form.resetFields(); form.setFieldsValue({ ...editor.record?.data, ...(editor.thermal !== undefined ? { thermal: editor.thermal } : {}), removedAt: new Date().toISOString().slice(0, 10), reason: '' })
   }, [editor, form])
   if (!type) return null
   const items = records.filter(record => record.kind === 'part' && record.vehicleId === vehicle.id && (typeId === 'emotor' ? record.data.category === 'motor' : record.data.category === 'component' && record.data.componentTypeId === typeId) && (includeArchived || !record.archived))
@@ -36,13 +36,13 @@ export default function ComponentSections({ vehicle, records, typeId, language, 
     if (!editor || !type || locked || unknown) return
     const { reason, removedAt, ...valuesData } = values
     const record = editor.record
-    const data: Fields = editor.removal ? { ...record!.data, removedAt } : {
+    const data: Fields = editor.thermal !== undefined ? { ...record!.data, thermal: editor.thermal } : editor.removal ? { ...record!.data, removedAt } : {
       ...record?.data, ...valuesData, category: typeId === 'emotor' ? 'motor' : 'component', componentTypeId: typeId === 'emotor' ? '' : typeId,
       name: typeId === 'emotor' ? record?.data.name || type.name : valuesData.name,
     }
     setSaving(true); admitted.current = true; onBusyChange(true)
     try {
-      await scope.request(record ? `/api/business/records/${encodeURIComponent(record.id)}` : '/api/business/records', { method: record ? 'PUT' : 'POST', body: { kind: 'part', vehicleId: vehicle.id, data, reason, ...(record ? { version: record.version } : {}) }, signal: controller.current.signal })
+      await scope.request(record ? `/api/business/records/${encodeURIComponent(record.id)}` : '/api/business/records', { method: record ? 'PUT' : 'POST', body: { kind: editor.thermal !== undefined ? 'vehicle' : 'part', vehicleId: editor.thermal !== undefined ? null : vehicle.id, data, reason, ...(record ? { version: record.version } : {}) }, signal: controller.current.signal })
       scope.assertCurrent(controller.current.signal); await onChanged(scope, controller.current.signal)
       if (active.current) setEditor(null)
     } catch (cause) {
@@ -60,16 +60,15 @@ export default function ComponentSections({ vehicle, records, typeId, language, 
   return <div className="component-section">
     {!catalog.enabled && <Alert type="info" showIcon title={text('configurationDisabledNotice')} />}
     {catalog.policyEnabled && type.reviewState && type.reviewState !== 'active' ? <Alert type="info" showIcon title={text('configurationExcluded')} description={text('componentTypeWorkingDataNotice')} /> : type.disabled && <Alert type="info" showIcon title={text('componentTypeDisabled')} description={text('componentTypeNotice')} />}
-    {typeId === 'thermal-management' && <Descriptions size="small" column={1} items={[{ key: 'thermal', label: text('thermal'), children: <Space wrap><span>{thermalSystemTypes.some(item => item === vehicle.data.thermal) ? text(String(vehicle.data.thermal)) : value(vehicle.data.thermal)}</span>{onEditThermal && <Button size="small" icon={<Pencil size={13} />} disabled={locked} onClick={onEditThermal}>{text('edit')}</Button>}</Space> }]} />}
-    <div className="section-toolbar"><h3>{type.label[at]}</h3><Button icon={<Plus size={15} />} disabled={locked || componentTypeBlocksNewEntries(type, catalog.policyEnabled) || !catalog.enabled} onClick={() => { setUnknown(false); setEditor({ record: null, removal: false }) }}>{text('addComponent')}</Button></div>
-    <Table<BusinessRecord> rowKey="id" size="small" dataSource={items} scroll={{ x: Math.max(700, fields.length * 170 + 220) }} pagination={{ pageSize: 8, hideOnSinglePage: true }} locale={{ emptyText: text('componentNone') }} columns={[
+    <div className="section-toolbar"><div className="component-section-heading"><h3>{type.label[at]}</h3>{typeId === 'thermal-management' && <div className="component-system-type"><span className="component-system-label">{text('thermal')}:</span><Select allowClear className="thermal-system-select" aria-label={text('thermal')} value={editor?.thermal !== undefined ? editor.thermal || undefined : vehicle.data.thermal ? String(vehicle.data.thermal) : undefined} placeholder="—" disabled={locked || Boolean(editor)} options={thermalSystemTypes.map(item => ({ value: item, label: text(item) }))} onChange={next => { const thermal = next || ''; if (thermal !== (vehicle.data.thermal || '')) { setUnknown(false); setEditor({ record: vehicle, removal: false, thermal }) } }} /></div>}</div><Button type="primary" icon={<Plus size={15} />} disabled={locked || componentTypeBlocksNewEntries(type, catalog.policyEnabled) || !catalog.enabled} onClick={() => { setUnknown(false); setEditor({ record: null, removal: false }) }}>{text('addComponent')}</Button></div>
+    <Table<BusinessRecord> rowKey="id" size="small" dataSource={items} scroll={{ x: Math.max(700, fields.length * 170 + 220) }} pagination={{ pageSize: 8, hideOnSinglePage: true }} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text('componentNone')} /> }} columns={[
       ...fields.map(field => ({ key: field.id, title: field.label[at], width: field.id === 'notes' ? 230 : 170, ellipsis: { showTitle: true }, render: (_: unknown, record: BusinessRecord) => <span title={value(record.data[field.id])}>{value(record.data[field.id])}</span> })),
       { key: 'state', title: text('status'), width: 135, render: (_, record) => <Tag>{record.archived ? text('archived') : record.data.removedAt ? `${text('removed')} · ${record.data.removedAt}` : text('installed')}</Tag> },
-      { key: 'actions', title: text('actions'), width: 110, render: (_, record) => <Space><Button size="small" icon={<Pencil size={14} />} aria-label={`${text('editComponent')}: ${value(record.data.name)}`} disabled={locked || record.archived} onClick={() => { setUnknown(false); setEditor({ record, removal: false }) }} />{!record.data.removedAt && <Button size="small" icon={<Wrench size={14} />} aria-label={`${text('removeComponent')}: ${value(record.data.name)}`} disabled={locked || record.archived} onClick={() => { setUnknown(false); setEditor({ record, removal: true }) }} />}</Space> },
+      { key: 'actions', title: text('actions'), width: 110, render: (_, record) => <Space><Button type="text" size="small" icon={<Pencil size={14} />} aria-label={`${text('editComponent')}: ${value(record.data.name)}`} disabled={locked || record.archived} onClick={() => { setUnknown(false); setEditor({ record, removal: false }) }} />{!record.data.removedAt && <Button type="text" size="small" icon={<Wrench size={14} />} aria-label={`${text('removeComponent')}: ${value(record.data.name)}`} disabled={locked || record.archived} onClick={() => { setUnknown(false); setEditor({ record, removal: true }) }} />}</Space> },
     ]} />
-    <Modal open={Boolean(editor)} title={`${text(editor?.removal ? 'removeComponent' : editor?.record ? 'editComponent' : 'addComponent')} · ${type.label[at]}`} width={760} onCancel={() => { if (!saving) setEditor(null) }} onOk={() => form.submit()} okText={text('save')} cancelText={text('cancel')} confirmLoading={saving} okButtonProps={{ disabled: unknown }} destroyOnHidden>
+    <Modal open={Boolean(editor)} title={editor?.thermal !== undefined ? text('thermal') : `${text(editor?.removal ? 'removeComponent' : editor?.record ? 'editComponent' : 'addComponent')} · ${type.label[at]}`} width={editor?.thermal !== undefined ? 480 : 760} onCancel={() => { if (!saving) setEditor(null) }} onOk={() => form.submit()} okText={text('save')} cancelText={text('cancel')} confirmLoading={saving} okButtonProps={{ disabled: unknown }} destroyOnHidden>
       {unknown && <Alert type="warning" showIcon title={text('componentSaveUnknown')} action={<Button size="small" icon={<RefreshCw size={14} />} onClick={() => void inspectSaved()}>{text('refresh')}</Button>} />}
-      <Form form={form} layout="vertical" requiredMark={false} disabled={saving || unknown} onFinish={values => void save(values)}><div className="record-form-grid">{editor?.removal ? <Form.Item name="removedAt" label={text('componentRemovedAt')} rules={[{ required: true, message: text('required') }]}><Input type="date" /></Form.Item> : fields.map(field => <Form.Item key={field.id} name={field.id} label={field.label[at]} className={field.id === 'notes' ? 'wide-field' : undefined} rules={[{ required: field.id === 'name', whitespace: field.id === 'name', message: text('required') }]}>{field.id === 'notes' ? <Input.TextArea rows={3} maxLength={4000} /> : <Input maxLength={field.id === 'name' ? 120 : 4000} />}</Form.Item>)}<Form.Item name="reason" label={text('reason')} className="wide-field" rules={[{ required: true, whitespace: true, message: text('required') }]}><Input.TextArea rows={2} maxLength={500} /></Form.Item></div></Form>
+      <Form form={form} layout="vertical" requiredMark={false} disabled={saving || unknown} onFinish={values => void save(values)}><div className="record-form-grid">{editor?.thermal !== undefined ? <p className="wide-field thermal-system-change">{thermalSystemTypes.some(item => item === editor.record?.data.thermal) ? text(String(editor.record?.data.thermal)) : value(editor.record?.data.thermal)} → {editor.thermal ? text(editor.thermal) : '—'}</p> : editor?.removal ? <Form.Item name="removedAt" label={text('componentRemovedAt')} rules={[{ required: true, message: text('required') }]}><Input type="date" /></Form.Item> : fields.map(field => <Form.Item key={field.id} name={field.id} label={field.label[at]} className={field.id === 'notes' ? 'wide-field' : undefined} rules={[{ required: field.id === 'name', whitespace: field.id === 'name', message: text('required') }]}>{field.id === 'notes' ? <Input.TextArea rows={3} maxLength={4000} /> : <Input maxLength={field.id === 'name' ? 120 : 4000} />}</Form.Item>)}<Form.Item name="reason" label={text('reason')} className="wide-field" rules={[{ required: true, whitespace: true, message: text('required') }]}><Input.TextArea rows={2} maxLength={500} /></Form.Item></div></Form>
     </Modal>
   </div>
 }

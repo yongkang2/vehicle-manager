@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { Alert, App, Button, Card, Descriptions, Empty, Input, Modal, Select, Space, Spin, Table, Tag, Tooltip } from 'antd'
-import { ClipboardCopy, GitCompare, Plus, RefreshCw } from 'lucide-react'
+import { Alert, App, Button, Card, Descriptions, Empty, Input, Modal, Popover, Select, Space, Spin, Table, Tag, Tooltip } from 'antd'
+import { CircleHelp, ClipboardCopy, GitCompare, Plus, RefreshCw } from 'lucide-react'
 import type { BusinessRecord } from '../shared/business'
 import { configurationDecisionKey, configurationReviewScope, configurationSections, configurationSnapshot, validateConfigurationRevisionRecord } from '../shared/configuration-revisions'
 import type { ComponentTypeCatalog, ConfigurationDecisions, ConfigurationPreview, ConfigurationPublicationReceipt, ConfigurationPublishRequest, ConfigurationRevisionData, ConfigurationRevisionRecord, ConfigurationRevisionSummary } from '../shared/configuration-revisions'
@@ -9,6 +9,7 @@ import { translateBusiness } from './business-i18n'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
 import { compareConfigurationRevisions, configurationComponentName, configurationRevisionText, excludedConfigurationTypes } from './configuration-revision-view'
+import ComponentTypeManagement from './ComponentTypeManagement'
 import './ConfigurationRevisions.css'
 
 type Scope = ReturnType<typeof createWorkspaceScope>
@@ -20,11 +21,6 @@ const emptyDecisions = (): ConfigurationDecisions => ({ fields: {}, sections: {}
 const textValue = (value: unknown) => value === undefined || value === null || value === '' ? '—' : String(value)
 const uncertain = new Set(['NETWORK_ERROR', 'SERVER_ERROR', 'SHARE_IO_ERROR', 'SHARE_LOCK_LOST', 'LOCAL_REFRESH_REQUIRED'])
 
-export function ConfigurationRevisionSummaryPanel({ vehicle, language, catalog, current, onOpen }: Pick<ConfigurationRevisionsProps, 'vehicle' | 'language' | 'catalog' | 'current'> & { onOpen: () => void }) {
-  const text = translateBusiness(language)
-  return <div className="configuration-current-summary"><Space wrap><strong>{text('configurationRevision')}</strong><Tag color={current ? 'blue' : undefined}>{current?.label || text('noConfigurationRevision')}</Tag>{current?.hasChanges && <Tag color="warning">{text('unpublishedConfigurationChanges')}</Tag>}<Button size="small" onClick={onOpen}>{text(current && !current.hasChanges ? 'configurationRevisions' : 'createConfigurationRevision')}</Button></Space>{!catalog.enabled && <p className="muted">{text('configurationDisabledNotice')}</p>}{vehicle.archived && <span className="muted">{text('archived')}</span>}</div>
-}
-
 function SnapshotView({ data, language }: { data: ConfigurationRevisionData; language: Language }) {
   const text = translateBusiness(language), at = language === 'zh' ? 1 : 0
   return <div className="configuration-snapshot"><Descriptions size="small" column={{ xs: 1, sm: 2 }} items={[
@@ -34,7 +30,7 @@ function SnapshotView({ data, language }: { data: ConfigurationRevisionData; lan
   ]} />{Boolean(excludedConfigurationTypes(data.snapshot.reviewScope).length) && <Card size="small" title={text('configurationReviewScope')}><p>{text('configurationExcluded')}: {excludedConfigurationTypes(data.snapshot.reviewScope).map(type => type.label[at]).join(' / ')}</p></Card>}{data.snapshot.sections.map(section => <Card size="small" key={section.typeId} title={section.label[at]}>{section.state !== 'installed' ? <p>{text(section.state === 'unknown' ? 'configurationUnknown' : 'configurationNotInstalled')} · {section.reason}</p> : section.components.map(component => <div className="configuration-component" key={component.id}><h4>{configurationComponentName(component, language)}</h4><Descriptions size="small" column={{ xs: 1, sm: 2 }} items={component.fields.map(field => ({ key: field.id, label: field.label[at], children: <span className="preserve-text">{field.state === 'known' ? textValue(field.value) : <><Tag>{text(field.state === 'unknown' ? 'configurationUnknown' : 'configurationNotApplicable')}</Tag>{field.reason}</>}</span> }))} /></div>)}</Card>)}</div>
 }
 
-export default function ConfigurationRevisions({ vehicle, records, language, online, syncPaused, catalog, current, onChanged, onBusyChange, onError }: ConfigurationRevisionsProps) {
+export default function ConfigurationRevisions({ vehicle, records, language, online, syncPaused, admin, catalog, current, onChanged, onBusyChange, onError }: ConfigurationRevisionsProps) {
   const text = translateBusiness(language), at = language === 'zh' ? 1 : 0, { message } = App.useApp()
   const [scope] = useState(createWorkspaceScope), controller = useRef(new AbortController())
   const active = useRef(true), historySequence = useRef(0), previewSequence = useRef(0), admitted = useRef(false)
@@ -140,11 +136,19 @@ export default function ConfigurationRevisions({ vehicle, records, language, onl
     setDecisions(previous => ({ ...previous, fields: { ...previous.fields, [key]: { ...(previous.fields[key] || { state: 'unknown' as const, reason: '' }), ...patch } } }))
   }
   return <div className="configuration-revisions">
-    <ConfigurationRevisionSummaryPanel vehicle={vehicle} language={language} catalog={catalog} current={current} onOpen={() => { if (current && !current.hasChanges) void openDetail(current.revisionId); else openReview() }} />
-    <p className="muted">{text('configurationFrozenNotice')}</p>
+    <div className="section-toolbar">
+      <div className="configuration-heading"><h3>{text('configurationRevisions')}</h3><span className="configuration-current-version">{current?.label || text('noConfigurationRevision')}</span>{current?.hasChanges && <Tag color="warning">{text('unpublishedConfigurationChanges')}</Tag>}{vehicle.archived && <Tag>{text('archived')}</Tag>}<Popover trigger="click" content={<p className="configuration-help-copy">{text('configurationFrozenNotice')}</p>}><Button type="text" size="small" icon={<CircleHelp size={16} />} aria-label={text('configurationHelp')} /></Popover></div>
+      <div className="configuration-list-utilities">
+        {admin && <ComponentTypeManagement language={language} online={online} syncPaused={syncPaused} catalog={catalog} onChanged={onChanged} onBusyChange={onBusyChange} onError={onError} />}
+        <Button type="primary" icon={<Plus size={15} />} disabled={vehicle.archived || !catalog.enabled} onClick={openReview}>{text('createConfigurationRevision')}</Button>
+      </div>
+    </div>
     {!catalog.enabled && <Alert type="info" showIcon title={text('configurationDisabledNotice')} />}
     {(!online || syncPaused) && <Alert type="info" showIcon title={text('configurationOfflineNotice')} />}
-    <Space wrap className="configuration-revision-toolbar"><Button type="primary" icon={<Plus size={15} />} disabled={vehicle.archived || !catalog.enabled} onClick={openReview}>{text('createConfigurationRevision')}</Button><Button icon={<GitCompare size={15} />} disabled={selection.length !== 2 || loading} onClick={() => void compare()}>{text('configurationCompare')}</Button><Button icon={<RefreshCw size={15} />} loading={loading} onClick={() => void loadHistory()}>{text('refresh')}</Button></Space>
+    <div className="configuration-list-toolbar">
+      <Button size="small" icon={<GitCompare size={14} />} disabled={selection.length !== 2 || loading} onClick={() => void compare()}>{text('configurationCompare')}</Button>
+      <Tooltip title={text('refresh')}><Button className="configuration-refresh" type="text" size="small" aria-label={text('refresh')} icon={<RefreshCw size={15} />} loading={loading} onClick={() => void loadHistory()} /></Tooltip>
+    </div>
     <Table<ConfigurationRevisionSummary> rowKey="revisionId" size="small" loading={loading} dataSource={history} pagination={{ pageSize: 10, hideOnSinglePage: true }} scroll={{ x: 680 }} rowSelection={{ selectedRowKeys: selection, onChange: keys => setSelection(keys.map(String).slice(-2)) }} columns={[
       { title: text('configurationRevision'), width: 115, render: (_, row) => <button className="inline-link" onClick={() => void openDetail(row.revisionId)}>{row.label}</button> },
       { title: text('configurationTitle'), width: 170, dataIndex: 'title' }, { title: text('configurationSummary'), width: 240, dataIndex: 'summary' },
