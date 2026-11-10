@@ -233,6 +233,9 @@ test('manual service shutdown closes an open presence socket and removes its sta
     const [exitCode] = await exited
     assert.equal(exitCode, 0, diagnostics)
     assert.equal(await fs.access(path.join(root, 'service.json')).then(() => true, () => false), false)
+    const log = await fs.readFile(path.join(root, 'logs', 'diagnostics.jsonl'), 'utf8')
+    for (const event of ['service.starting', 'service.ready', 'service.stopping', 'service.stopped']) assert(log.includes(event), event)
+    assert(!log.includes(controlToken)); assert(!log.includes(token))
   } finally {
     socket?.terminate()
     if (child.exitCode === null && child.signalCode === null) { child.kill(); await exited }

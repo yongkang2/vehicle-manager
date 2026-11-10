@@ -59,6 +59,7 @@ async function immutableFile(filename: string, bytes: Buffer): Promise<void> {
 export class BusinessSync {
   private running: Promise<SyncStatus> | null = null
   private runningFull = false
+  private diagnosticState = ''
   private previews = new Map<string, PreviewState>()
   private phase: SyncStatus['phase'] = 'idle'
   private error: string | null = null
@@ -78,13 +79,21 @@ export class BusinessSync {
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity, options: { ifChanged?: boolean } = {}): Promise<SyncStatus> {
     if (this.running) return !options.ifChanged && !this.runningFull ? this.running.then(() => this.synchronize(directory, teamId, identity, options)) : this.running
+    const started = performance.now()
+    let failure: unknown
     this.runningFull = !options.ifChanged
     this.phase = 'syncing'
     this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team, options.ifChanged))).catch(error => {
+      failure = error
       this.verified = null
       this.error = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
       this.phase = ['SHARE_BUSY', 'SHARE_LOCK_LOST', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
       return this.status()
+    }).then(state => {
+      const key = JSON.stringify([state.phase, state.error, state.pending, state.conflicts.length]), durationMs = Math.round(performance.now() - started)
+      if (key !== this.diagnosticState || !state.error && durationMs >= 2000) this.business.store.diagnostics.write(state.error ? 'warn' : 'info', state.error ? 'sync.failed' : 'sync.changed', { phase: state.phase, code: state.error, pending: state.pending, conflicts: state.conflicts.length, durationMs }, failure)
+      this.diagnosticState = key
+      return state
     }).finally(() => { this.running = null })
     return this.running
   }
