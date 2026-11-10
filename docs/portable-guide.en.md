@@ -99,3 +99,5 @@ When an operation fails, note its time/timezone, action, application version and
 For startup failures, also preserve `startup.log` in the data directory and `launcher.log` beside the launcher. Review legacy logs for sensitive paths before sharing. Share only needed evidence through approved channels; do not send passwords, cookies, tokens, request bodies or a copy of your database. New structured diagnostics omit those values and business content. Log storage failures do not prevent normal operations, but evidence can be missing. No diagnostics are uploaded automatically.
 
 Before retrying a write after an uncertain response, refresh and inspect its result. Do not delete the database, originals, shared snapshots or locks to fix a logging problem.
+
+Startup text logs now prefix each new stdout/stderr line and each launcher error/stack line with an ISO 8601 UTC timestamp (`Z`) and its source. The service preloads timestamp handling before the main module, keeps it after a detached launcher exits, and still exits with failure on uncaught exceptions. Existing historical log lines are preserved unchanged; timestamps cannot be reconstructed retrospectively.
