@@ -23,6 +23,7 @@ type Props = {
   extensions?: readonly string[]
   limitsText?: string
   uploadBlocked?: boolean
+  hideUploadActions?: boolean
   validateFile?: (file: Pick<File, 'name' | 'size'>) => 'FILE_TYPE_NOT_ALLOWED' | 'FILE_TOO_LARGE' | undefined
   uploadFile?: (scope: ReturnType<typeof createWorkspaceScope>, file: File, signal: AbortSignal) => Promise<{ id: string; pauseForRefresh?: boolean }>
 }
@@ -53,7 +54,7 @@ export default function AttachmentUpload({ vehicle, language, disabled, onRefres
   return queue && <AttachmentUploadPanel queue={queue} vehicle={vehicle} language={language} disabled={disabled} onError={onError} extensions={extensions} limitsText={limitsText} uploadBlocked={uploadBlocked} />
 }
 
-function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, extensions = ATTACHMENT_EXTENSIONS, limitsText, uploadBlocked }: Pick<Props, 'vehicle' | 'language' | 'disabled' | 'onError' | 'extensions' | 'limitsText' | 'uploadBlocked'> & { queue: AttachmentUploadQueue }) {
+export function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, extensions = ATTACHMENT_EXTENSIONS, limitsText, uploadBlocked, hideUploadActions = false }: Pick<Props, 'vehicle' | 'language' | 'disabled' | 'onError' | 'extensions' | 'limitsText' | 'uploadBlocked' | 'hideUploadActions'> & { queue: AttachmentUploadQueue }) {
   const text = translateBusiness(language), input = useRef<HTMLInputElement>(null)
   const snapshot = useSyncExternalStore(queue.subscribe, queue.getSnapshot)
   const { rows, busy, limited, inspectionRequired, refreshError } = snapshot
@@ -68,10 +69,12 @@ function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, ex
     }} />
     <div className="attachment-upload-toolbar">
       <Button icon={<Plus size={15} />} disabled={readonly || inspectionRequired || rows.length >= ATTACHMENT_BATCH_LIMIT} onClick={() => input.current?.click()}>{text('attachmentChooseFiles')}</Button>
-      <Button type="primary" icon={<UploadIcon size={15} />} disabled={readonly || !pending} loading={busy && uploading} onClick={() => void queue.run('pending').catch(onError)}>{text('upload')}{pending ? ` (${pending})` : ''}</Button>
-      {failed > 0 && <Button icon={<RefreshCw size={15} />} disabled={readonly} onClick={() => void queue.run('failed').catch(onError)}>{text('attachmentRetryFailed')} ({failed})</Button>}
+      {!hideUploadActions && <>
+      <Button type="primary" icon={<UploadIcon size={15} />} disabled={readonly || inspectionRequired || !pending} loading={busy && uploading} onClick={() => void queue.run('pending').catch(onError)}>{text('upload')}{pending ? ` (${pending})` : ''}</Button>
+      {failed > 0 && <Button icon={<RefreshCw size={15} />} disabled={readonly || inspectionRequired} onClick={() => void queue.run('failed').catch(onError)}>{text('attachmentRetryFailed')} ({failed})</Button>}
       <Button type="text" disabled={locked || !rows.length || inspectionRequired} onClick={() => queue.clear()}>{text('clearBatch')}</Button>
       <Button icon={<RefreshCw size={15} />} disabled={locked} loading={busy && !uploading} onClick={() => void queue.refresh().catch(onError)}>{text('attachmentRefreshList')}</Button>
+      </>}
     </div>
     <p className="attachment-upload-limits">{limitsText || text('attachmentBatchLimits')}</p>
     {limited && <Alert type="warning" showIcon title={text('attachmentSelectionLimit')} />}

@@ -20,6 +20,7 @@ import { buildCsvExport } from './csv-export.js'
 import { ExportTemplates } from './export-templates.js'
 import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
 import { VehiclePhotos } from './vehicle-photos.js'
+import { EquipmentRecords, validateAttachmentFile } from './equipment.js'
 import { ConfigurationRevisions } from './configuration-revisions.js'
 import { Modifications } from './modifications.js'
 import { installModificationRoutes } from './modification-routes.js'
@@ -36,7 +37,7 @@ type BusinessRequest = Request & { localUser?: LocalUser; sessionToken?: string;
 const recordKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', 'attachment']
 export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store, backgroundSyncAllowed = () => true) {
   const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business), exportTemplates = new ExportTemplates(store)
-  const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business)
+  const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business), equipment = new EquipmentRecords(business)
   const configurationRevisions = new ConfigurationRevisions(business, synchronization, teams)
   const modifications = new Modifications(business, synchronization, teams)
   function sessionGuard(req: BusinessRequest): () => void {
@@ -166,6 +167,10 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   router.post('/vehicles/:id/configuration-revisions', async (req: BusinessRequest, res) => res.status(201).json(await configurationRevisions.publish(await configurationContext(req), String(req.params.id), req.body)))
   writeRoute('post', '/records', (req: BusinessRequest, res) => {
     if (!['vehicle', 'part', 'modification', 'equipment'].includes(req.body?.kind)) throw new AppError('INVALID_INPUT')
+    if (req.body.kind === 'equipment') {
+      res.status(201).json(equipment.save({ vehicleId: req.body.vehicleId || null, data: req.body.data, reason: req.body.reason, requestId: req.body.requestId }, req.businessContext!.actor, req.localUser!.id))
+      return
+    }
     validateManualRecordFields(req.body.kind, req.body.data)
     res.status(201).json(business.write({ kind: req.body.kind, vehicleId: req.body.vehicleId || null, data: req.body.data, actor: req.businessContext!.actor, reason: req.body.reason }))
   })
@@ -173,6 +178,10 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const current = business.get(String(req.params.id))
     if (current.kind === 'configurationRevision' || current.kind === 'componentType') throw new AppError('CONFIGURATION_IMMUTABLE', 409)
     if (['report', 'attachment'].includes(current.kind)) throw new AppError('IMMUTABLE_REPORT', 409)
+    if (current.kind === 'equipment') {
+      res.json(equipment.save({ id: current.id, vehicleId: current.vehicleId, data: req.body.data, version: req.body.version, reason: req.body.reason, requestId: req.body.requestId }, req.businessContext!.actor, req.localUser!.id))
+      return
+    }
     validateManualRecordFields(current.kind, req.body.data, current)
     res.json(business.write({ id: current.id, kind: current.kind, vehicleId: current.vehicleId, data: req.body.data, version: req.body.version, actor: req.businessContext!.actor, reason: req.body.reason }))
   })
@@ -256,9 +265,10 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     if (error instanceof multer.MulterError && error.code !== 'LIMIT_FILE_SIZE') return next(new AppError('INVALID_INPUT'))
     next(error)
   })
-  const filename = (file: Express.Multer.File) => {
+  const filename = (file: Express.Multer.File, truncate = true) => {
     const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8')
-    return path.basename(decoded.includes('\ufffd') ? file.originalname : decoded).slice(0, 240)
+    const name = path.basename(decoded.includes('\ufffd') ? file.originalname : decoded)
+    return truncate ? name.slice(0, 240) : name
   }
   writeRoute('get', '/vehicles/:id/photo', async (req: BusinessRequest, res) => {
     const assertSession = sessionGuard(req)
@@ -296,12 +306,18 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     if (!req.file) throw new AppError('FILE_REQUIRED')
     const car = business.get(String(req.params.id))
     if (car.kind !== 'vehicle' || car.archived) throw new AppError('PARENT_ARCHIVED', 409)
-    const name = filename(req.file), extension = path.extname(name).toLowerCase(), bytes = req.file.buffer
-    const valid = extension === '.xlsx' ? bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])) : extension === '.xls' ? bytes.subarray(0, 8).equals(Buffer.from([208, 207, 17, 224, 161, 177, 26, 225])) : extension === '.pdf' ? bytes.subarray(0, 5).toString() === '%PDF-' : extension === '.png' ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : ['.jpg', '.jpeg', '.jfif'].includes(extension) && bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
-    if (!valid) throw new AppError('FILE_TYPE_NOT_ALLOWED', 422)
+    const name = filename(req.file), bytes = req.file.buffer
+    validateAttachmentFile(name, bytes)
     const key = await business.blob(bytes)
     const actor = await verify()
     res.status(201).json(business.write({ kind: 'attachment', vehicleId: car.id, data: { name, checksum: key, size: bytes.length, savedAt: new Date().toISOString() }, actor, reason: 'Attachment uploaded', internal: true }))
+  })
+  writeRoute('post', '/equipment/:id/attachments', upload.single('file'), async (req: BusinessRequest, res) => {
+    const verify = finalAccess(req, res)
+    if (!req.file) throw new AppError('FILE_REQUIRED')
+    if (Object.keys(req.body || {}).some(key => key !== 'reason')) throw new AppError('INVALID_INPUT')
+    const attachment = await equipment.upload(String(req.params.id), { name: filename(req.file, false), bytes: req.file.buffer }, req.body.reason, req.businessContext!.actor, verify)
+    res.status(201).json(attachment)
   })
   writeRoute('get', '/files/:id', async (req: BusinessRequest, res) => {
     const record = business.get(String(req.params.id))

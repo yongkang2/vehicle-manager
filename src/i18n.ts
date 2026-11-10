@@ -38,6 +38,9 @@ const zh: Record<keyof typeof en, string> = {
   withdrawWarning: '确认向原团队撤回当前账号的待审批申请？需要共享目录可用。若无法访问，可断开当前会话，但远端申请仍然存在。', reloadPage: '重新加载页面',
 }
 const errorPairs: Record<string, [string, string]> = {
+  EQUIPMENT_REQUEST_MISMATCH: ['This request does not match its saved receipt. Close the editor, refresh and inspect equipment before reopening it; do not repeatedly retry this request.', '此请求与已保存凭据不一致。请关闭窗口，刷新并核对设备后重新打开，不要反复重试此请求。'],
+  EQUIPMENT_TYPE_REQUIRED: ['Choose an equipment type before saving.', '保存前请选择设备类型。'],
+  FILE_UNREADABLE: ['This file could not be read before uploading. Remove it and select an accessible copy again.', '上传前无法读取此文件。请移除后重新选择可读取的文件副本。'],
   MODIFICATION_LINKED: ['This record is linked. Refresh it and use the shared editor or Unlink action.', '此记录已关联，请刷新并使用共享编辑器或解除关联。'],
   MODIFICATION_MANAGED: ['Shared modification records are managed through their linked vehicle.', '请通过已关联的车辆管理共享改装记录。'],
   MODIFICATION_ALREADY_LINKED: ['A selected vehicle is already linked. Refresh the selection.', '所选车辆已关联，请刷新选择。'],

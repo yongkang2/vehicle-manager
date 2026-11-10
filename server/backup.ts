@@ -3,7 +3,7 @@ import path from 'node:path'
 import { Transform } from 'node:stream'
 import unzipper from 'unzipper'
 import { AppError } from './team.js'
-import { Business, checksum, normalizeFields } from './business.js'
+import { Business, checksum, normalizeFields, validateEquipmentAttachmentRecords } from './business.js'
 import type { Actor, BusinessRecord, Change, Operation, QuarantinedOperation, RestoredHistoryImport, RestorePreview, RestoreResult, VehicleDeletion } from '../shared/business.js'
 import { businessFieldRegistry, validReportAssociation } from '../shared/business.js'
 import type { TeamDocument } from '../shared/types.js'
@@ -15,6 +15,7 @@ import { builtinComponentTypes, isProtectedKind, validateComponentTypeRecord, va
 import { collectChangeFileKeys, collectModificationImportFileKeys, collectRecordFileKeys, hasEnhancedModificationText, modificationFiles, modificationGroupId, modificationView, validateModificationFiles, validateModificationReceiptEntry, validateModificationRecords } from '../shared/modifications.js'
 import type { AbandonedModificationImport, ModificationImport, ModificationReceiptEntry } from '../shared/modifications.js'
 import { validateModificationFile } from './modification-files.js'
+import { parseEquipmentAttachmentId } from '../shared/equipment-attachments.js'
 
 export type ConfigurationReceiptEntry = { key: string; value: string }
 export type PendingConfigurationImport = { id: string; records: BusinessRecord[]; actor: Actor; reason: string; receipts: ConfigurationReceiptEntry[] }
@@ -347,7 +348,7 @@ export async function previewBackup(business: Business, bytes: Buffer, teamId: s
       vins.set(vin, record.id)
     }
     if (['vehicle', 'part', 'modification', 'equipment'].includes(record.kind)) {
-      const registry = record.kind === 'vehicle' ? businessFieldRegistry.vehicle : record.kind === 'part' ? businessFieldRegistry.part : record.kind === 'modification' ? businessFieldRegistry.modification : businessFieldRegistry.entry
+      const registry = record.kind === 'vehicle' ? businessFieldRegistry.vehicle : record.kind === 'part' ? businessFieldRegistry.part : record.kind === 'modification' ? businessFieldRegistry.modification : businessFieldRegistry.equipment
       const allowed = new Set<string>([...registry.active, ...registry.legacy, ...(record.kind === 'vehicle' ? ['photoAttachmentId'] : record.kind === 'modification' && manifest.format >= 5 ? ['groupId', 'attachments'] : [])])
       const fields = preservesManagedModification(record) ? [] : Object.keys(record.data).filter(field => !allowed.has(field))
       if (fields.length) droppedFields.push({ recordId: record.id, fields })
@@ -470,6 +471,7 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
     const prior = currentById.get(original.id)
     if (manifest.format < 5 && prior && managedModification(prior)) preservedManagedIds.add(original.id)
     const record = manifest.records[index] = normalizedBackupRecord(original, manifest.format, prior)
+    if (record.kind === 'attachment' && prior && (prior.kind !== 'attachment' || parseEquipmentAttachmentId(prior.data.equipmentId) !== parseEquipmentAttachmentId(record.data.equipmentId))) throw new AppError('INVALID_BACKUP', 422)
     if (record.kind === 'modificationGroup' && (!Number.isSafeInteger(record.version) || record.version < 1 || !timestamp(record.updated))) throw new AppError('INVALID_BACKUP', 422)
     const marker = markerByRecord.get(record.id)
     if (marker && marker.vehicleId !== (record.kind === 'vehicle' ? record.id : record.vehicleId)) throw new AppError('INVALID_BACKUP', 422)
@@ -499,6 +501,7 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
   // Vehicle rows are restored before children. Validate managed references against
   // the complete manifest first, rather than the old/current working database.
   const recordsById = new Map(manifest.records.map(record => [record.id, record]))
+  try { validateEquipmentAttachmentRecords(manifest.records) } catch { throw new AppError('INVALID_BACKUP', 422) }
   for (const report of manifest.records.filter(record => record.kind === 'report' && Object.hasOwn(record.data, 'association'))) {
     if (recordsById.get(report.vehicleId!)?.kind !== 'vehicle') throw new AppError('INVALID_BACKUP', 422)
   }
@@ -529,7 +532,8 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
   const modificationImport = prepareModificationImport(currentRecords, manifest.records, deletedIds, deletedVehicles, modReceipts, knownModificationReceipts(business), manifest.format, new Set(archiveRecordIds))
   if ((modificationImport.records.length || modificationImport.receipts.length) && (business.store.get<number>('businessProtocol') || 1) < 5) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
   const managedIds = new Set([...preservedManagedIds, ...modificationImport.records.map(record => record.id)])
-  const ordered = manifest.records.filter(record => !skippedIds.has(record.id) && !isProtectedKind(record.kind) && !managedModification(record) && !managedIds.has(record.id)).toSorted((left, right) => Number(right.kind === 'vehicle') - Number(left.kind === 'vehicle'))
+  const recordOrder = (record: BusinessRecord) => record.kind === 'vehicle' ? 0 : record.kind === 'equipment' ? 1 : record.kind === 'attachment' ? 3 : 2
+  const ordered = manifest.records.filter(record => !skippedIds.has(record.id) && !isProtectedKind(record.kind) && !managedModification(record) && !managedIds.has(record.id)).toSorted((left, right) => recordOrder(left) - recordOrder(right))
   const summary: RestoreResult = { changed: 0, skippedVehicles: skippedVehicleIds.length, skippedRecords: skipped.length, skippedVehicleIds }
   // Blobs are immutable; retain quarantined originals but never replay their operations.
   const blobKeys = new Set([...ordered, ...modificationImport.records].flatMap(collectRecordFileKeys))

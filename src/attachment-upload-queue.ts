@@ -1,5 +1,5 @@
 import type { BusinessRecord } from '../shared/business'
-import { ATTACHMENT_BATCH_LIMIT, attachmentFileError } from '../shared/attachments'
+import { ATTACHMENT_BATCH_LIMIT, ATTACHMENT_MAX_FILE_BYTES, attachmentFileError } from '../shared/attachments'
 import { ApiError } from './api'
 import type { createWorkspaceScope } from './api'
 
@@ -22,8 +22,8 @@ type Options = {
 }
 
 // Only explicit rejection codes are safe to retry: a lost response can follow a save.
-const rejected = new Set(['FILE_TYPE_NOT_ALLOWED', 'FILE_TOO_LARGE', 'FILE_REQUIRED', 'INVALID_INPUT', 'FILE_CORRUPTED', 'MAINTENANCE_IN_PROGRESS', 'SHARE_UNAVAILABLE', 'SHARE_ACCESS_DENIED', 'SHARE_BUSY'])
-const fatal = new Set(['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'ADMIN_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'WORKSPACE_NOT_FOUND', 'NOT_CONFIGURED', 'PARENT_ARCHIVED', 'RECORD_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND', 'NOT_FOUND', 'MODIFICATION_NOT_ENABLED', 'MODIFICATION_CHANGED', 'MODIFICATION_LINK_CHANGED', 'MODIFICATION_LINKED', 'MODIFICATION_MANAGED', 'MODIFICATION_STALE', 'MODIFICATION_LINKED_ONLINE_REQUIRED', 'MODIFICATION_PENDING_CHANGES', 'MODIFICATION_REQUEST_MISMATCH', 'VERSION_CONFLICT', 'CONFIRM_RESUME'])
+const rejected = new Set(['FILE_TYPE_NOT_ALLOWED', 'FILE_TOO_LARGE', 'FILE_REQUIRED', 'INVALID_INPUT', 'FILE_CORRUPTED', 'REASON_REQUIRED', 'MAINTENANCE_IN_PROGRESS', 'SHARE_UNAVAILABLE', 'SHARE_ACCESS_DENIED', 'SHARE_BUSY'])
+const fatal = new Set(['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'ADMIN_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'WORKSPACE_NOT_FOUND', 'NOT_CONFIGURED', 'REQUEST_CANCELLED', 'INVALID_REQUEST', 'PARENT_ARCHIVED', 'RECORD_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND', 'NOT_FOUND', 'MODIFICATION_NOT_ENABLED', 'MODIFICATION_CHANGED', 'MODIFICATION_LINK_CHANGED', 'MODIFICATION_LINKED', 'MODIFICATION_MANAGED', 'MODIFICATION_STALE', 'MODIFICATION_LINKED_ONLINE_REQUIRED', 'MODIFICATION_PENDING_CHANGES', 'MODIFICATION_REQUEST_MISMATCH', 'VERSION_CONFLICT', 'CONFIRM_RESUME'])
 const errorCode = (cause: unknown) => cause instanceof ApiError ? cause.message : 'SERVER_ERROR'
 
 /** A queue belongs to one vehicle and one authenticated workspace for its lifetime. */
@@ -108,6 +108,7 @@ export class AttachmentUploadQueue {
   }
 
   async run(mode: 'pending' | 'failed'): Promise<void> {
+    if (this.snapshot.inspectionRequired) return
     const targets = this.snapshot.rows.filter(row => row.status === mode)
     if (!targets.length) return
     const controller = this.begin()
@@ -116,12 +117,29 @@ export class AttachmentUploadQueue {
       for (const row of targets) {
         if (!this.current(controller)) break
         this.updateRow(row.id, { status: 'uploading', error: undefined })
+        let file: File
+        try {
+          // A selected File may become unreadable or change on disk. Read it
+          // before admitting a request so that failure cannot mean a server save.
+          const bytes = await row.file.arrayBuffer()
+          if (!this.current(controller)) break
+          if (bytes.byteLength !== row.file.size) throw new Error('File changed')
+          if (bytes.byteLength > ATTACHMENT_MAX_FILE_BYTES) {
+            this.updateRow(row.id, { status: 'invalid', error: 'FILE_TOO_LARGE' })
+            continue
+          }
+          file = new File([bytes], row.file.name, { type: row.file.type, lastModified: row.file.lastModified })
+        } catch {
+          if (!this.current(controller)) break
+          this.updateRow(row.id, { status: 'invalid', error: 'FILE_UNREADABLE' })
+          continue
+        }
         try {
           let record: { id: string; pauseForRefresh?: boolean }
-          if (this.options.uploadFile) record = await this.options.uploadFile(row.file, controller.signal)
+          if (this.options.uploadFile) record = await this.options.uploadFile(file, controller.signal)
           else {
             const body = new FormData()
-            body.append('file', row.file, row.file.name)
+            body.append('file', file, file.name)
             const uploaded = await this.options.scope.request<BusinessRecord>(`/api/business/vehicles/${encodeURIComponent(this.options.vehicleId)}/attachments`, { method: 'POST', body, signal: controller.signal })
             if (!uploaded || uploaded.kind !== 'attachment' || uploaded.vehicleId !== this.options.vehicleId) throw new ApiError('SERVER_ERROR')
             record = uploaded
@@ -135,7 +153,7 @@ export class AttachmentUploadQueue {
           const code = errorCode(cause), certain = cause instanceof ApiError && (rejected.has(code) || fatal.has(code))
           this.updateRow(row.id, { status: certain ? 'failed' : 'unknown', error: code })
           if (!certain) this.publish({ inspectionRequired: true })
-          if (fatal.has(code)) break
+          if (!certain || fatal.has(code)) break
         }
       }
       await this.reload(controller, false)

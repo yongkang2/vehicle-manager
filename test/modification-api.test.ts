@@ -71,7 +71,7 @@ test('modification HTTP fields, activation, Unicode filenames and ordinary-form 
     }
     const basic = await f.request(`/business/records/${view.record.id}`, 'PUT', { version: view.record.version, data: { ...view.record.data, notes: 'Legacy edit before activation' }, reason: 'Basic modification fields remain available' })
     assert.equal(basic.status, 200); view = await f.detail()
-    const equipment = await f.request('/business/records', 'POST', { kind: 'equipment', vehicleId: f.cars[0].id, data: { name: 'Equipment', requestor: 'Do not add this field' }, reason: 'Equipment stays unchanged' })
+    const equipment = await f.request('/business/records', 'POST', { kind: 'equipment', vehicleId: f.cars[0].id, data: { name: 'Equipment', equipmentType: 'Others', requestor: 'Do not add this field' }, reason: 'Equipment stays unchanged' })
     assert.equal(equipment.status, 201); assert.equal(equipment.data.data.requestor, undefined)
     assert.equal((await f.request(`${f.endpoint()}/files`, 'POST', form(view, 'request.txt'))).data.error, 'MODIFICATION_NOT_ENABLED')
     assert.equal((await f.request('/business/modifications/enable', 'POST', { requestId: randomUUID(), reason: 'Denied member activation' }, 'member')).status, 403)

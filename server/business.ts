@@ -3,12 +3,13 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { AppError } from './team.js'
 import { LocalStore } from './store.js'
-import { batteryLifeStatuses, businessFieldRegistry, complianceLevels, controllerTypes, entryFields, keyControllerName, modificationFields, partFields, vehicleFields } from '../shared/business.js'
+import { batteryLifeStatuses, businessFieldRegistry, complianceLevels, controllerTypes, equipmentFields, equipmentTypes, keyControllerName, modificationFields, partFields, vehicleFields } from '../shared/business.js'
 import { collectRecordFileKeys, hasEnhancedModificationText, modificationGroupId, validateModificationFiles } from '../shared/modifications.js'
 import type { ModificationFile } from '../shared/modifications.js'
 import { configurationFeatureFlags } from '../shared/business-features.js'
 import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind } from '../shared/business.js'
 import { parsePhotoAttachmentId, PHOTO_MAX_BYTES, PHOTO_MAX_DIMENSION, PHOTO_MAX_PIXELS } from '../shared/vehicle-photo.js'
+import { parseEquipmentAttachmentId } from '../shared/equipment-attachments.js'
 
 export const now = () => new Date().toISOString()
 export const checksum = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex')
@@ -20,8 +21,8 @@ export function normalizeVin(value: string): string { return value.toUpperCase()
 export function normalizeFields(kind: RecordKind, input: unknown): Fields {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('INVALID_INPUT')
   const source = input as Fields
-  const names = kind === 'vehicle' ? vehicleFields : kind === 'part' ? partFields : kind === 'modification' ? modificationFields : kind === 'equipment' ? entryFields : null
-  const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : businessFieldRegistry.entry.legacy
+  const names = kind === 'vehicle' ? vehicleFields : kind === 'part' ? partFields : kind === 'modification' ? modificationFields : kind === 'equipment' ? equipmentFields : null
+  const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : kind === 'equipment' ? businessFieldRegistry.equipment.legacy : businessFieldRegistry.entry.legacy
   if (!names) throw new AppError('INVALID_INPUT')
   const data: Fields = {}
   for (const field of names) {
@@ -60,6 +61,7 @@ export function normalizeFields(kind: RecordKind, input: unknown): Fields {
     }
   }
   if (kind === 'part' && data.category === 'controller') data.name = keyControllerName(data.name) || data.name
+  if (kind === 'equipment' && data.equipmentType && !equipmentTypes.some(value => value === data.equipmentType)) throw new AppError('INVALID_INPUT')
   return data
 }
 
@@ -79,6 +81,16 @@ export function validateManualPartFields(kind: RecordKind, input: unknown, curre
 }
 
 export function validateManualRecordFields(kind: RecordKind, input: unknown, current?: BusinessRecord): void {
+  if (kind === 'equipment') {
+    const data = normalizeFields(kind, input)
+    if (data.equipmentType) return
+    // A real blank-to-date removal does not force legacy equipment classification.
+    if (current?.kind === 'equipment' && !String(current.data.removedAt ?? '').trim() && data.removedAt) {
+      const before = normalizeFields(kind, current.data)
+      if (equipmentFields.every(field => field === 'removedAt' || before[field] === data[field])) return
+    }
+    throw new AppError('EQUIPMENT_TYPE_REQUIRED')
+  }
   if (kind !== 'vehicle') return validateManualPartFields(kind, input, current)
   // Ordinary vehicle edits ignore this server-managed reference, just as write()
   // does. Classification validation must not give callers a new photo-write path.
@@ -88,6 +100,20 @@ export function validateManualRecordFields(kind: RecordKind, input: unknown, cur
 }
 export type RecordRow = { id: string; kind: RecordKind; vehicle_id: string | null; data: string; archived: number; version: number; updated: string }
 export function fromRow(row: RecordRow): BusinessRecord { return { id: row.id, kind: row.kind, vehicleId: row.vehicle_id, data: JSON.parse(row.data), archived: Boolean(row.archived), version: row.version, updated: row.updated } }
+
+/** Validate references against the entire working graph, including archived data. */
+export function validateEquipmentAttachmentRecords(records: readonly BusinessRecord[]): void {
+  const byId = new Map(records.map(record => [record.id, record]))
+  for (const record of records) {
+    if (record.kind !== 'attachment') continue
+    if (!record.data || typeof record.data !== 'object' || Array.isArray(record.data)) throw new AppError('INVALID_INPUT', 409)
+    const equipmentId = parseEquipmentAttachmentId(record.data.equipmentId)
+    if (equipmentId === null) throw new AppError('INVALID_INPUT', 409)
+    if (!equipmentId) continue
+    const equipment = byId.get(equipmentId)
+    if (!equipment || equipment.kind !== 'equipment' || !record.vehicleId || equipment.vehicleId !== record.vehicleId || byId.get(record.vehicleId)?.kind !== 'vehicle' || record.data.purpose === 'vehiclePhoto') throw new AppError('INVALID_INPUT', 409)
+  }
+}
 
 export class Business {
   constructor(readonly store: LocalStore) {}
@@ -149,7 +175,7 @@ export class Business {
         }
       }
       if (before) {
-        const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : businessFieldRegistry.entry.legacy
+        const legacyNames = kind === 'vehicle' ? businessFieldRegistry.vehicle.legacy : kind === 'part' ? businessFieldRegistry.part.legacy : kind === 'equipment' ? businessFieldRegistry.equipment.legacy : businessFieldRegistry.entry.legacy
         if (!internal && maintenance !== 'restore') for (const field of legacyNames) {
           if (Object.hasOwn(before.data, field)) normalized[field] = before.data[field]
           else delete normalized[field]
@@ -173,6 +199,18 @@ export class Business {
         else delete normalized.photoAttachmentId
       }
       const targetArchived = archived ?? before?.archived ?? false
+      if (kind === 'attachment') {
+        const equipmentId = parseEquipmentAttachmentId(normalized.equipmentId)
+        if (equipmentId === null || equipmentId && normalized.purpose === 'vehiclePhoto') throw new AppError('INVALID_INPUT')
+        if (before && parseEquipmentAttachmentId(before.data.equipmentId) !== equipmentId) throw new AppError('INVALID_INPUT')
+        if (equipmentId) {
+          const equipment = this.get(equipmentId)
+          if (equipment.kind !== 'equipment' || equipment.vehicleId !== vehicleId) throw new AppError('INVALID_INPUT')
+          // Retained files can be archived/restored after their equipment is
+          // archived; only a newly admitted upload requires active equipment.
+          if (!before && maintenance !== 'restore' && equipment.archived) throw new AppError('RECORD_ARCHIVED', 409)
+        }
+      }
       if (kind === 'vehicle' && targetArchived && !before?.archived) {
         const linked = this.store.db.prepare("SELECT data FROM records WHERE vehicle_id=? AND kind='modification' AND archived=0").all(id).some(row => Boolean(JSON.parse(String(row.data)).groupId))
         if (linked) throw new AppError('MODIFICATION_LINKED', 409)
