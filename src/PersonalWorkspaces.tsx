@@ -35,7 +35,7 @@ export default function PersonalWorkspaces({ open, text, status, onClose, onConn
     })
   }
   return <><Drawer title={text.personal} open={open} onClose={onClose} size={480} className="personal-drawer">
-    <div className="personal-heading"><h2>{text.myTeams}</h2><Button type="text" aria-label={text.refresh} title={text.refresh} icon={<RefreshCw size={17} />} loading={busy} onClick={() => void load()} /></div>
+    <div className="personal-heading"><h2>{text.myTeams}</h2><Button type="text" size="small" aria-label={text.refresh} title={text.refresh} icon={<RefreshCw size={17} />} loading={busy} onClick={() => void load()} /></div>
     {busy && <Spin />}{!busy && !teams.length && <Empty description={text.noTeams} />}
     <div className="personal-team-list">{teams.map(team => <div className="personal-team" key={team.id}><div className="personal-team-heading"><strong>{team.name}</strong>{team.selected && <Tag icon={<Check size={13} />}>{text.currentTeam}</Tag>}</div><small className="personal-path">{team.sharedPath}</small><small className="personal-team-id">{team.id}</small><div className="personal-team-state"><Tag>{labels[team.access]}</Tag><span>{text.pendingChanges}: {team.pending}</span><span>{text.conflictCount}: {team.conflicts}</span></div>{!team.selected && <Button icon={<ArrowRightLeft size={16} />} disabled={busy} onClick={() => { setRetain(false); setTarget(team) }}>{text.selectTeam}</Button>}</div>)}</div>
     <div className="personal-commands"><div className="personal-workspace-actions"><Button icon={<FolderPlus size={17} />} disabled={busy} onClick={() => modal.confirm({ title: text.connectTeam, content: text.switchWarning, okText: text.save, cancelText: text.cancel, onOk() { onClose(); onConnect() } })}>{text.connectTeam}</Button>

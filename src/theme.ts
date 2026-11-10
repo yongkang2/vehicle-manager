@@ -6,6 +6,8 @@ export const palette = {
 
 export const fontFamily = '"Segoe UI", "Microsoft YaHei UI", sans-serif'
 
+export const buttonTheme = { primaryShadow: 'none', defaultShadow: 'none', dangerShadow: 'none', contentFontSizeSM: 13 }
+
 export function installThemeTokens() {
   for (const [name, value] of Object.entries(palette)) document.documentElement.style.setProperty(`--${name}`, value)
 }

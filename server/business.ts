@@ -125,7 +125,10 @@ export class Business {
     return fromRow(row)
   }
   list(kind?: RecordKind, vehicleId?: string): BusinessRecord[] {
-    return (this.store.db.prepare('SELECT * FROM records ORDER BY updated DESC,id').all() as RecordRow[]).filter(row => (!kind || row.kind === kind) && (!vehicleId || row.vehicle_id === vehicleId) && !this.store.deletionFor(row.id, row.vehicle_id)).map(fromRow)
+    const conditions: string[] = [], parameters: string[] = []
+    if (kind) { conditions.push('kind=?'); parameters.push(kind) }
+    if (vehicleId) { conditions.push('vehicle_id=?'); parameters.push(vehicleId) }
+    return (this.store.db.prepare(`SELECT * FROM records${conditions.length ? ` WHERE ${conditions.join(' AND ')}` : ''} ORDER BY updated DESC,id`).all(...parameters) as RecordRow[]).filter(row => !this.store.deletionFor(row.id, row.vehicle_id)).map(fromRow)
   }
   history(vehicleId?: string): Change[] {
     return this.store.db.prepare('SELECT payload FROM changes WHERE (? IS NULL OR vehicle_id=?) ORDER BY created DESC,rowid DESC LIMIT 1000').all(vehicleId || null, vehicleId || null).map(row => JSON.parse(row.payload as string) as Change)

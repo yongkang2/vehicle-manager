@@ -106,7 +106,7 @@ test('protocol-4 background HEAD checks reject downgrades and ingest pending con
   const recovered = await f.request<WorkspaceSnapshot>('/business/workspace')
   assert.equal(open.mock.callCount(), 2, 'a history-only restore also bypasses the cached HEAD')
   assert.equal(recovered.data.sync.pending, 0)
-  assert(recovered.data.data!.changes.some(change => change.id === historical.id))
+  assert.equal((await f.request<Change>(`/business/history/changes/${historical.id}`)).data.id, historical.id)
   assert.deepEqual(f.workspace.store.get('pendingHistoryImports'), [])
 
   const before = open.mock.callCount(), bytes = await fs.readFile(f.headPath, 'utf8'), head = JSON.parse(bytes)

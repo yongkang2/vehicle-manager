@@ -1,4 +1,10 @@
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  readonly requestId: string | undefined
+  constructor(code: string, requestId?: string | null) {
+    super(code)
+    this.requestId = requestId && /^[a-f0-9-]{36}$/.test(requestId) ? requestId : undefined
+  }
+}
 let workspaceToken: string | null = null
 let workspaceGeneration = 0
 const headersFor = () => ({ 'X-App-Request': 'vehicle-manager', ...(workspaceToken ? { 'X-Workspace-Token': workspaceToken } : {}) })
@@ -8,7 +14,7 @@ export async function api<T>(url: string, options: { method?: string; body?: unk
   try { response = await fetch(url, { method: options.method || 'GET', headers: { ...headersFor(), ...(options.body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: options.body ? form ? options.body as FormData : JSON.stringify(options.body) : undefined }) }
   catch { throw new ApiError('NETWORK_ERROR') }
   const result = await response.json().catch(() => ({ error: 'SERVER_ERROR' }))
-  if (!response.ok) throw new ApiError(result.error || 'SERVER_ERROR')
+  if (!response.ok) throw new ApiError(result.error || 'SERVER_ERROR', response.headers.get('x-request-id'))
   const token = response.headers.get('x-workspace-token')
   if (token) {
     if (!workspaceToken || ['/api/login', '/api/register', '/api/setup/configure', '/api/workspaces/select', '/api/workspaces/disconnect'].includes(url)) { workspaceToken = token; workspaceGeneration += 1 }
@@ -48,7 +54,7 @@ export function createWorkspaceScope() {
       throw new ApiError('SERVER_ERROR')
     }
     assertCurrent(signal)
-    if (!response.ok) throw new ApiError(typeof result === 'object' && result !== null && 'error' in result && typeof result.error === 'string' ? result.error : 'SERVER_ERROR')
+    if (!response.ok) throw new ApiError(typeof result === 'object' && result !== null && 'error' in result && typeof result.error === 'string' ? result.error : 'SERVER_ERROR', response.headers.get('x-request-id'))
     return result as T
   }
   return {
@@ -84,7 +90,7 @@ export async function download(url: string, filename: string, options: { method?
     throw new ApiError('NETWORK_ERROR')
   })
   assertCurrent()
-  if (!response.ok) { const result = await response.json().catch(() => ({ error: 'SERVER_ERROR' })); assertCurrent(); throw new ApiError(result.error || 'SERVER_ERROR') }
+  if (!response.ok) { const result = await response.json().catch(() => ({ error: 'SERVER_ERROR' })); assertCurrent(); throw new ApiError(result.error || 'SERVER_ERROR', response.headers.get('x-request-id')) }
   if (initiatingToken && response.headers.get('x-workspace-token') !== initiatingToken) throw new ApiError('WORKSPACE_CHANGED')
   const blob = await response.blob()
   assertCurrent()

@@ -52,11 +52,11 @@ export class History {
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
     const from = "FROM changes LEFT JOIN records vehicle ON vehicle.id=changes.vehicle_id AND vehicle.kind='vehicle'"
-    return { where, from, values }
+    return { where, from, queryFrom: q ? from : 'FROM changes', values }
   }
 
   query(input: HistoryFilters) {
-    const { where, from, values } = this.selection(input)
+    const { where, queryFrom: from, values } = this.selection(input)
     const pageText = text(input.page, 20) || '1', page = Number(pageText)
     if (!/^[1-9]\d*$/.test(pageText) || !Number.isSafeInteger(page) || !Number.isSafeInteger(page * 50)) throw new AppError('INVALID_INPUT')
     const total = Number(this.store.db.prepare(`SELECT count(*) AS total ${from} ${where}`).get(...values)!.total)

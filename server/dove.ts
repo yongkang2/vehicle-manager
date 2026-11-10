@@ -63,7 +63,11 @@ export class DoveService {
     if (bytes.length > DOVE_MAX_FILE_BYTES) throw new AppError('FILE_TOO_LARGE', 413)
     this.active++
     let parsed: DoveData
-    try { parsed = await parseIsolated(bytes) } finally { this.active-- }
+    const started = performance.now()
+    try { parsed = await parseIsolated(bytes) } catch (error) {
+      this.business.store.diagnostics.write('warn', 'parser.failed', { bytes: bytes.length, durationMs: Math.round(performance.now() - started), code: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }, error)
+      throw error
+    } finally { this.active-- }
     for (const [id, draft] of this.drafts) if (draft.expires < Date.now()) this.drafts.delete(id)
     while (this.drafts.size >= DOVE_BATCH_LIMIT) this.drafts.delete(this.drafts.keys().next().value!)
     const draft: Draft = { id: randomUUID(), owner, filename, bytes, parsed, checksum: checksum(bytes), expires: Date.now() + 30 * 60 * 1000, vehicleId: null }

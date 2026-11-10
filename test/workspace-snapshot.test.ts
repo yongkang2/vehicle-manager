@@ -40,7 +40,16 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   await admin.synchronization.settle()
   const first = await request(member, '/business/workspace')
   assert.equal(first.status, 200); assert.equal(first.data.data.records[0].id, car.id)
-  assert.ok(first.data.data.changes.length)
+  assert.equal('changes' in first.data.data, false)
+  const memberWorkspace = member.workspaces.get(teamId)
+  const originalChange = memberWorkspace.store.db.prepare('SELECT * FROM changes LIMIT 1').get()!
+  const payload = JSON.parse(String(originalChange.payload)); payload.id = 'history-only'; payload.reason = 'History-only refresh fixture'
+  memberWorkspace.store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(payload.id, String(originalChange.record_id), String(originalChange.vehicle_id), JSON.stringify(payload), String(originalChange.created))
+  const historyOnly = await request(member, `/business/workspace?local=1&known=${first.data.revision}`)
+  assert(historyOnly.data.data, 'A history-only insertion must invalidate the workspace fingerprint')
+  assert(!('changes' in historyOnly.data.data), 'No full history payload returns')
+  assert.deepEqual(historyOnly.data.data.records, first.data.data.records)
+  first.data.revision = historyOnly.data.revision
   const open = t.mock.method(SharedBusinessSnapshot, 'open')
   const unchanged = await request(member, `/business/workspace?known=${first.data.revision}`)
   assert.equal(unchanged.status, 200); assert.equal(unchanged.data.data, undefined)
