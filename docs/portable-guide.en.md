@@ -1,6 +1,6 @@
 # Vehicle Manager: Portable User Guide
 
-This guide covers application **1.6.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+This guide covers application **1.7.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
 
 ## Installation
 
@@ -59,7 +59,7 @@ After all collaborating installations upgrade, an administrator can enable confi
 
 Administrators can disable, remove or restore any configuration component type, including the four built-ins. This changes future revision reviews only: vehicle sections, installed components and published history remain available. Removed types can be found through Show removed and restored with their original identity. Catalog changes invalidate open reviews. Published revisions stay read-only; corrections create another revision.
 
-Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.6.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
+Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.7.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
 
 
 ## Backups and upgrades
@@ -91,3 +91,13 @@ Restore history and results are local administrator records. Durable request IDs
 Modification restores publish the reviewed group and memberships together. Compare-and-swap checks compare the reviewed base states and shared group version before publication; a newer shared change stops publication instead of overwriting it. The unpublished payload and referenced files remain available in **Restore history**. Use **Export retained payload** to preserve a review copy, then **Retain and review again** with a reason to retain the attempted payload and refresh canonical shared data. This requires an online administrator with synchronization resumed. Create a fresh backup preview before another restore; the retained ZIP is recovery evidence, not an automatic replay action. Older backups cannot silently replace or detach an existing managed modification group.
 
 Backup reminder: the overview menu contains Back up data, Restore data and Restore history. Online administrators are reminded when the team has no recorded backup or the last completed team-backup transfer was at least seven days ago. Completion time is shared by the team. Remind me tomorrow suppresses the prompt for the administrator on this device for the current local calendar day; work remains available. Local exports and automatic pre-restore safety copies do not reset the timer. Completed HTTP transfer does not verify where the browser saved the file. Old versions do not record completion, so collaborating administrators should use the updated application for reliable reminders.
+
+## Troubleshooting evidence
+
+When an operation fails, note its time/timezone, action, application version and error. Local diagnostics are stored in the data directory under `logs/diagnostics.jsonl` with up to three numbered archives (2 MiB each). The default directory is `%LOCALAPPDATA%\VehicleManager\data`; `VEHICLE_MANAGER_DATA_DIR` overrides it. In browser developer tools, the failed request's `X-Request-Id` response header identifies matching diagnostic entries. An offline browser request that never reaches the service has no server ID.
+
+For startup failures, also preserve `startup.log` in the data directory and `launcher.log` beside the launcher. Review legacy logs for sensitive paths before sharing. Share only needed evidence through approved channels; do not send passwords, cookies, tokens, request bodies or a copy of your database. New structured diagnostics omit those values and business content. Log storage failures do not prevent normal operations, but evidence can be missing. No diagnostics are uploaded automatically.
+
+Before retrying a write after an uncertain response, refresh and inspect its result. Do not delete the database, originals, shared snapshots or locks to fix a logging problem.
+
+Startup text logs now prefix each new stdout/stderr line and each launcher error/stack line with an ISO 8601 UTC timestamp (`Z`) and its source. The service preloads timestamp handling before the main module, keeps it after a detached launcher exits, and still exits with failure on uncaught exceptions. Existing historical log lines are preserved unchanged; timestamps cannot be reconstructed retrospectively.

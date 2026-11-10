@@ -1,3 +1,4 @@
+import { Diagnostics } from './diagnostics.js'
 import { DatabaseSync } from 'node:sqlite'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync } from 'node:fs'
@@ -94,7 +95,7 @@ export class LocalStore {
   readonly db: DatabaseSync
   readonly deviceId: string
   readonly deviceName = hostname()
-  constructor(readonly directory: string, deviceId?: string) {
+  constructor(readonly directory: string, deviceId?: string, readonly diagnostics = new Diagnostics(directory)) {
     mkdirSync(directory, { recursive: true })
     this.db = new DatabaseSync(path.join(directory, 'local.sqlite'))
     try {

@@ -568,6 +568,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     res.json(result)
   })
   app.use('/api/business', router)
+  let pollError: string | null = null
   async function tick() {
     const configuration = store.get<Config>('configuration')
     if (!configuration) return
@@ -575,7 +576,12 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       const team = await teams.read(configuration.sharedPath, configuration.teamId); cache(team)
       const binding = team.bindings.find(item => item.deviceId === store.deviceId && item.enabled && team.members.some(member => member.id === item.memberId && member.enabled) && accounts.db.prepare('SELECT 1 FROM sessions WHERE user_id=? AND workspace_id=? AND sync_enabled=1 AND expires>?').get(item.localUserId, configuration.teamId, Date.now()))
       if (binding) await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' }, { ifChanged: true })
-    } catch { return }
+    } catch (error) {
+      const code = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
+      if (code !== pollError) store.diagnostics.write('warn', 'workspace.poll_failed', { code }, error)
+      pollError = code; return
+    }
+    if (pollError) { store.diagnostics.write('info', 'workspace.poll_recovered'); pollError = null }
   }
   return { business, synchronization, configurationRevisions, tick }
 }

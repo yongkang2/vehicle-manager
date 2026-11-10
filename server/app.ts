@@ -1,8 +1,9 @@
+import { Diagnostics, diagnosticContext } from './diagnostics.js'
 import express from 'express'
 import type { Request, Response } from 'express'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { LocalStore } from './store.js'
@@ -25,13 +26,31 @@ function role(value: unknown): Role {
   return value
 }
 
-export function createApp({ dataDir, staticDir, controlToken, onShutdown, browserPresence, presenceToken }: { dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void; browserPresence?: BrowserPresence; presenceToken?: string }) {
-  const store = new LocalStore(dataDir)
+export function createApp({ dataDir, staticDir, controlToken, onShutdown, browserPresence, presenceToken, diagnostics = new Diagnostics(dataDir) }: { diagnostics?: Diagnostics; dataDir: string; staticDir?: string; controlToken?: string; onShutdown?: () => void; browserPresence?: BrowserPresence; presenceToken?: string }) {
+  const store = new LocalStore(dataDir, undefined, diagnostics)
   const teams = new TeamDirectory(store.get<TeamDocument>('cachedTeam'))
   const workspaces = new Workspaces(store)
   const active = new Map<string, number>(), switching = new Set<string>()
   const app = express()
   app.disable('x-powered-by')
+  app.use((req, res, next) => {
+    const diagnosticPath = req.path.toLowerCase().replace(/\/+$/, '')
+    if (diagnosticPath !== '/api' && !diagnosticPath.startsWith('/api/')) return next()
+    const requestId = randomUUID(), started = performance.now()
+    res.set('X-Request-Id', requestId)
+    const method = req.method, authRoute = ['/api/login', '/api/register', '/api/logout'].includes(diagnosticPath) ? diagnosticPath : null
+    let recorded = false
+    const record = (aborted: boolean) => {
+      if (recorded) return
+      recorded = true
+      const durationMs = Math.round(performance.now() - started), status = aborted ? 499 : res.statusCode
+      const route = authRoute || (req.route?.path && typeof req.route.path === 'string' ? `/api${req.route.path.startsWith('/api/') ? req.route.path.slice(4) : `/business${req.route.path}`}` : '/api/unmatched')
+      if (status >= 400 || durationMs >= 2000 || authRoute) store.diagnostics.write(status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info', aborted ? 'request.aborted' : authRoute && status < 400 ? 'auth.succeeded' : status >= 400 ? 'request.failed' : 'request.slow', { requestId, method, route, status, durationMs, code: res.locals.diagnosticCode }, res.locals.diagnosticError)
+    }
+    res.once('finish', () => record(false))
+    res.once('close', () => record(!res.writableFinished))
+    diagnosticContext.run({ requestId }, next)
+  })
   app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null, 'img-src': ["'self'", 'data:', 'blob:'] } } }))
   app.use((req, res, next) => {
     if (!['localhost', '127.0.0.1', '[::1]'].includes(req.hostname)) return next(new AppError('HOST_NOT_ALLOWED', 403))
@@ -53,7 +72,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     if (!['GET', 'HEAD'].includes(req.method) && req.get('X-App-Request') !== 'vehicle-manager') return next(new AppError('INVALID_REQUEST', 403))
     next()
   })
-  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, legacyHeaders: false, standardHeaders: 'draft-8', message: { error: 'TOO_MANY_ATTEMPTS' } })
+  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, legacyHeaders: false, standardHeaders: 'draft-8', handler: (_req, res) => { res.locals.diagnosticCode = 'TOO_MANY_ATTEMPTS'; res.status(429).json({ error: 'TOO_MANY_ATTEMPTS' }) } })
   function userOf(account: Account): LocalUser { return { id: account.id, username: account.username, displayName: account.display_name } }
   function session(res: Response, account: Account): void {
     const token = randomBytes(32).toString('hex')
@@ -141,6 +160,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     if (!config) throw new AppError('NOT_CONFIGURED', 409)
     return config
   }
+  const statusErrors = new Map<string, string>()
   async function status(req: AuthRequest): Promise<Status> {
     const session = workspaces.session(req.sessionToken!), workspace = session.workspace_id ? workspaces.get(session.workspace_id) : null
     const readStatus = async (): Promise<Status> => {
@@ -149,6 +169,13 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       if (config && workspace) {
         try { team = await workspace.teams.read(config.sharedPath, config.teamId); workspace.cache(team); online = true }
         catch (failure) { error = failure instanceof AppError ? failure.code : 'SHARE_IO_ERROR'; team = workspace.store.get<TeamDocument>('cachedTeam') }
+      }
+      if (workspace) {
+        const previous = statusErrors.get(workspace.row.id)
+        if (error && previous !== error) store.diagnostics.write('warn', 'workspace.status_failed', { code: error })
+        else if (!error && previous) store.diagnostics.write('info', 'workspace.status_recovered')
+        if (error) statusErrors.set(workspace.row.id, error)
+        else statusErrors.delete(workspace.row.id)
       }
       const { member, binding } = team ? bindingFor(team, identity(req)) : {}
       const request = team?.requests.filter(item => item.identity.deviceId === store.deviceId && item.identity.localUserId === req.localUser!.id).at(-1)
@@ -309,12 +336,13 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     app.get('/', (req, res) => res.sendFile(path.join(staticDir, 'index.html')))
   }
   app.use((error: unknown, req: Request, res: Response, next: express.NextFunction) => {
-    if (res.headersSent) return next(error)
+    res.locals.diagnosticError = error
+    res.locals.diagnosticCode = error instanceof AppError ? error.code : (error as { type?: string }).type === 'entity.parse.failed' ? 'INVALID_INPUT' : (error as { code?: string }).code === 'LIMIT_FILE_SIZE' ? 'FILE_TOO_LARGE' : String((error as Error).message).includes('UNIQUE constraint') ? 'VIN_EXISTS' : 'SERVER_ERROR'
+    if (res.headersSent) { store.diagnostics.write('error', 'request.stream_failed', { requestId: res.getHeader('X-Request-Id') }, error); return next(error) }
     if (error instanceof AppError) return res.status(error.status).json({ error: error.code })
     if ((error as { code?: string }).code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'FILE_TOO_LARGE' })
     if (String((error as Error).message).includes('UNIQUE constraint')) return res.status(409).json({ error: 'VIN_EXISTS' })
     if ((error as { type?: string }).type === 'entity.parse.failed') return res.status(400).json({ error: 'INVALID_INPUT' })
-    console.error('Request failed:', error instanceof Error ? error.name : 'Unknown error')
     res.status(500).json({ error: 'SERVER_ERROR' })
   })
   return { app, store, business: new Business(store), workspaces, tick: () => workspaces.tick(), synchronization: { settle: () => workspaces.settle() }, close: () => workspaces.close() }

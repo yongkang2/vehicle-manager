@@ -20,7 +20,7 @@ export class Workspaces {
   private assertOpen(): void { if (this.closing) throw new AppError('MAINTENANCE_IN_PROGRESS', 503) }
   private open(row: WorkspaceRow) {
     const directory = path.resolve(this.root.directory, row.directory)
-    const store = directory === path.resolve(this.root.directory) ? this.root : new LocalStore(directory, this.root.deviceId)
+    const store = directory === path.resolve(this.root.directory) ? this.root : new LocalStore(directory, this.root.deviceId, this.root.diagnostics)
     const teams = new TeamDirectory(store.get<TeamDocument>('cachedTeam'))
     const cache = (team: TeamDocument) => {
       if (team.id !== row.id) throw new AppError('WRONG_TEAM', 409)

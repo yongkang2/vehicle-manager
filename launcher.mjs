@@ -82,7 +82,7 @@ async function launch() {
         let child
         try {
           child = fork(entry, [], {
-            cwd: application, execArgv: [], detached: !managed, windowsHide: true, stdio: ['ignore', log, log, 'ipc'],
+            cwd: application, execArgv: ['--import', pathToFileURL(path.join(application, 'dist-server', 'server', 'timestamp-output.js')).href], detached: !managed, windowsHide: true, stdio: ['ignore', log, log, 'ipc'],
             env: { ...process.env, PORT: String(candidate), VEHICLE_MANAGER_DATA_DIR: dataDir },
           })
           if (managed) managedExit = new Promise(resolve => child.once('exit', code => resolve(code ?? 1)))
@@ -118,6 +118,8 @@ async function main() {
 
 if (path.resolve(process.argv[1] || '') === fileURLToPath(import.meta.url)) main().catch(async error => {
   console.error(error.message)
-  try { await fs.appendFile(path.join(root, 'launcher.log'), `${new Date().toISOString()} ${error.stack}\n`) } catch { }
+  const stamp = new Date().toISOString()
+  const lines = String(error.stack || error).split(/\r?\n/).map(line => `[${stamp}] [launcher] ${line}`).join('\n')
+  try { await fs.appendFile(path.join(root, 'launcher.log'), `${lines}\n`) } catch { }
   process.exitCode = 1
 })
