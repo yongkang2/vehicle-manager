@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { WorkspaceLoader } from '../src/workspace-loader.js'
 import type { WorkspaceSnapshot } from '../shared/workspace.js'
 
-const snapshot = (revision: string, data = true): WorkspaceSnapshot => ({ revision, ...(data ? { data: { records: [], catalog: { enabled: false, types: [] }, revisionSummaries: [], audit: [], quarantined: [] } } : {}), sync: { phase: 'ready', pending: 0, error: null, conflicts: [], quarantined: 0, revision: 'shared', lastSync: null } })
+const snapshot = (revision: string, data = true): WorkspaceSnapshot => ({ revision, ...(data ? { data: { historyRevision: 0, records: [], catalog: { enabled: false, types: [] }, revisionSummaries: [], audit: [], quarantined: [] } } : {}), sync: { phase: 'ready', pending: 0, error: null, conflicts: [], quarantined: 0, revision: 'shared', lastSync: null } })
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
 test('shows local data before a slow shared refresh and requests only changes on later polls', async () => {

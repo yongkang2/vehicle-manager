@@ -130,12 +130,23 @@ export class LocalStore {
       } else {
         this.set('deviceId', selectedDevice); this.set('machine', this.deviceName)
       }
-      // Derived indexes are additive and preserve the published database schema.
-      this.db.exec(`CREATE INDEX IF NOT EXISTS changes_created ON changes(created DESC);
-        CREATE INDEX IF NOT EXISTS changes_vehicle_created ON changes(vehicle_id,created DESC);
-        CREATE INDEX IF NOT EXISTS changes_day ON changes(julianday(CASE WHEN created <> 'now' THEN created END));
-        CREATE INDEX IF NOT EXISTS changes_vehicle_day ON changes(vehicle_id,julianday(CASE WHEN created <> 'now' THEN created END));
-        CREATE INDEX IF NOT EXISTS changes_vehicle_kind_created ON changes(vehicle_id,json_extract(payload,'$.kind'),created DESC);`)
+      // Ascending created + implicit rowid lets reverse scans satisfy both DESC terms.
+      this.transaction(() => {
+        for (const [name, columns] of [
+          ['changes_created', 'created'],
+          ['changes_vehicle_created', 'vehicle_id,created'],
+          ['changes_vehicle_kind_created', "vehicle_id,json_extract(payload,'$.kind'),created"],
+        ]) {
+          const previous = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=?").get(name)
+          if (previous && /created\s+DESC/i.test(String(previous.sql))) this.db.exec(`DROP INDEX ${name}`)
+          this.db.exec(`CREATE INDEX IF NOT EXISTS ${name} ON changes(${columns})`)
+        }
+        this.db.exec(`CREATE INDEX IF NOT EXISTS changes_day ON changes(julianday(CASE WHEN created <> 'now' THEN created END));
+          CREATE INDEX IF NOT EXISTS changes_vehicle_day ON changes(vehicle_id,julianday(CASE WHEN created <> 'now' THEN created END));
+`)
+        // Local derived invalidation metadata; never copied into shared snapshots or backups.
+        for (const action of ['INSERT', 'UPDATE', 'DELETE']) this.db.exec(`CREATE TRIGGER IF NOT EXISTS changes_revision_${action.toLowerCase()} AFTER ${action} ON changes BEGIN INSERT INTO settings VALUES('historyRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+      })
       this.deviceId = selectedDevice
     } catch (error) { this.db.close(); throw error }
   }
