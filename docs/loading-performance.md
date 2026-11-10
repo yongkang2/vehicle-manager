@@ -9,3 +9,11 @@ Background synchronization still acquires the shared lock and verifies the curre
 The loading optimization requires no additional database schema, shared protocol or backup format changes; the integrated application retains schema 5 and configuration-review protocols 3/4. Existing write version checks, conflict handling, paused-session rules and permanent-deletion protection remain in place. Local-first display can briefly show the last synchronized state until the shared check finishes, and still requires a current access check (with the existing offline fallback).
 
 Validation includes unchanged polling, local/remote edits, conflicts, revoked membership, rollback and malformed HEAD detection, failed attachment retry, periodic and explicit full validation, delayed shared synchronization, paused sessions, remote deletion, stale workspace requests and out-of-order UI responses. Actual latency over the team's Windows network share still needs acceptance testing; local tests do not establish a speedup percentage.
+
+## Shared-folder read refinement (2026-11-10)
+
+Revision history and detail viewing now read the authorized local copy without initiating business synchronization. The revision Refresh button sends `full=1` and retains full shared synchronization. Preview and publication retain their existing locked checks. Per-request roster access, full configuration integrity validation, permanent deletion guards and photo hash/format/final-access checks remain unchanged. Local viewing can show the last synchronized revision until explicit refresh.
+
+Workspace snapshots no longer include the unused `changes` array (up to 1,000 full audit payloads); audit reading remains on the existing paginated history APIs. Record filters are parameterized SQL and still apply canonical deletion filtering. Revision queries reuse a single local record snapshot. Ordinary vehicle version changes no longer remount an unchanged photo; no persistent photo or permission cache was introduced. Original files and no-store HTTP responses are preserved.
+
+Regression evidence checks zero synchronization calls for ordinary revision history/detail, full synchronization on explicit refresh, rejection after canonical membership revocation and omission of unused history from workspace responses. These checks do not establish real SMB latency or a speedup percentage.

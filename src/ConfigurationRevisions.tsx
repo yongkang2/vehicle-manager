@@ -44,10 +44,10 @@ export default function ConfigurationRevisions({ vehicle, records, language, onl
   const isCurrent = () => active.current && !controller.current.signal.aborted
   const finishBusy = useEffectEvent(() => { previewSequence.current++; if (admitted.current) { admitted.current = false; onBusyChange(false) } })
   useEffect(() => { active.current = true; if (controller.current.signal.aborted) controller.current = new AbortController(); const current = controller.current; return () => { active.current = false; current.abort(); finishBusy() } }, [])
-  async function loadHistory() {
+  async function loadHistory(full = false) {
     if (!catalog.enabled) { setHistory([]); return }
     const sequence = ++historySequence.current; setLoading(true)
-    try { const result = await scope.request<ConfigurationRevisionSummary[]>(endpoint, { signal: controller.current.signal }); if (isCurrent() && historySequence.current === sequence) setHistory(result) }
+    try { const result = await scope.request<ConfigurationRevisionSummary[]>(full ? `${endpoint}?full=1` : endpoint, { signal: controller.current.signal }); if (isCurrent() && historySequence.current === sequence) setHistory(result) }
     catch (cause) { if (isCurrent() && !(cause instanceof ApiError && cause.message === 'WORKSPACE_CHANGED')) onError(cause) }
     finally { if (isCurrent() && historySequence.current === sequence) setLoading(false) }
   }
@@ -147,7 +147,7 @@ export default function ConfigurationRevisions({ vehicle, records, language, onl
     {(!online || syncPaused) && <Alert type="info" showIcon title={text('configurationOfflineNotice')} />}
     <div className="configuration-list-toolbar">
       <Button size="small" icon={<GitCompare size={14} />} disabled={selection.length !== 2 || loading} onClick={() => void compare()}>{text('configurationCompare')}</Button>
-      <Tooltip title={text('refresh')}><Button className="configuration-refresh" type="text" size="small" aria-label={text('refresh')} icon={<RefreshCw size={15} />} loading={loading} onClick={() => void loadHistory()} /></Tooltip>
+      <Tooltip title={text('refresh')}><Button className="configuration-refresh" type="text" size="small" aria-label={text('refresh')} icon={<RefreshCw size={15} />} loading={loading} onClick={() => void loadHistory(true)} /></Tooltip>
     </div>
     <Table<ConfigurationRevisionSummary> rowKey="revisionId" size="small" loading={loading} dataSource={history} pagination={{ pageSize: 10, hideOnSinglePage: true }} scroll={{ x: 680 }} rowSelection={{ selectedRowKeys: selection, onChange: keys => setSelection(keys.map(String).slice(-2)) }} columns={[
       { title: text('configurationRevision'), width: 115, render: (_, row) => <button className="inline-link" onClick={() => void openDetail(row.revisionId)}>{row.label}</button> },

@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { BusinessSync } from '../server/sync.js'
 import { createApp } from '../server/app.js'
 import type { BusinessRecord } from '../shared/business.js'
 import type { ConfigurationDecisions, ConfigurationPreview } from '../shared/configuration-revisions.js'
@@ -148,5 +149,28 @@ test('revision receipts survive vehicle deletion and VIN reuse starts a new revi
     const replacement = await f.car(String(car.data.vin)); assert.notEqual(replacement.id, car.id)
     const fresh = await f.request(`/business/vehicles/${replacement.id}/configuration-revisions`, 'POST', f.publication(await f.preview(replacement.id)))
     assert.equal(fresh.data.label, 'R01')
+  } finally { await f.close() }
+})
+
+
+test('local revision viewing skips shared synchronization and still enforces membership', async t => {
+  const f = await fixture()
+  try {
+    const team = await f.team(); const car = await f.car(); await f.enable()
+    const published = await f.request(`/business/vehicles/${car.id}/configuration-revisions`, 'POST', f.publication(await f.preview(car.id)))
+    const sync = t.mock.method(BusinessSync.prototype, 'synchronize')
+    assert.equal((await f.request(`/business/vehicles/${car.id}/configuration-revisions`)).status, 200)
+    assert.equal((await f.request(`/business/vehicles/${car.id}/configuration-revisions/${published.data.revisionId}`)).status, 200)
+    assert.equal(sync.mock.callCount(), 0)
+    assert.equal((await f.request(`/business/vehicles/${car.id}/configuration-revisions?full=1`)).status, 200)
+    assert.equal(sync.mock.callCount(), 1)
+    const rosterPath = path.join(team.shared, 'team.json')
+    // Revoke in the canonical roster, preserving its existing structure.
+    const roster = JSON.parse(await fs.readFile(rosterPath, 'utf8'))
+    roster.revision++
+    roster.members.forEach((member: { enabled: boolean }) => { member.enabled = false })
+    await fs.writeFile(rosterPath, JSON.stringify(roster))
+    assert.equal((await f.request(`/business/vehicles/${car.id}/configuration-revisions`)).status, 403)
+    assert.equal((await f.request(`/business/vehicles/${car.id}/configuration-revisions/${published.data.revisionId}`)).status, 403)
   } finally { await f.close() }
 })

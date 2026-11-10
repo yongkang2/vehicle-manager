@@ -40,7 +40,7 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   await admin.synchronization.settle()
   const first = await request(member, '/business/workspace')
   assert.equal(first.status, 200); assert.equal(first.data.data.records[0].id, car.id)
-  assert.ok(first.data.data.changes.length)
+  assert.equal('changes' in first.data.data, false)
   const open = t.mock.method(SharedBusinessSnapshot, 'open')
   const unchanged = await request(member, `/business/workspace?known=${first.data.revision}`)
   assert.equal(unchanged.status, 200); assert.equal(unchanged.data.data, undefined)
