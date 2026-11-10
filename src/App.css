@@ -248,8 +248,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    min-height: 40px;
+    flex-wrap: wrap;
     margin-bottom: 24px
 }
+
+.row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .eyebrow {
     font-size: 11px;
@@ -260,15 +264,15 @@
 
 .setup-section {
     max-width: 780px;
-    padding-top: 15px
+    padding-top: 0
 }
 
 .setup-section h1 {
-    font-size: 27px
+    font-size: 30px
 }
 
 .section-heading {
-    margin-bottom: 34px
+    margin-bottom: 24px
 }
 
 .path-row {
@@ -298,8 +302,8 @@
 }
 
 .setup-later .ant-btn {
-    color: #939cab;
-    font-size: 12px
+    color: var(--muted);
+    font-size: 14px
 }
 
 .connection-result {
@@ -683,11 +687,6 @@
     margin-bottom: 24px
 }
 
-.team-management>.page-heading .ant-btn-icon-only {
-    width: 40px;
-    height: 40px
-}
-
 .team-management>.ant-tabs>.ant-tabs-nav {
     margin-bottom: 24px
 }
@@ -995,12 +994,9 @@
     }
 
     .page-heading>.ant-btn {
-        height: auto;
-        min-height: 36px;
-        font-size: 11px;
-        padding: 7px 9px;
-        white-space: normal;
-        max-width: 155px
+        min-height: 40px;
+        font-size: 14px;
+        max-width: 100%
     }
 
     .setup-section {
@@ -1016,8 +1012,7 @@
     }
 
     .path-row .ant-btn {
-        align-self: flex-start;
-        font-size: 12px
+        align-self: flex-start
     }
 
     .workspace-facts {

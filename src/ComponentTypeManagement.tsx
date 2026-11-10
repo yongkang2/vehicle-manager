@@ -60,12 +60,12 @@ export default function ComponentTypeManagement({ language, online, syncPaused, 
     </Space>
   }
   return <>
-    <Button icon={<Layers size={15} />} onClick={() => setOpen(true)}>{text('componentTypes')}</Button>
+    <Button type="text" size="small" icon={<Layers size={15} />} onClick={() => setOpen(true)}>{text('componentTypes')}</Button>
     <Modal open={open} className="component-type-management-modal" width={1000} title={text('componentTypes')} onCancel={() => { if (!saving) setOpen(false) }} footer={<Button disabled={saving} onClick={() => setOpen(false)}>{text('vehicleTableColumnsClose')}</Button>} destroyOnHidden>
-      <p>{text('componentTypeNotice')}</p>
+      <p>{text('componentTypesTeamScope')}</p><p>{text('componentTypeNotice')}</p>
       {!catalog.enabled && <div className="configuration-review"><Alert type="warning" showIcon title={text('configurationActivationNotice')} /><label className="configuration-input-label">{text('configurationActivationReason')}<Input.TextArea value={activationReason} rows={2} maxLength={500} disabled={!enabled || saving} onChange={event => setActivationReason(event.target.value)} /></label><Button type="primary" disabled={!enabled || saving || !activationReason.trim()} loading={saving} onClick={() => void activate()}>{text('activateConfigurationRevisions')}</Button></div>}
       {!enabled && <Alert type="info" showIcon title={text('configurationOfflineNotice')} />}
-      <Space wrap className="configuration-revision-toolbar"><Button icon={<Plus size={15} />} disabled={!editable} onClick={() => setEditor({ type: null, requestId: crypto.randomUUID() })}>{text('addComponentType')}</Button><Checkbox checked={showRemoved} onChange={event => setShowRemoved(event.target.checked)}>{text('componentTypeShowRemoved')}</Checkbox></Space>
+      <Space wrap className="configuration-revision-toolbar"><Button type="primary" icon={<Plus size={15} />} disabled={!editable} onClick={() => setEditor({ type: null, requestId: crypto.randomUUID() })}>{text('addComponentType')}</Button><Checkbox checked={showRemoved} onChange={event => setShowRemoved(event.target.checked)}>{text('componentTypeShowRemoved')}</Checkbox></Space>
       <Table<ComponentTypeDefinition> rowKey="id" dataSource={visibleComponentTypes(catalog.types, showRemoved)} size="small" pagination={false} scroll={{ x: 850 }} columns={[
         { title: text('componentTypeName'), width: 190, render: (_, row) => <Space wrap>{row.label[at]}{row.builtin && <Tag>{text('componentTypeBuiltin')}</Tag>}</Space> }, { title: text('componentTypeDescription'), dataIndex: 'description', width: 230 },
         { title: text('componentTypeConfigurationStatus'), width: 160, render: (_, row) => <Tag color={row.pendingRestore ? undefined : componentPolicyStatus(row) === 'active' ? 'green' : undefined}>{text(row.pendingRestore ? 'componentTypePendingRestore' : `componentTypeState${componentPolicyStatus(row)[0].toUpperCase()}${componentPolicyStatus(row).slice(1)}`)}</Tag> },

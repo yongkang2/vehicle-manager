@@ -1,5 +1,5 @@
 import { useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Alert, Button, Space, Table, Tag } from 'antd'
+import { Alert, Button, Space, Table, Tag, Tooltip } from 'antd'
 import { Plus, RefreshCw, Trash2, Upload as UploadIcon } from 'lucide-react'
 import type { BusinessRecord } from '../shared/business'
 import { ATTACHMENT_BATCH_LIMIT, ATTACHMENT_EXTENSIONS } from '../shared/attachments'
@@ -19,6 +19,7 @@ type Props = {
   onBusyChange: (busy: boolean) => void
   onCancelReady: (cancel: (() => void) | null) => void
   onError: (cause: unknown) => void
+  heading?: string
   queueId?: string
   extensions?: readonly string[]
   limitsText?: string
@@ -37,7 +38,7 @@ function createQueueStore() {
   }
 }
 
-export default function AttachmentUpload({ vehicle, language, disabled, onRefresh, onBusyChange, onCancelReady, onError, queueId, extensions, limitsText, uploadBlocked, validateFile, uploadFile }: Props) {
+export default function AttachmentUpload({ vehicle, language, disabled, onRefresh, onBusyChange, onCancelReady, onError, heading, queueId, extensions, limitsText, uploadBlocked, validateFile, uploadFile }: Props) {
   const [store] = useState(createQueueStore)
   const queue = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const refresh = useEffectEvent(onRefresh), changeBusy = useEffectEvent(onBusyChange), exposeCancel = useEffectEvent(onCancelReady)
@@ -50,10 +51,10 @@ export default function AttachmentUpload({ vehicle, language, disabled, onRefres
     exposeCancel(() => next.dispose())
     return () => { exposeCancel(null); next.dispose(); store.replace(null) }
   }, [vehicle.id, queueId, store, validateFile, hasUploadFile])
-  return queue && <AttachmentUploadPanel queue={queue} vehicle={vehicle} language={language} disabled={disabled} onError={onError} extensions={extensions} limitsText={limitsText} uploadBlocked={uploadBlocked} />
+  return queue && <AttachmentUploadPanel heading={heading} queue={queue} vehicle={vehicle} language={language} disabled={disabled} onError={onError} extensions={extensions} limitsText={limitsText} uploadBlocked={uploadBlocked} />
 }
 
-function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, extensions = ATTACHMENT_EXTENSIONS, limitsText, uploadBlocked }: Pick<Props, 'vehicle' | 'language' | 'disabled' | 'onError' | 'extensions' | 'limitsText' | 'uploadBlocked'> & { queue: AttachmentUploadQueue }) {
+function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, heading, extensions = ATTACHMENT_EXTENSIONS, limitsText, uploadBlocked }: Pick<Props, 'vehicle' | 'language' | 'disabled' | 'onError' | 'heading' | 'extensions' | 'limitsText' | 'uploadBlocked'> & { queue: AttachmentUploadQueue }) {
   const text = translateBusiness(language), input = useRef<HTMLInputElement>(null)
   const snapshot = useSyncExternalStore(queue.subscribe, queue.getSnapshot)
   const { rows, busy, limited, inspectionRequired, refreshError } = snapshot
@@ -66,13 +67,13 @@ function AttachmentUploadPanel({ queue, vehicle, language, disabled, onError, ex
     <input ref={input} className="attachment-file-input" type="file" hidden multiple accept={extensions.join(',')} aria-label={text('attachmentChooseFiles')} disabled={readonly || inspectionRequired || rows.length >= ATTACHMENT_BATCH_LIMIT} onChange={event => {
       queue.add(Array.from(event.target.files || [])); event.target.value = ''
     }} />
-    <div className="attachment-upload-toolbar">
-      <Button icon={<Plus size={15} />} disabled={readonly || inspectionRequired || rows.length >= ATTACHMENT_BATCH_LIMIT} onClick={() => input.current?.click()}>{text('attachmentChooseFiles')}</Button>
-      <Button type="primary" icon={<UploadIcon size={15} />} disabled={readonly || !pending} loading={busy && uploading} onClick={() => void queue.run('pending').catch(onError)}>{text('upload')}{pending ? ` (${pending})` : ''}</Button>
+    <div className={heading ? 'section-toolbar' : undefined}>{heading && <h3>{heading}</h3>}<div className="attachment-upload-toolbar">
+      <Tooltip title={text('attachmentRefreshList')}><Button className="attachment-refresh" type="text" size="small" aria-label={text('attachmentRefreshList')} icon={<RefreshCw size={15} />} disabled={locked} loading={busy && !uploading} onClick={() => void queue.refresh().catch(onError)} /></Tooltip>
+      <Button type={rows.length ? 'default' : 'primary'} icon={<Plus size={15} />} disabled={readonly || inspectionRequired || rows.length >= ATTACHMENT_BATCH_LIMIT} onClick={() => input.current?.click()}>{text('attachmentChooseFiles')}</Button>
+      {rows.length > 0 && <Button type="primary" icon={<UploadIcon size={15} />} disabled={readonly || !pending} loading={busy && uploading} onClick={() => void queue.run('pending').catch(onError)}>{text('upload')}{pending ? ` (${pending})` : ''}</Button>}
       {failed > 0 && <Button icon={<RefreshCw size={15} />} disabled={readonly} onClick={() => void queue.run('failed').catch(onError)}>{text('attachmentRetryFailed')} ({failed})</Button>}
-      <Button type="text" disabled={locked || !rows.length || inspectionRequired} onClick={() => queue.clear()}>{text('clearBatch')}</Button>
-      <Button icon={<RefreshCw size={15} />} disabled={locked} loading={busy && !uploading} onClick={() => void queue.refresh().catch(onError)}>{text('attachmentRefreshList')}</Button>
-    </div>
+      {rows.length > 0 && <Button disabled={locked || !rows.length || inspectionRequired} onClick={() => queue.clear()}>{text('clearBatch')}</Button>}
+    </div></div>
     <p className="attachment-upload-limits">{limitsText || text('attachmentBatchLimits')}</p>
     {limited && <Alert type="warning" showIcon title={text('attachmentSelectionLimit')} />}
     {rows.some(row => row.status === 'unknown') && <Alert type="warning" showIcon title={text('attachmentUnknownNotice')} description={inspectionRequired ? text('attachmentInspectBeforeRetry') : text('attachmentInspectionDone')} />}
