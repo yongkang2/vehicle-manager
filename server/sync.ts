@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { Business, checksum, fromRow, now, reason } from './business.js'
+import { Business, checksum, fromRow, now, reason, validateEquipmentAttachmentRecords } from './business.js'
 import { assertConfigurationProtocol, SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
 import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
@@ -14,13 +14,14 @@ import type { ConfigurationImport } from '../shared/configuration-revisions.js'
 import { collectChangeFileKeys, collectRecordFileKeys, hasEnhancedModificationText, modificationFiles, validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
 import type { ModificationImport } from '../shared/modifications.js'
 import { configurationFeatureFlags } from '../shared/business-features.js'
+import { parseEquipmentAttachmentId } from '../shared/equipment-attachments.js'
 
 const changeHasEnhancedModificationText = (change: Change): boolean => ['modification', 'modificationGroup'].includes(change.kind) && [change.before, change.after].some(data => data && hasEnhancedModificationText(data))
 const operationHasEnhancedModificationText = (operation: Operation): boolean => hasEnhancedModificationText(operation.desired.data) || Boolean(operation.base && hasEnhancedModificationText(operation.base.data)) || operation.changes.some(changeHasEnhancedModificationText)
 const equivalent = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 const fieldKeys = (base: Fields, desired: Fields) => new Set([...Object.keys(base), ...Object.keys(desired)])
 // Legacy records omit these values; materializing a blank is not a change.
-const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus', 'componentTypeId'] : kind === 'modification' ? ['requestor', 'lead'] : []
+const blankEquivalentFields = (kind: RecordKind): readonly string[] => kind === 'vehicle' ? ['physicalLocation', 'photoAttachmentId', 'complianceLevel'] : kind === 'part' ? ['controllerType', 'lifeStatus', 'componentTypeId'] : kind === 'modification' ? ['requestor', 'lead'] : kind === 'equipment' ? ['equipmentType'] : kind === 'attachment' ? ['equipmentId'] : []
 const equivalentField = (kind: RecordKind, field: string, left: unknown, right: unknown) => blankEquivalentFields(kind).includes(field)
   ? equivalent(left === undefined ? '' : left, right === undefined ? '' : right)
   : equivalent(left, right)
@@ -33,7 +34,7 @@ function equivalentData(kind: RecordKind, left: Fields, right: Fields): boolean 
 }
 const stateOf = (row: RecordRow | undefined) => row ? { data: JSON.parse(row.data) as Fields, archived: Boolean(row.archived) } : null
 const hashKey = (key: string) => /^[a-f0-9]{64}$/.test(key)
-const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'modificationGroup' THEN 1 WHEN 'part' THEN 2 ELSE 3 END"
+const kinds = "CASE kind WHEN 'vehicle' THEN 0 WHEN 'modificationGroup' THEN 1 WHEN 'part' THEN 2 WHEN 'equipment' THEN 3 WHEN 'attachment' THEN 5 ELSE 4 END"
 type PreviewState = { vehicleId: string; actorKey: string; graph: string; version: number; vin: string; expires: number }
 
 export async function atomicFile(destination: string, bytes: Buffer | string, beforeRename?: () => void): Promise<void> {
@@ -186,12 +187,21 @@ export class BusinessSync {
       } finally { await snapshot.close() }
     }))
   }
-  private checkConflict(master: DatabaseSync, operations: Operation[], team: TeamDocument): SyncConflict | null {
+  private checkConflict(master: DatabaseSync, operations: Operation[], team: TeamDocument, retainedEquipmentUploads: ReadonlySet<string> = new Set()): SyncConflict | null {
     const first = operations[0], last = operations.at(-1)!
     const row = master.prepare('SELECT * FROM records WHERE id=?').get(first.recordId) as RecordRow | undefined
     const remote = stateOf(row), fields: string[] = []
     if (isProtectedKind(first.kind)) fields.push('_protected')
     if (first.kind === 'modificationGroup') fields.push('_modificationManaged')
+    if (first.kind === 'attachment' && !first.decision) {
+      const equipmentId = parseEquipmentAttachmentId(last.desired.data.equipmentId)
+      const beforeId = first.base ? parseEquipmentAttachmentId(first.base.data.equipmentId) : ''
+      if (equipmentId === null || equipmentId && last.desired.data.purpose === 'vehiclePhoto' || first.base && beforeId !== equipmentId || remote && parseEquipmentAttachmentId(remote.data.equipmentId) !== equipmentId) fields.push('_equipmentLink')
+      if (equipmentId) {
+        const equipment = master.prepare('SELECT kind,vehicle_id,archived FROM records WHERE id=?').get(equipmentId)
+        if (!equipment || equipment.kind !== 'equipment' || equipment.vehicle_id !== first.vehicleId || !first.base && equipment.archived && !retainedEquipmentUploads.has(first.recordId) && !operations.every(operation => operation.maintenance === 'restore')) fields.push('_equipmentParent')
+      }
+    }
     if (first.kind === 'modification') {
       const discard = first.decision && equivalent(remote, last.desired)
       if (!discard && (remote?.data.groupId || last.desired.data.groupId)) fields.push('_modificationLink')
@@ -277,6 +287,7 @@ export class BusinessSync {
     const records = master.prepare(`SELECT * FROM records ORDER BY ${kinds},id`).all() as RecordRow[]
     if (head.protocol >= 3) { try { const view = records.map(fromRow); assertConfigurationProtocol(view, head.protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
     try { validateModificationRecords(records.map(fromRow), head.protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
+    validateEquipmentAttachmentRecords(records.map(fromRow))
     const files = new Map<string, number>()
     for (const row of records) {
       const record = fromRow(row)
@@ -449,14 +460,24 @@ export class BusinessSync {
         groups.get(operation.recordId)!.push(operation)
       }
       const conflicts: SyncConflict[] = []
-      const ordered = [...groups.values()].sort((left, right) => Number(right[0].kind === 'vehicle') - Number(left[0].kind === 'vehicle'))
+      const operationOrder = (operation: Operation) => operation.kind === 'vehicle' ? 0 : operation.kind === 'equipment' ? 1 : operation.kind === 'attachment' ? 3 : 2
+      const ordered = [...groups.values()].sort((left, right) => operationOrder(left[0]) - operationOrder(right[0]))
+      const ordinals = new Map(pending.map((operation, index) => [operation.id, index]))
+      const retainedEquipmentUploads = new Set<string>()
       for (const operations of ordered) {
-        const conflict = this.checkConflict(master, operations, team)
+        const conflict = this.checkConflict(master, operations, team, retainedEquipmentUploads)
         if (conflict && !operations[0].decision) { conflicts.push(conflict); continue }
-        if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive'].includes(field))) { conflicts.push(conflict); continue }
+        if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive', '_equipmentParent', '_equipmentLink'].includes(field))) { conflicts.push(conflict); continue }
         await this.filesToShare(directory, operations)
         master.exec('BEGIN IMMEDIATE')
         try { this.apply(master, operations); master.exec('COMMIT'); changed = true } catch (error) { master.exec('ROLLBACK'); throw error }
+        // Files accepted before a local archive stay with that equipment in the
+        // same atomic publication. A later remote archive never grants this.
+        const archive = operations.find(operation => operation.kind === 'equipment' && operation.desired.archived && !operation.base?.archived && !operation.decision)
+        if (archive) for (const queued of groups.values()) {
+          const upload = queued[0]
+          if (upload.kind === 'attachment' && !upload.base && parseEquipmentAttachmentId(upload.desired.data.equipmentId) === archive.recordId && ordinals.get(upload.id)! < ordinals.get(archive.id)!) retainedEquipmentUploads.add(upload.recordId)
+        }
       }
       for (const record of deferredModifications) {
         if (!record.vehicleId || !master.prepare("SELECT id FROM records WHERE id=? AND kind='vehicle'").get(record.vehicleId)) throw new AppError('MODIFICATION_RESTORE_CONFLICT', 409)
@@ -500,6 +521,7 @@ export class BusinessSync {
       }
       if (protocol >= 3) { try { const view = (master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow); assertConfigurationProtocol(view, protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
       try { validateModificationRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow), protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
+      validateEquipmentAttachmentRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow))
       if (changed) {
         await snapshot.publish(team.id, protocol)
       }
@@ -527,6 +549,7 @@ export class BusinessSync {
     if (current.kind === 'modificationGroup' || conflict.fields.includes('_modificationManaged')) throw new AppError('MODIFICATION_MANAGED', 409)
     if (current.kind === 'modification' && (store.get<number>('businessProtocol') || 1) < 5 && (hasEnhancedModificationText(current.data) || conflict.remote && hasEnhancedModificationText(conflict.remote.data) || operations.some(operationHasEnhancedModificationText))) throw new AppError('MODIFICATION_NOT_ENABLED', 409)
     if (conflict.fields.some(field => ['_modificationLink', '_modificationDisabled', '_modificationLinkedArchive'].includes(field) && choices[field] !== 'shared')) throw new AppError('MODIFICATION_LINKED', 409)
+    if (conflict.fields.some(field => ['_equipmentParent', '_equipmentLink'].includes(field) && choices[field] !== 'shared')) throw new AppError('INVALID_INPUT', 409)
     if (!equivalent(conflict.local, { data: current.data, archived: current.archived }) || !equivalent(conflict.operationIds, operations.map(operation => operation.id))) throw new AppError('CONFLICT_CHANGED', 409)
     const discard = conflict.fields.some(field => field.startsWith('_') && choices[field] === 'shared')
     if (conflict.fields.includes('_vin') && !discard) throw new AppError('VIN_EXISTS', 409)

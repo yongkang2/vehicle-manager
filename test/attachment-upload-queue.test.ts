@@ -95,16 +95,19 @@ for (const [label, cause] of [['lost connection', new ApiError('NETWORK_ERROR')]
     f.queue.add([file('unknown.pdf'), file('continue.png')])
     await f.queue.run('pending')
     const unknown = f.queue.getSnapshot().rows[0]
-    assert.equal(unknown.status, 'unknown'); assert.equal(f.queue.getSnapshot().rows[1].status, 'uploaded')
+    assert.equal(unknown.status, 'unknown'); assert.equal(f.queue.getSnapshot().rows[1].status, 'pending')
     assert.equal(f.queue.getSnapshot().inspectionRequired, true)
     assert.equal(f.refreshes, 1, 'Automatic refresh must not acknowledge user inspection')
     await f.queue.run('failed'); await f.queue.run('pending')
-    assert.equal(f.calls.length, 2)
+    assert.equal(f.calls.length, 1, 'No pending or failed uploads may run before inspection')
     f.queue.remove(unknown.id); f.queue.clear(); f.queue.add([file('unknown.pdf')])
     assert.equal(f.queue.getSnapshot().rows.length, 2)
     await f.queue.refresh()
     assert.equal(f.queue.getSnapshot().inspectionRequired, false)
     assert.equal(f.queue.getSnapshot().rows[0].status, 'unknown', 'Refreshing must not invent a success or a retryable failure')
+    await f.queue.run('pending')
+    assert.deepEqual(f.calls.map(call => call.filename), ['unknown.pdf', 'continue.png'])
+    assert.equal(f.queue.getSnapshot().rows[1].status, 'uploaded')
     f.queue.remove(unknown.id)
     assert.equal(f.queue.getSnapshot().rows.length, 1)
     f.queue.clear(); assert.equal(f.queue.getSnapshot().rows.length, 0)
@@ -128,7 +131,7 @@ test('failed refresh does not unlock uncertain files and does not undo known sav
   f.queue.dispose()
 })
 
-for (const code of ['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'WORKSPACE_CHANGED', 'PARENT_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND']) {
+for (const code of ['LOGIN_REQUIRED', 'ACCESS_DISABLED', 'CLIENT_UPGRADE_REQUIRED', 'WORKSPACE_CHANGED', 'WORKSPACE_TOKEN_REQUIRED', 'REQUEST_CANCELLED', 'PARENT_ARCHIVED', 'VEHICLE_DELETED', 'RECORD_NOT_FOUND']) {
   test(`${code} stops unsent files without removing earlier successful uploads`, async () => {
     const f = fixture({ upload: async name => { if (name === 'stop.pdf') throw new ApiError(code); return saved(name) } })
     f.queue.add([file('one.pdf'), file('stop.pdf'), file('unsent.pdf')]); await f.queue.run('pending')
@@ -187,4 +190,50 @@ test('disposing during a manual refresh does not unlock unknown rows through a l
   const refreshing = f.queue.refresh(); await started.promise; f.queue.dispose(); held.resolve(); await refreshing
   assert.equal(f.queue.getSnapshot().inspectionRequired, true)
   assert.deepEqual(f.busy, [true, false, true, false])
+})
+
+test('an unreadable or changed local file is invalid before sending and must be reselected', async () => {
+  for (const changed of [false, true]) {
+    const unreadable = file('媒体 (30).jfif')
+    Object.defineProperty(unreadable, 'arrayBuffer', { value: async () => {
+      if (changed) return new ArrayBuffer(1)
+      throw new DOMException('Source file is unavailable', 'NotReadableError')
+    } })
+    const f = fixture()
+    f.queue.add([unreadable, file('valid.pdf')]); await f.queue.run('pending')
+    assert.deepEqual(f.calls.map(call => call.filename), ['valid.pdf'])
+    assert.deepEqual(f.queue.getSnapshot().rows.map(row => row.status), ['invalid', 'uploaded'])
+    assert.equal(f.queue.getSnapshot().rows[0].error, 'FILE_UNREADABLE')
+    assert.equal(f.queue.getSnapshot().inspectionRequired, false)
+    await f.queue.run('failed'); await f.queue.run('pending')
+    assert.equal(f.calls.length, 1)
+    f.queue.remove(f.queue.getSnapshot().rows[0].id); f.queue.add([file('媒体 (30).jfif')])
+    await f.queue.run('pending')
+    assert.equal(f.calls.length, 2); assert.equal(f.queue.getSnapshot().rows[1].status, 'uploaded')
+    f.queue.dispose()
+  }
+})
+
+test('uploads use immutable byte snapshots while retaining original name and file metadata', async () => {
+  const bytes = new Uint8Array([255, 216, 255, 0, 13, 10, 200]), original = new File([bytes], '媒体 (32).JFIF', { type: 'image/jpeg', lastModified: 123456 })
+  Object.defineProperty(original, 'arrayBuffer', { value: async () => bytes.buffer })
+  let sent = 0
+  const queue = new AttachmentUploadQueue({ scope: { assertCurrent: () => {}, request: async () => { throw new Error('Unexpected default upload') }, blob: async () => { throw new Error('Unexpected download') } }, vehicleId: 'vehicle-a', onRefresh: async () => {}, uploadFile: async snapshot => {
+    sent++; assert.notEqual(snapshot, original)
+    assert.equal(snapshot.name, original.name); assert.equal(snapshot.type, original.type); assert.equal(snapshot.lastModified, original.lastModified)
+    bytes.fill(0)
+    assert.deepEqual(new Uint8Array(await snapshot.arrayBuffer()), new Uint8Array([255, 216, 255, 0, 13, 10, 200]))
+    return { id: 'immutable-saved' }
+  } })
+  queue.add([original]); await queue.run('pending')
+  assert.equal(sent, 1); assert.equal(queue.getSnapshot().rows[0].savedId, 'immutable-saved')
+  queue.dispose()
+})
+
+test('closing during file reading sends no upload or subsequent requests', async () => {
+  const bytes = deferred<ArrayBuffer>(), entered = deferred<void>(), original = file('before-read.pdf'), f = fixture()
+  Object.defineProperty(original, 'arrayBuffer', { value: async () => { entered.resolve(); return bytes.promise } })
+  f.queue.add([original, file('unsent.pdf')]); const running = f.queue.run('pending')
+  await entered.promise; f.queue.dispose(); bytes.resolve(new ArrayBuffer(original.size)); await running
+  assert.equal(f.calls.length, 0); assert.equal(f.refreshes, 0)
 })

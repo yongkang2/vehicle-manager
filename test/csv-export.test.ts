@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import unzipper from 'unzipper'
 import type { BusinessRecord, RecordKind } from '../shared/business.js'
-import { entryFields, partFields, vehicleFields } from '../shared/business.js'
+import { entryFields, equipmentTypes, partFields, vehicleFields } from '../shared/business.js'
 import { defaultExportConfiguration, exportColumns, exportFilterFields, exportKinds, matchesExportVehicle, MAX_EXPORT_ID_LENGTH, MAX_EXPORT_VEHICLES, parseExportConfiguration, recordsForExport } from '../shared/csv-export.js'
 import type { ExportConfiguration } from '../shared/csv-export.js'
 import { buildCsvExport } from '../server/csv-export.js'
@@ -12,6 +12,20 @@ const otherId = '22222222-2222-4222-8222-222222222222'
 const record = (kind: RecordKind, id: string, data: BusinessRecord['data'] = {}, parent: string | null = kind === 'vehicle' ? null : vehicleId, archived = false): BusinessRecord => ({ id, kind, vehicleId: parent, data, archived, version: 3, updated: '2026-10-23T02:03:04.000Z' })
 const car = (id = vehicleId, overrides: BusinessRecord['data'] = {}, archived = false) => record('vehicle', id, { name: '昵称', project: 'Project A', model: 'Model A', vin: 'TEST0000000000001', status: 'available', owner: 'Alice', physicalLocation: 'Bay 1', thermal: 'Indirect Heat Pump', ...overrides }, null, archived)
 const allColumns = (language: 'en' | 'zh' = 'en'): ExportConfiguration => ({ ...defaultExportConfiguration(language), columns: Object.fromEntries(exportKinds.map(kind => [kind, exportColumns[kind].map(column => column.id)])) })
+
+test('equipment Type is selectable in bilingual CSV without changing existing template selections', async () => {
+  for (const language of ['en', 'zh'] as const) {
+    const configuration = { ...defaultExportConfiguration(language), columns: { equipment: ['equipmentType', 'name'] } }
+    assert.deepEqual(parseExportConfiguration(configuration)?.columns.equipment, ['equipmentType', 'name'])
+    const rows = [car(), ...equipmentTypes.map((equipmentType, index) => record('equipment', 'typed-' + index, { name: 'Equipment ' + index, equipmentType }))]
+    const output = await buildCsvExport(rows, { vehicleIds: [vehicleId], configuration })
+    const csv = csvRows((await contents(output.bytes)).get('equipment.csv')!)
+    assert.deepEqual(csv[0], [language === 'en' ? 'Type' : '类型', language === 'en' ? 'Name' : '名称'])
+    assert.deepEqual(csv.slice(1).map(row => row[0]).sort(), [...equipmentTypes].sort())
+    const existing = { ...configuration, columns: { equipment: ['name', 'installedAt'] } }
+    assert.deepEqual(parseExportConfiguration(existing)?.columns.equipment, ['name', 'installedAt'])
+  }
+})
 
 async function contents(bytes: Buffer): Promise<Map<string, Buffer>> {
   const zip = await unzipper.Open.buffer(bytes)

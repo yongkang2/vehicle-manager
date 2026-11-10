@@ -55,11 +55,14 @@ export function doveRecordedTime(value: unknown): number {
 	return Date.parse(String(value ?? '').trim().replace(/^(\d{4}-\d{2}-\d{2})[ T](\d{2})h(\d{2})$/, '$1T$2:$3:00'))
 }
 export const entryFields = ['name', 'description', 'installedAt', 'removedAt', 'notes'] as const
+export const equipmentTypes = ['ETAS tools', 'Basic Equipment', 'Charging Adaptors', 'Hook', 'Controller', 'Others'] as const
+export const equipmentFields = ['name', 'equipmentType', 'description', 'installedAt', 'removedAt', 'notes'] as const
 export const modificationFields = ['name', 'description', 'requestor', 'lead', 'installedAt', 'removedAt', 'notes'] as const
 export const businessFieldRegistry = {
 	vehicle: { active: vehicleFields, legacy: ['coolingArchitecture'], removed: [] as string[] },
 	part: { active: partFields, legacy: [] as string[], removed: [] as string[] },
 	entry: { active: entryFields, legacy: [] as string[], removed: [] as string[] },
+	equipment: { active: equipmentFields, legacy: [] as string[], removed: [] as string[] },
 	modification: { active: modificationFields, legacy: [] as string[], removed: [] as string[] },
 } as const
 export type Controller = { name: string; description: string; network: string; supplier: string; functionalPart: string; productPart: string; software: string; calibrationPart: string; calibrationVersion: string; flashingDate: string; productionDate: string; serial: string }

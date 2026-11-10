@@ -1,5 +1,13 @@
 import type { Language } from './i18n'
 const labels: Record<string, [string, string]> = {
+  equipmentType: ['Type', '类型'],
+  equipmentSaveBlocked: ['Close this editor, refresh or sign in again as needed, and inspect the equipment list before starting another save.', '请关闭此窗口，按需刷新或重新登录，并先核对设备列表，再开始新的保存。'],
+  equipmentInstalledOptional: ['Installed on (optional)', '安装日期（可选）'], equipmentRemovedOptional: ['Removed on (optional)', '拆除日期（可选）'],
+  equipmentAttachmentsOptional: ['Attachments (optional)', '附件（可选）'], equipmentAttachments: ['Equipment attachments', '设备附件'], equipmentAttachmentEquipment: ['Equipment record', '设备记录'], equipmentUnavailable: ['Equipment unavailable', '设备记录不可用'],
+  equipmentSavedFilesNotice: ['Equipment saved. Uploaded files are retained; failed files can be retried below.', '设备已保存。已上传的附件会保留，可在下方重试失败文件。'],
+  equipmentSaveUnknown: ['Save result unknown. Retry save safely recovers this request before any files are uploaded.', '保存结果未知；重试保存会核实同一请求，然后再上传附件。'],
+  equipmentRetrySave: ['Retry save', '重试保存'], equipmentDone: ['Done', '完成'], equipmentClose: ['Close', '关闭'],
+  _equipmentParent: ['Linked equipment unavailable or archived', '关联设备不可用或已归档'], _equipmentLink: ['Equipment attachment association changed', '设备附件关联已变化'],
   configurationRevision: ['Configuration revision', '配置版本'], configurationRevisions: ['Configuration revisions', '配置版本记录'],
   'configuration.enabled': ['Enabled configuration revisions', '启用配置版本'], 'configuration.published': ['Published configuration revision', '发布配置版本'],
   'componentType.created': ['Added component type', '新增组件类型'], 'componentType.updated': ['Updated component type', '更新组件类型'],
@@ -46,7 +54,7 @@ const labels: Record<string, [string, string]> = {
   attachmentCompleted: ['Completed', '已处理'], attachmentUploadedCount: ['Uploaded', '已上传'], attachmentRemoveFromQueue: ['Remove from queue', '从队列移除'],
   attachmentStatus_pending: ['Pending', '待上传'], attachmentStatus_invalid: ['Invalid file', '文件不符合要求'], attachmentStatus_uploading: ['Uploading', '正在上传'],
   attachmentStatus_uploaded: ['Uploaded', '已上传'], attachmentStatus_failed: ['Failed', '上传失败'], attachmentStatus_unknown: ['Result unknown', '上传结果未知'],
-  attachmentUnknownNotice: ['An upload response was not confirmed. The file may already be saved. It will not be retried automatically.', '未能确认上传响应，文件可能已保存，系统不会自动重试。'],
+  attachmentUnknownNotice: ['An upload response was not confirmed. The file may already be saved. Unsent files are paused; the uncertain file will not be retried automatically.', '未能确认上传响应，文件可能已保存。尚未提交的文件已暂停，系统不会自动重试结果未知的文件。'],
   attachmentInspectBeforeRetry: ['Refresh and inspect the saved attachment list before removing unknown rows or selecting those files again, to avoid duplicate attachments.', '请先刷新并核对已保存的附件列表，再移除结果未知的条目或重新选择这些文件，以免产生重复附件。'],
   attachmentInspectionDone: ['The attachment list has been refreshed. Check it before clearing an unknown row and selecting the file again. Saved files remain saved.', '附件列表已刷新，请核对后再清除结果未知的条目并重新选择文件。已保存的文件仍然保留。'],
   attachmentRefreshFailed: ['The attachment list could not be refreshed. Upload results are retained; try refreshing again.', '无法刷新附件列表。上传结果已保留，请重试刷新。'],

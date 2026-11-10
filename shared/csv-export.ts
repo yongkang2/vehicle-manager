@@ -1,4 +1,4 @@
-import { entryFields, modificationFields, partFields, vehicleFields } from './business.js'
+import { equipmentFields, modificationFields, partFields, vehicleFields } from './business.js'
 import type { BusinessRecord } from './business.js'
 import { effectiveModificationRecords, modificationFiles } from './modifications.js'
 
@@ -21,7 +21,7 @@ const labels: Record<string, [string, string]> = {
   configurationRevision: ['Configuration revision', '配置版本'],
   description: ['Description', '说明'], category: ['Category', '部件类别'], position: ['Position / identifier', '位置 / 标识'], supplier: ['Supplier', '供应商'], serial: ['Serial number', '序列号'], type: ['Type', '类型'], hardware: ['Hardware version', '硬件版本'], software: ['Software identifier / version', '软件标识 / 版本'],
   requestor: ['Requestor', '申请人'], lead: ['Lead', '负责人'], modificationId: ['Vehicle modification ID', '车辆改装标识'], groupId: ['Linked modification group ID', '关联改装组标识'], fileId: ['Modification file ID', '改装文件标识'],
-  controllerType: ['Controller Type', '控制器类型'], lifeStatus: ['Life Status', '寿命状态'],
+  controllerType: ['Controller Type', '控制器类型'], lifeStatus: ['Life Status', '寿命状态'], equipmentType: ['Type', '类型'],
   functionalPart: ['Functional part number', '功能零件号'], productPart: ['Product part number', '产品零件号'], calibrationPart: ['Software / calibration part', '软件 / 标定零件号'], calibrationVersion: ['Calibration version', '标定版本'], network: ['Diagnostic network', '诊断网络'],
   flashingDate: ['Flashed on', '刷写日期'], productionDate: ['Produced on', '生产日期'], sourceName: ['Original controller name', '报告原始名称'], reportId: ['Source report ID', '来源报告标识'], reportRecordedAt: ['Source report date', '来源报告采集时间'],
   maturity: ['Part maturity', '零件成熟度'], batteryStatus: ['Battery pack condition', '电池包状态'], installedAt: ['Installed on', '安装日期'], removedAt: ['Removed on', '拆除日期'],
@@ -35,7 +35,7 @@ export const exportColumns: Record<ExportRecordKind, ExportColumn[]> = {
   vehicle: [...columns(vehicleFields).map(column => column.id === 'name' ? { ...column, label: ['Nick Name', '昵称'] as [string, string] } : column), ...columns(['configurationRevision']), ...columns(metadata)],
   part: [...columns(partFields), ...columns(childMetadata)],
   modification: [...columns(modificationFields), ...columns(['groupId']), ...columns(childMetadata)],
-  equipment: [...columns(entryFields), ...columns(childMetadata)],
+  equipment: [...columns(equipmentFields), ...columns(childMetadata)],
   report: [...columns(['name', 'checksum', 'size', 'recordedAt', 'savedAt', 'parserVersion', 'reportVin', 'rawVin', 'software', 'mileage', 'soc', 'vehicleMode']).map(column => column.id === 'name' ? { ...column, label: ['Filename', '文件名'] as [string, string] } : column), ...columns(childMetadata)],
   attachment: [...columns(['name', 'checksum', 'size', 'savedAt']).map(column => column.id === 'name' ? { ...column, label: ['Filename', '文件名'] as [string, string] } : column), ...columns(['modificationId', 'groupId', 'fileId']), ...columns(childMetadata)],
 }
