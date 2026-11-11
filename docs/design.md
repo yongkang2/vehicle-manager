@@ -65,6 +65,8 @@ Reserve the longer translation's space for shared actions instead of sizing butt
 The root's stable scrollbar gutter owns viewport reservation. Body width remains auto while library scroll locks continue to prevent background scrolling, avoiding a second scrollbar-width deduction on Windows. Opening or closing a modal/drawer must leave the underlying workspace geometry unchanged. Modal motion uses opacity and at most 6px vertical travel; dropdowns fade without scaling. Feedback is 120ms, modal/menu motion 180ms and drawer motion 200ms. No content/page-scale effects, pressed-button displacement or animated layout dimensions. Reduced motion disables these effects. Future visual changes must compare main control bounds across English/Chinese and the workspace bounds before/during/after overlays, including scrollable and short pages.
 
 ## Colors
+Vehicle identity buttons indicate clickability through a quiet hover background, navy title and chevron feedback; do not underline the title or move its geometry. Desktop navigation selection uses its existing filled background and text emphasis, without a vertical accent line. Preserve visible keyboard focus.
+
 Canonical runtime values live in src/theme.ts; installThemeTokens maps the palette to root CSS variables before React renders, and App.tsx adapts the same palette to Ant Design. Refined.css owns the presentation layer. Existing specialized component styles remain in their owners.
 
 ## Typography
