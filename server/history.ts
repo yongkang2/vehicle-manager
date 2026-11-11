@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { LocalStore } from './store.js'
 import { AppError } from './team.js'
+import { historyChangedFields } from '../shared/history-presentation.js'
 import type { Change } from '../shared/business.js'
 
 function text(value: unknown, max: number): string {
@@ -12,13 +13,6 @@ function text(value: unknown, max: number): string {
   return value
 }
 const display = (value: unknown) => value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value)
-function populated(value: unknown): boolean {
-  if (value == null) return false
-  if (typeof value === 'string') return Boolean(value.trim())
-  if (Array.isArray(value)) return value.some(populated)
-  if (typeof value === 'object') return Object.values(value).some(populated)
-  return true
-}
 type HistoryFilters = { vehicleId?: unknown; q?: unknown; page?: unknown; kind?: unknown; date?: unknown; offset?: unknown; endOffset?: unknown; summary?: unknown }
 
 export class History {
@@ -66,7 +60,7 @@ export class History {
     const items = selected.map(change => {
       const vehicleLabel = labels.get(change.vehicleId)?.model || labels.get(change.vehicleId)?.vin || change.vehicleId
       if (!summary) return { ...change, vehicleLabel, changedFieldCount: undefined, statusChanged: undefined }
-      const changedFieldCount = [...new Set([...Object.keys(change.before || {}), ...Object.keys(change.after)])].filter(key => JSON.stringify(change.before?.[key]) !== JSON.stringify(change.after[key]) && (change.before !== null || populated(change.after[key]))).length
+      const changedFieldCount = historyChangedFields(change).length
       const after = Object.fromEntries(['name', 'category'].map(key => [key, change.after[key] ?? change.before?.[key]]).filter(([,value]) => value !== undefined))
       return { ...change, before: null, after, vehicleLabel, changedFieldCount, statusChanged: change.archivedBefore !== null && change.archivedBefore !== change.archivedAfter }
     })

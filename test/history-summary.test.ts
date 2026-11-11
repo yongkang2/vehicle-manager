@@ -10,13 +10,13 @@ test('summary pages omit large snapshots and retain lazy detail and independent 
   const root = await mkdtemp(path.join(os.tmpdir(), 'vm-history-summary-'))
   const store = new LocalStore(root)
   try {
-    const change = { id:'large', recordId:'r', vehicleId:'v', kind:'report', before:{name:'Old', content:'x'.repeat(100000)}, after:{name:'New', category:'DOVE', content:'y'.repeat(100000)}, actor:{id:'a',name:'Actor',role:'member',deviceId:'d'}, action:'updated',reason:'update',created:'2026-11-06T00:00:00Z',archivedBefore:false,archivedAfter:true }
+    const change = { id:'large', recordId:'r', vehicleId:'v', kind:'report', before:{name:'Old', content:'x'.repeat(100000)}, after:{name:'New', category:'DOVE', content:'y'.repeat(100000), checksum:'internal-hash', size:123, savedAt:'2026-11-06T00:00:00Z', parserVersion:'v2'}, actor:{id:'a',name:'Actor',role:'member',deviceId:'d'}, action:'updated',reason:'update',created:'2026-11-06T00:00:00Z',archivedBefore:false,archivedAfter:true }
     store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(change.id,change.recordId,change.vehicleId,JSON.stringify(change),change.created)
     const history = new History(store)
     const summary = history.query({summary:'1'})
     assert.equal(summary.items[0].before,null)
     assert.deepEqual(summary.items[0].after,{name:'New',category:'DOVE'})
-    assert.equal(summary.items[0].changedFieldCount,3)
+    assert.equal(summary.items[0].changedFieldCount,4)
     assert.equal(summary.items[0].statusChanged,true)
     assert(!JSON.stringify(summary).includes('xxxxx'))
     assert(!('vehicleOptions' in summary))
