@@ -18,7 +18,7 @@ import type { BusinessRefreshHandle, BusinessView } from './BusinessApp'
 import { VehicleTableFilterProvider } from './VehicleTableFilterSession'
 import './App.css'
 import './Refined.css'
-import { palette, fontFamily, buttonTheme } from './theme'
+import { interfaceTheme, buttonTheme } from './theme'
 
 const BusinessApp = lazy(() => import('./BusinessApp'))
 const businessNavigation = [{ view: 'vehicles', icon: CarFront }, { view: 'dove', icon: FileSpreadsheet }, { view: 'reports', icon: Files }, { view: 'history', icon: History }, { view: 'sync', icon: FolderSync }, { view: 'audit', icon: ShieldCheck }] as const
@@ -135,9 +135,17 @@ function Application({ language, text, languageControl }: { language: Language; 
 
 export default function App() {
   useEffect(() => trackBrowserPresence(), [])
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const changed = () => setReducedMotion(preference.matches)
+    changed()
+    preference.addEventListener('change', changed)
+    return () => preference.removeEventListener('change', changed)
+  }, [])
   const [language, setLanguage] = useState<Language>(() => localStorage.getItem('vdm-language') === 'zh' ? 'zh' : 'en')
   const text = dictionaries[language]
   useEffect(() => { localStorage.setItem('vdm-language', language); document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en'; document.title = `STELLANTIS · ${text.product}` }, [language, text.product])
   const languageControl = <Segmented aria-label="Language / 语言" value={language} options={[{ label: 'English', value: 'en' }, { label: '中文', value: 'zh' }]} onChange={value => setLanguage(value as Language)} />
-  return <ConfigProvider locale={language === 'zh' ? zhCN : enUS} theme={{ components: { Button: buttonTheme }, token: { colorPrimary: palette.brand, colorText: palette.ink, colorTextSecondary: palette.muted, colorBorder: palette.line, borderRadius: 6, fontFamily, fontSize: 14, controlHeight: 40, controlHeightSM: 32, motion: false } }}><AntApp><Application language={language} text={text} languageControl={languageControl} /></AntApp></ConfigProvider>
+  return <ConfigProvider locale={language === 'zh' ? zhCN : enUS} theme={{ components: { Button: buttonTheme, Modal: { motionDurationSlow: interfaceTheme.motionDurationMid }, Table: { headerBg: interfaceTheme.colorFillAlter, rowHoverBg: interfaceTheme.colorPrimaryBgHover, rowSelectedBg: interfaceTheme.colorPrimaryBg } }, token: { ...interfaceTheme, motion: !reducedMotion } }}><AntApp><Application language={language} text={text} languageControl={languageControl} /></AntApp></ConfigProvider>
 }
