@@ -4,6 +4,7 @@ export const palette = {
   canvas: '#f5f7fa', surface: '#ffffff', navy: '#18274d', green: '#187760',
   surfaceTint: '#f8f9fc', hover: '#f0f4fa', selected: '#edf2fc', focus: '#b9c8ed',
   navHover: '#243657', navActive: '#30477b',
+  watchInk: '#a86610', watchBg: '#fff0cc', watchHover: '#ffe3a3',
 }
 
 export const fontFamily = '"Segoe UI", "Microsoft YaHei UI", sans-serif'
