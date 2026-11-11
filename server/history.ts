@@ -2,7 +2,8 @@ import ExcelJS from 'exceljs'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { LocalStore } from './store.js'
+import { prepareHistorySearch } from './history-search.js'
+import type { HistoryStore } from './history-search.js'
 import { AppError } from './team.js'
 import { historyChangedFields } from '../shared/history-presentation.js'
 import type { Change } from '../shared/business.js'
@@ -16,7 +17,8 @@ const display = (value: unknown) => value === undefined ? '' : typeof value === 
 type HistoryFilters = { vehicleId?: unknown; q?: unknown; page?: unknown; kind?: unknown; date?: unknown; offset?: unknown; endOffset?: unknown; summary?: unknown }
 
 export class History {
-  constructor(private store: LocalStore) {}
+  constructor(private store: HistoryStore) {}
+  prepareSearch(): void { prepareHistorySearch(this.store) }
 
   private selection(input: HistoryFilters) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('INVALID_INPUT')
@@ -38,23 +40,39 @@ export class History {
       values.push(new Date(start).toISOString(), end, new Date(start).toISOString(), end)
     }
     const fieldAliases: Record<string, string> = { 软件: 'software', 软件版本: 'software', 硬件: 'hardware', 硬件版本: 'hardware', 序列号: 'serial', 名称: 'name', 车型: 'model', 负责人: 'owner', 状态: 'status', 标定版本: 'calibrationVersion', 说明: 'description', 备注: 'notes' }
+    const payloadConditions: string[] = [], payloadValues: string[] = []
+    if (q) this.prepareSearch()
     for (const term of q ? q.split(/\s+/) : []) {
-      clauses.push(`(EXISTS (SELECT 1 FROM json_tree(changes.payload) WHERE CAST(json_tree.key AS TEXT) LIKE ? ESCAPE '\\' OR (json_tree.type IN ('text','integer','real','true','false') AND CAST(json_tree.value AS TEXT) LIKE ? ESCAPE '\\')) OR json_extract(vehicle.data,'$.model') LIKE ? ESCAPE '\\' OR json_extract(vehicle.data,'$.vin') LIKE ? ESCAPE '\\' OR changes.vehicle_id IN (SELECT historical.vehicle_id FROM changes historical WHERE json_extract(historical.payload,'$.kind')='vehicle' AND (json_extract(historical.payload,'$.after.model') LIKE ? ESCAPE '\\' OR json_extract(historical.payload,'$.before.model') LIKE ? ESCAPE '\\' OR json_extract(historical.payload,'$.after.vin') LIKE ? ESCAPE '\\' OR json_extract(historical.payload,'$.before.vin') LIKE ? ESCAPE '\\')))`)
       const pattern = `%${term.replace(/[\\%_]/g, '\\$&')}%`
-      const keyPattern = `%${(Object.hasOwn(fieldAliases, term) ? fieldAliases[term] : term).replace(/[\\%_]/g, '\\$&')}%`
-      values.push(keyPattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+      const key = Object.hasOwn(fieldAliases, term) ? fieldAliases[term] : term
+      const keyPattern = `%${key.replace(/[\\%_]/g, '\\$&')}%`
+      const exact = "(keys LIKE ? ESCAPE '\\' OR contents LIKE ? ESCAPE '\\')"
+      const vehicles = "SELECT id FROM records WHERE kind='vehicle' AND (json_extract(data,'$.model') LIKE ? ESCAPE '\\' OR json_extract(data,'$.vin') LIKE ? ESCAPE '\\') UNION SELECT historical.vehicle_id FROM changes historical WHERE json_extract(historical.payload,'$.kind')='vehicle' AND (json_extract(historical.payload,'$.after.model') LIKE ? ESCAPE '\\' OR json_extract(historical.payload,'$.before.model') LIKE ? ESCAPE '\\' OR json_extract(historical.payload,'$.after.vin') LIKE ? ESCAPE '\\' OR json_extract(historical.payload,'$.before.vin') LIKE ? ESCAPE '\\')"
+      const vehicleValues = [pattern, pattern, pattern, pattern, pattern, pattern]
+      if (!this.store.db.prepare(`SELECT 1 FROM (${vehicles}) LIMIT 1`).get(...vehicleValues)) {
+        payloadConditions.push(exact); payloadValues.push(keyPattern, pattern)
+      } else {
+        clauses.push(`(changes.rowid IN (SELECT rowid FROM temp.history_search WHERE ${exact}) OR changes.vehicle_id IN (${vehicles}))`)
+        values.push(keyPattern, pattern, ...vehicleValues)
+      }
+    }
+    if (payloadConditions.length) {
+      clauses.push(`changes.rowid IN (SELECT rowid FROM temp.history_search WHERE ${payloadConditions.join(' AND ')})`)
+      values.push(...payloadValues)
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
     const from = "FROM changes LEFT JOIN records vehicle ON vehicle.id=changes.vehicle_id AND vehicle.kind='vehicle'"
-    return { where, from, queryFrom: q ? from : 'FROM changes', values }
+    return { where, from, queryFrom: 'FROM changes', values, searched: Boolean(q) }
   }
 
   query(input: HistoryFilters) {
-    const { where, queryFrom: from, values } = this.selection(input)
+    const { where, queryFrom: from, values, searched } = this.selection(input)
     const pageText = text(input.page, 20) || '1', page = Number(pageText)
     if (!/^[1-9]\d*$/.test(pageText) || !Number.isSafeInteger(page) || !Number.isSafeInteger(page * 50)) throw new AppError('INVALID_INPUT')
-    const total = Number(this.store.db.prepare(`SELECT count(*) AS total ${from} ${where}`).get(...values)!.total)
-    const selected = this.store.db.prepare(`SELECT changes.payload ${from} ${where} ORDER BY changes.created DESC,changes.rowid DESC LIMIT 50 OFFSET ?`).all(...values, (page - 1) * 50).map(row => JSON.parse(row.payload as string) as Change)
+    const matched = searched ? this.store.db.prepare(`WITH matched AS MATERIALIZED (SELECT changes.rowid AS id ${from} ${where}) SELECT (SELECT count(*) FROM matched) AS total,(SELECT json_group_array(payload) FROM (SELECT changes.payload FROM changes JOIN matched ON matched.id=changes.rowid ORDER BY changes.created DESC,changes.rowid DESC LIMIT 50 OFFSET ?)) AS payloads`).get(...values, (page - 1) * 50)! : null
+    const total = Number(matched ? matched.total : this.store.db.prepare(`SELECT count(*) AS total ${from} ${where}`).get(...values)!.total)
+    const payloads: string[] = matched ? JSON.parse(String(matched.payloads)) : this.store.db.prepare(`SELECT changes.payload ${from} ${where} ORDER BY changes.created DESC,changes.rowid DESC LIMIT 50 OFFSET ?`).all(...values, (page - 1) * 50).map(row => String(row.payload))
+    const selected = payloads.map(payload => JSON.parse(payload) as Change)
     const summary = input.summary === '1'
     const labels = this.labels(summary ? [...new Set(selected.map(change => change.vehicleId))] : undefined)
     const items = selected.map(change => {

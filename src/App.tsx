@@ -126,7 +126,7 @@ function Application({ language, text, languageControl }: { language: Language; 
   const { message, modal } = AntApp.useApp()
   const staleNotice = useRef(false)
   const [user, setUser] = useState<LocalUser | null>(null), [loading, setLoading] = useState(true)
-  const onError = (error: unknown) => { const code = error instanceof ApiError ? error.message : 'SERVER_ERROR'; if (code === 'LOGIN_REQUIRED') setUser(null); if (code === 'WORKSPACE_CHANGED') { if (!staleNotice.current) { staleNotice.current = true; modal.warning({ title: errorText(code, language), okText: text.reloadPage, onOk: () => location.reload() }) }; return }; void message.error({ key: code, content: errorText(code, language) }) }
+  const onError = (error: unknown) => { const code = error instanceof ApiError ? error.message : 'SERVER_ERROR'; if (code === 'LOGIN_REQUIRED') setUser(null); if (code === 'WORKSPACE_CHANGED') { if (!staleNotice.current) { staleNotice.current = true; modal.warning({ title: text.reloadPage, content: errorText(code, language), okText: text.reloadPage, okCancel: true, cancelText: language === 'zh' ? '暂不刷新' : 'Keep page open', afterClose: () => { staleNotice.current = false }, onOk: () => location.reload() }) }; return }; void message.error({ key: code, content: errorText(code, language), duration: 8 }) }
   const reportError = useEffectEvent(onError)
   useEffect(() => { void api<{ user: LocalUser | null }>('/api/bootstrap').then(result => setUser(result.user)).catch(error => reportError(error)).finally(() => setLoading(false)) }, [])
   if (loading) return <div className="boot"><Spin /></div>

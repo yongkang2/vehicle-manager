@@ -7,6 +7,11 @@ import { hostname } from 'node:os'
 import path from 'node:path'
 import { AppError } from './team.js'
 import type { Operation, QuarantinedOperation, VehicleDeletion } from '../shared/business.js'
+import type { Actor } from '../shared/business.js'
+import type { LocalUser, TeamDocument } from '../shared/types.js'
+import type { AuditEntry, AuditIdentity } from '../shared/workspace.js'
+
+export const auditAccountContext = new AsyncLocalStorage<LocalUser>()
 
 const schemaError = () => new AppError('LOCAL_SCHEMA_INVALID', 503)
 const coreSql = `CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -143,9 +148,15 @@ export class LocalStore {
         }
         this.db.exec(`CREATE INDEX IF NOT EXISTS changes_day ON changes(julianday(CASE WHEN created <> 'now' THEN created END));
           CREATE INDEX IF NOT EXISTS changes_vehicle_day ON changes(vehicle_id,julianday(CASE WHEN created <> 'now' THEN created END));
+          CREATE INDEX IF NOT EXISTS changes_kind_vehicle ON changes(json_extract(payload,'$.kind'),vehicle_id);
 `)
         // Local derived invalidation metadata; never copied into shared snapshots or backups.
         for (const action of ['INSERT', 'UPDATE', 'DELETE']) this.db.exec(`CREATE TRIGGER IF NOT EXISTS changes_revision_${action.toLowerCase()} AFTER ${action} ON changes BEGIN INSERT INTO settings VALUES('historyRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+        for (const table of ['records', 'changes', 'vehicle_deletions', 'quarantined_operations']) for (const action of ['INSERT', 'UPDATE', 'DELETE']) this.db.exec(`CREATE TRIGGER IF NOT EXISTS workspace_${table}_${action.toLowerCase()} AFTER ${action} ON ${table} BEGIN INSERT INTO settings VALUES('workspaceRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+        for (const action of ['INSERT', 'UPDATE', 'DELETE']) {
+          const row = action === 'DELETE' ? 'OLD' : 'NEW'
+          this.db.exec(`CREATE TRIGGER IF NOT EXISTS workspace_settings_${action.toLowerCase()} AFTER ${action} ON settings WHEN ${row}.key IN ('pendingConfigurationImports','businessProtocol','configurationEnabled','configurationPolicyEnabled') BEGIN INSERT INTO settings VALUES('workspaceRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+        }
       })
       this.deviceId = selectedDevice
     } catch (error) { this.db.close(); throw error }
@@ -210,6 +221,7 @@ export class LocalStore {
     for (const row of this.canonicalDeletions.values()) rows.set(row.vehicleId, row)
     return [...rows.values()]
   }
+  get workspaceRevision(): string { return `${this.get<number>('workspaceRevision') || 0}:${this.canonicalDeletions.size}` }
 
   /** Use only for deletions already committed to the canonical shared HEAD. */
   rememberDeletions(rows: VehicleDeletion[]): void {
@@ -285,7 +297,31 @@ export class LocalStore {
     try { work(); this.db.exec('COMMIT') } catch (error) { this.db.exec('ROLLBACK'); throw error }
     finally { this.transactionDepth = 0 }
   }
-  event(actorId: string, action: string, detail: unknown): void {
-    this.db.prepare('INSERT INTO local_events VALUES(?,?,?,?,?)').run(randomUUID(), actorId, action, JSON.stringify(detail), new Date().toISOString())
+  auditEntries(accounts: LocalStore = this): AuditEntry[] {
+    const team = this.get<TeamDocument>('cachedTeam')
+    return this.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => {
+      const detail = JSON.parse(String(row.detail))
+      const snapshot = detail.__auditActor
+      let identity: AuditIdentity
+      if (snapshot?.version === 1 && snapshot.actorId === row.actor_id) {
+        const { version: _version, ...recorded } = snapshot
+        identity = { ...recorded, source: 'recorded' }
+        delete detail.__auditActor
+      } else {
+        const account = accounts.db.prepare('SELECT id,username,display_name AS displayName FROM accounts WHERE id=?').get(row.actor_id) as LocalUser | undefined
+        const member = team?.members.find(item => item.id === row.actor_id)
+        identity = { actorId: String(row.actor_id), deviceId: this.deviceId, ...(account ? { account } : {}), ...(member ? { member: { id: member.id, name: member.name } } : {}), source: account || member ? 'resolved' : 'unknown' }
+      }
+      const account = identity.account
+      const actor = account ? `${account.displayName} (${account.username})` : identity.member?.name || identity.actorId
+      return { id: String(row.id), created: String(row.created), action: String(row.action), detail, actor, identity }
+    })
+  }
+  event(actor: string | Actor | LocalUser, action: string, detail: unknown): void {
+    const actorId = typeof actor === 'string' ? actor : actor.id
+    const account = typeof actor !== 'string' && 'username' in actor ? actor : auditAccountContext.getStore()
+    const member = typeof actor !== 'string' && 'name' in actor ? { id: actor.id, name: actor.name } : undefined
+    const identity = { version: 1, actorId, deviceId: this.deviceId, ...(account ? { account: { id: account.id, username: account.username, displayName: account.displayName } } : {}), ...(member ? { member } : {}) }
+    this.db.prepare('INSERT INTO local_events VALUES(?,?,?,?,?)').run(randomUUID(), actorId, action, JSON.stringify({ ...detail as object, __auditActor: identity }), new Date().toISOString())
   }
 }

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { LocalStore } from '../server/store.js'
 import { History } from '../server/history.js'
+import { HistoryQueries } from '../server/history-queries.js'
 
 // Run with npx tsx scripts/benchmark-history.ts. Compare with the immutable v1.7.0 release.
 const source = path.resolve('server/.history-benchmark-baseline.mts')
@@ -37,9 +38,12 @@ try {
       for (const [version, history] of [['baseline', new Baseline(store)],['current',new History(store)]] as const) {
         if (version === 'current') {
           const start = performance.now()
-          for (const row of indexes) store.db.exec(`DROP INDEX ${row.name}`)
+          for (const row of indexes) store.db.exec(`DROP INDEX IF EXISTS ${row.name}`)
           for (const row of indexes) store.db.exec(String(row.sql))
           console.log(JSON.stringify({count,version,query:'indexBuild',ms:Math.round(performance.now()-start)}))
+          const searchStart = performance.now()
+          history.prepareSearch()
+          console.log(JSON.stringify({count,version,query:'searchIndexBuild',ms:Math.round(performance.now()-searchStart)}))
         }
         console.log(JSON.stringify({count,version,plan:store.db.prepare('EXPLAIN QUERY PLAN SELECT payload FROM changes ORDER BY created DESC,rowid DESC LIMIT 50').all()}))
         for (const [query, filter] of Object.entries({page:{},page2:{page:'2'},page100:{page:'100'},vehicle:{vehicleId:'v0'},date:{date:'2026-11-06',offset:'0'},compound:{q:'Actor softwareVersion v1'},dove:{q:'DOVE'}})) {
@@ -51,6 +55,18 @@ try {
         const exported = await history.export({vehicleId:'v0'})
         try { console.log(JSON.stringify({count,version,query:'exportVehicle',ms:Math.round(performance.now()-exportStart)})) } finally {await exported.cleanup()}
       }
+      const queries = new HistoryQueries(root)
+      let previousTick = performance.now(), maxMainLoopGapMs = 0, samples = 0
+      const timer = setInterval(() => { const current = performance.now(); maxMainLoopGapMs = Math.max(maxMainLoopGapMs, current - previousTick); previousTick = current; samples++ }, 10)
+      try {
+        for (const query of ['backgroundCold', 'backgroundWarm']) {
+          const started = performance.now()
+          const result = await queries.query({ q: 'Actor softwareVersion v1', summary: '1' })
+          if (result.total !== count || result.items.length !== 50) throw new Error('Background history results differ from the benchmark fixture')
+          console.log(JSON.stringify({count,version:'current',query,ms:Math.round(performance.now()-started),total:result.total}))
+        }
+      } finally { clearInterval(timer); await queries.close() }
+      console.log(JSON.stringify({count,version:'current',query:'backgroundResponsiveness',maxMainLoopGapMs:Math.round(maxMainLoopGapMs),samples}))
     } finally {store.db.close();await rm(root,{recursive:true,force:true})}
   }
 } finally {await rm(source,{force:true})}

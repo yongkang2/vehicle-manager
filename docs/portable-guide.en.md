@@ -21,6 +21,8 @@ Create your own local account. Local data normally resides in %LOCALAPPDATA%\Veh
 
 Do not copy another person's local data or distribute a populated data directory. Keep your own device identity, accounts, sessions, pending changes and files together. Do not delete SQLite databases or WAL files to resolve synchronization problems.
 
+Administrators can inspect the Device audit log. New entries display the local account name and username recorded at operation time; details retain the original actor ID, device ID and applicable team identity. Later profile changes do not rename these snapshots. Older entries are explicitly identified as current-profile lookups or unconfirmed historical identities, rather than reconstructed as operation-time evidence. Search accepts identity names and IDs. Local audit identity is not synchronized or included in business backups.
+
 ## Team collaboration
 
 Configure the existing Windows SMB shared folder in the application. Only the team owner initializes a new team in an empty folder. Colleagues select the existing team and request approval. An administrator must approve membership and device access before collaboration is available.

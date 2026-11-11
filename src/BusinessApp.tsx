@@ -51,6 +51,24 @@ function controllerSources(report: BusinessRecord) {
   return parsedControllerSources((report.data as unknown as ReportData).parsed.controllers)
 }
 
+function AuditDetails({ entry, language, text }: { entry: AuditEntry; language: Language; text: (key: string) => string }) {
+  const identity = entry.identity, zh = language === 'zh'
+  const identityItems = identity ? [
+    { key: 'identitySource', label: zh ? '身份依据' : 'Identity source', children: identity.source === 'recorded' ? (zh ? '操作时快照' : 'Recorded at operation time') : identity.source === 'resolved' ? (zh ? '旧日志：当前资料解析' : 'Legacy log: current profile lookup') : (zh ? '历史身份未确认' : 'Unconfirmed historical identity') },
+    { key: 'actorId', label: zh ? '原始操作人 ID' : 'Original actor ID', children: identity.actorId },
+    { key: 'deviceId', label: zh ? '设备 ID' : 'Device ID', children: identity.deviceId },
+    ...(identity.account ? [
+      { key: 'localAccount', label: zh ? '本地账号' : 'Local account', children: `${identity.account.displayName} (${identity.account.username})` },
+      { key: 'localAccountId', label: zh ? '本地账号 ID' : 'Local account ID', children: identity.account.id },
+    ] : []),
+    ...(identity.member ? [
+      { key: 'teamMember', label: zh ? '团队身份' : 'Team identity', children: identity.member.name },
+      { key: 'teamMemberId', label: zh ? '团队成员 ID' : 'Team member ID', children: identity.member.id },
+    ] : []),
+  ] : []
+  return <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={[...identityItems, ...Object.entries(entry.detail).map(([key, value]) => ({ key: `detail-${key}`, label: text(key), children: display(value) }))]} /></details>
+}
+
 function DifferenceValue({ value, fields, text }: { value: unknown; fields: string[]; text: (key: string) => string }) {
   if (Array.isArray(value)) return value.length ? <div>{value.map((item, index) => <DifferenceValue key={index} value={item} fields={fields} text={text} />)}</div> : <span>—</span>
   if (!value || typeof value !== 'object') return <span>{display(value)}</span>
@@ -166,6 +184,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [revisionBusy, setRevisionBusy] = useState(false)
   const vehicleFilterValues = useMemo(() => createVehicleFilterValues(records, language, revisionSummaries), [records, language, revisionSummaries])
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [query, setQuery] = useState(''), [filter, setFilter] = useState<string | undefined>(), [archived, setArchived] = useState(false)
+  const [hasSnapshot, setHasSnapshot] = useState(false), [loadError, setLoadError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [action, setAction] = useState<Action | null>(null), [actionReason, setActionReason] = useState('')
   const [detailTab, setDetailTab] = useState('overview')
   const [reportId, setReportId] = useState<string | null>(null)
@@ -187,6 +206,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   function acceptWorkspace(result: WorkspaceSnapshot) {
     if (result.data) {
       const data = result.data
+      setHasSnapshot(true)
       setRecords(data.records.filter(record => !deletedRecordIds.current.has(record.id) && !deletedRecordIds.current.has(record.vehicleId || record.id)))
       setCatalog(data.catalog); setRevisionSummaries(data.revisionSummaries.filter(summary => !deletedRecordIds.current.has(summary.vehicleId)))
       setModificationEnabled(Boolean(data.modificationEnabled))
@@ -195,20 +215,26 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       setHistoryRevision(value => value + 1); setAudit(data.audit); setQuarantined(data.quarantined)
     }
     setSync(current => JSON.stringify(current) === JSON.stringify(result.sync) ? current : result.sync)
+    setLoadError(null)
     setLoading(false)
   }
+  function reportWorkspaceError(error: unknown) {
+    setLoadError(error instanceof ApiError ? error.message : 'SERVER_ERROR')
+    onError(error)
+  }
   async function load(options: { background?: boolean; full?: boolean } = {}) {
+    if (!options.background) setLoading(true)
     try {
       const scope = createWorkspaceScope()
       await workspaceLoader.load(url => scope.request(url), acceptWorkspace, { audit: view === 'audit', quarantined: view === 'sync', localFirst: !options.background, full: options.full })
-    } catch (error) { onError(error) } finally { setLoading(false) }
+    } catch (error) { reportWorkspaceError(error) } finally { setLoading(false) }
   }
   useImperativeHandle(refreshRef, () => ({ refresh: () => load({ full: true }) }))
   async function loadScoped(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
     await workspaceLoader.load(url => scope.request(url, { signal }), result => { scope.assertCurrent(signal); acceptWorkspace(result) }, { audit: view === 'audit', quarantined: view === 'sync', localOnly: true })
     scope.assertCurrent(signal)
   }
-  const reportInitialError = useEffectEvent(onError)
+  const reportInitialError = useEffectEvent(reportWorkspaceError)
   useEffect(() => {
     const controller = new AbortController(), scope = createWorkspaceScope()
     void workspaceLoader.load(url => scope.request(url, { signal: controller.signal }), acceptWorkspace, { audit: view === 'audit', quarantined: view === 'sync', localFirst: true }).catch(error => { if (!controller.signal.aborted) { reportInitialError(error); setLoading(false) } })
@@ -218,6 +244,12 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     if (!workspaceLoader.busy && !editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load({ background: true })
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
+  useEffect(() => {
+    if (view !== 'sync' || !busy && sync.phase !== 'syncing') return
+    const controller = new AbortController(), scope = createWorkspaceScope()
+    const timer = setInterval(() => { void scope.request<SyncStatus>('/api/business/sync', { signal: controller.signal }).then(state => { if (!controller.signal.aborted) setSync(state) }).catch(() => {}) }, 1000)
+    return () => { clearInterval(timer); controller.abort() }
+  }, [view, busy, sync.phase])
   const selected = records.find(record => record.id === selectedId) || null
   const openVehicle = (id: string, tab = 'overview') => {
     if (id !== selectedId) { attachmentCancel.current?.(); equipmentCancel.current?.(); setEditor(current => current?.kind === 'equipment' && current.vehicleId !== id ? null : current) }
@@ -358,7 +390,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       if (!mayRemind() || epoch !== reminderEpoch.current || !status.due || status.dismissedDay === localReminderDay() || reminderOpen.current) return
       reminderOpen.current = true
       const dismiss = async () => { try { await scope.request('/api/business/backup/reminder/dismiss', { method: 'POST', body: { day: localReminderDay() } }) } finally { reminderOpen.current = false } }
-      reminderDialog.current = modal.confirm({ title: language === 'zh' ? '备份提醒' : 'Backup reminder', content: language === 'zh' ? (status.lastBackupAt ? '本团队已连续 7 天未备份，建议现在备份。' : '尚无团队备份记录，建议先备份一次。') : (status.lastBackupAt ? 'This team has not been backed up for at least 7 days. Back up now.' : 'No team backup is recorded. Create your first backup.'), okText: language === 'zh' ? '立即备份' : 'Back up now', cancelText: language === 'zh' ? '今天稍后提醒' : 'Remind me tomorrow', onCancel: dismiss, onOk: async () => { await dismiss(); scope.assertCurrent(); await startBackup() } })
+      reminderDialog.current = modal.confirm({ title: language === 'zh' ? '备份提醒' : 'Backup reminder', content: language === 'zh' ? (status.lastBackupAt ? '本团队已连续 7 天未备份，建议现在备份。' : '尚无团队备份记录，建议先备份一次。') : (status.lastBackupAt ? 'This team has not been backed up for at least 7 days. Back up now.' : 'No team backup is recorded. Create your first backup.'), okText: language === 'zh' ? '立即备份' : 'Back up now', cancelText: language === 'zh' ? '今天不再提醒' : 'Dismiss for today', onCancel: dismiss, onOk: async () => { await dismiss(); scope.assertCurrent(); await startBackup() } })
     } catch { /* Offline or revoked access must not produce an unverified reminder. */ }
   })
   const closeReminder = useEffectEvent(() => { reminderEpoch.current++; reminderDialog.current?.destroy(); reminderDialog.current = null; reminderOpen.current = false })
@@ -472,13 +504,15 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const selectedReports = reports.filter(record => reportSelection.includes(record.id))
   const canCompare = reportSelection.length === 2 && selectedReports.length === 2 && selectedReports.every(record => !record.archived) && selectedReports[0].vehicleId === selectedReports[1].vehicleId && Boolean(reportAssociationVin(selectedReports[0])) && reportAssociationVin(selectedReports[0]) === reportAssociationVin(selectedReports[1])
 
-  const visibleAudit = view === 'audit' ? audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)}`.toLowerCase().includes(query.toLowerCase())) : []
+  const visibleAudit = view === 'audit' ? audit.filter(entry => `${entry.actor} ${text(entry.action)} ${JSON.stringify(entry.detail)} ${JSON.stringify(entry.identity || {})}`.toLowerCase().includes(query.toLowerCase())) : []
   const selectedController = configuration?.controllerIndex !== null && configuration?.controllerIndex !== undefined ? (configuration.report.data as unknown as ReportData).parsed.controllers[configuration.controllerIndex] : null
   const targetParts = configuration && selectedController ? records.filter(record => record.kind === 'part' && record.vehicleId === configuration.report.vehicleId && record.data.category === 'controller' && !record.archived && keyControllerName(record.data.name) === keyControllerName(selectedController.name)) : []
   const olderReport = Boolean(configuration?.part && doveRecordedTime(configuration.report.data.recordedAt) < doveRecordedTime(configuration.part.data.reportRecordedAt))
   const duplicateTarget = targetParts.length > 1
   const conflictingSources = configuration ? controllerSources(configuration.report).filter(item => keyControllerName(item.controller.name) && controllerSources(configuration.report).filter(other => keyControllerName(other.controller.name) === keyControllerName(item.controller.name)).length > 1) : []
+  if (!hasSnapshot) return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1></div>{loadError ? <Alert type="error" showIcon title={language === 'zh' ? '暂时无法加载数据' : 'Data could not be loaded'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} /> : <Spin />}</section>
   return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1><Space wrap>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
+    {loadError && <Alert className="connection-alert" type="warning" showIcon title={language === 'zh' ? '刷新未完成，当前显示上次加载的数据' : 'Refresh failed. Showing the last loaded data.'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} />}
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div>
@@ -546,9 +580,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     {view === 'reports' && <section className="report-archive workspace-panel"><div className="business-table-controls"><div className="business-filters report-filters"><Select showSearch allowClear optionFilterProp="label" aria-label={text('selectReportVehicle')} placeholder={text('selectReportVehicle')} value={reportVehicle} onChange={value => { setReportVehicle(value); setReportSelection([]) }} options={cars.map(car => ({ value: car.id, label: `${display(car.data.model || car.data.name)} · ${display(car.data.vin)}` }))} /><Input allowClear prefix={<Search size={15} />} aria-label={text('reportCompoundSearch')} placeholder={text('reportCompoundSearch')} value={query} onChange={event => { setQuery(event.target.value); setReportSelection([]) }} /></div></div><div className="report-selection-bar"><div className="report-selection-summary"><span>{text('reports')} · {visibleReports.length}</span><span className="muted">{text('selected')}: {reportSelection.length}</span><Button type="text" size="small" disabled={!reportSelection.length || busy} onClick={() => setReportSelection([])}>{text('clearSelection')}</Button></div><Space className="report-bulk-actions"><Button size="small" disabled={!reportSelection.length || busy} icon={<Download size={16} />} onClick={() => void downloadReports()}>{text('downloadSelected')}</Button>{admin && <Button size="small" disabled={!online || busy || !selectedReports.some(record => !record.archived)} onClick={() => { setBatchReason(''); setBatchArchive(true) }}>{text('archive')}</Button>}<Tooltip title={!canCompare ? text('selectTwoReports') : ''}><Button size="small" disabled={!canCompare || busy} icon={<GitCompare size={16} />} onClick={() => void compare()}>{text('compare')}</Button></Tooltip></Space></div>{reportTable(visibleReports, true)}</section>}
 
     {view === 'history' && <HistoryPanel language={language} refreshToken={historyRevision} reportIds={records.filter(record => record.kind === 'report').map(record => record.id)} onOpenReport={setReportId} />}
-    {view === 'audit' && <section className="workspace-panel audit-panel"><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 650 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, dataIndex: 'actor' }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), render: (_, entry) => <details><summary>{text('details')}</summary><Descriptions column={1} size="small" items={Object.entries(entry.detail).map(([key, value]) => ({ key, label: text(key), children: display(value) }))} /></details> }]} /></section>}
+    {view === 'audit' && <section className="workspace-panel audit-panel"><div className="business-table-controls"><div className="business-filters"><Input prefix={<Search size={15} />} placeholder={text('search')} aria-label={text('search')} allowClear value={query} onChange={event => setQuery(event.target.value)} /></div></div><div className="business-list-heading"><h3>{text('audit')}</h3><span>{visibleAudit.length}</span></div><Table<AuditEntry> rowKey="id" size="small" dataSource={visibleAudit} scroll={{ x: 870 }} pagination={{ pageSize: 15 }} columns={[{ title: text('created'), width: 180, render: (_, entry) => date(entry.created) }, { title: text('actor'), width: 150, render: (_, entry) => entry.identity?.source === 'unknown' ? <span>{language === 'zh' ? '历史身份未确认' : 'Unconfirmed historical identity'}<small className="mono">{entry.actor}</small></span> : entry.actor }, { title: text('actions'), width: 180, render: (_, entry) => text(entry.action) }, { title: text('details'), width: 360, render: (_, entry) => <AuditDetails entry={entry} language={language} text={text} /> }]} /></section>}
     {view === 'sync' && <section className="workspace-panel sync-panel">
       <Alert type={sync.error || sync.conflicts.length || sync.quarantined ? 'warning' : 'success'} showIcon icon={sync.error ? <CloudOff size={18} /> : undefined} title={sync.error ? errorText(sync.error, language) : text(sync.phase)} />
+      {sync.progress && <p role="status" aria-live="polite">{({ opening: ['Reading shared data', '正在读取共享数据'], operations: ['Saving change files', '正在保存变更文件'], records: ['Applying records', '正在处理记录'], publishing: ['Publishing team data', '正在发布团队数据'], refreshing: ['Refreshing this device', '正在刷新本机数据'] }[sync.progress.stage])[language === 'zh' ? 1 : 0]}{sync.progress.total > 0 ? ` · ${sync.progress.completed} / ${sync.progress.total}` : ''}</p>}
       <div className="sync-metrics">{[{ key: 'pending', value: sync.pending }, { key: 'conflicts', value: sync.conflicts.length }, { key: 'quarantined', value: sync.quarantined }].map(item => <div key={item.key}><span>{text(item.key)}</span><strong>{item.value}</strong></div>)}</div>
       <div className="sync-update-meta"><Tooltip title={`${text('lastSync')}: ${sync.lastSync ? date(sync.lastSync) : '—'}`}><span tabIndex={0}><Clock3 size={13} aria-hidden="true" />{text('lastSync')} · {sync.lastSync ? new Date(sync.lastSync).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—'}</span></Tooltip><span>{text('revision')} · {sync.revision || '—'}</span></div>
       <div className="business-list-heading"><h3>{text('conflicts')}</h3><span>{sync.conflicts.length}</span></div>
