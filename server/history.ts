@@ -32,7 +32,7 @@ export class History {
     if (input.offset !== undefined && (!/^-?\d+$/.test(offsetText) || !Number.isInteger(Number(offsetText)) || Math.abs(Number(offsetText)) > 840)) throw new AppError('INVALID_INPUT')
     const endOffsetText = input.endOffset === undefined ? offsetText : text(input.endOffset, 5)
     if (input.endOffset !== undefined && (!/^-?\d+$/.test(endOffsetText) || !Number.isInteger(Number(endOffsetText)) || Math.abs(Number(endOffsetText)) > 840)) throw new AppError('INVALID_INPUT')
-    const clauses: string[] = [], values: string[] = []
+    const clauses: string[] = ["COALESCE(json_extract(changes.payload,'$.action'),'') <> 'modification.enabled'"], values: string[] = []
     if (vehicleId) { clauses.push('changes.vehicle_id=?'); values.push(vehicleId) }
     if (kind) { clauses.push("json_extract(changes.payload,'$.kind')=?"); values.push(kind) }
     if (date) {
@@ -77,7 +77,7 @@ export class History {
     const nonblank = (value: unknown) => typeof value === 'string' ? value.trim() : ''
     const labels = new Map<string, { model: string; vin: string }>()
     if (ids && !ids.length) return labels
-    const rows = this.store.db.prepare(`SELECT ids.vehicle_id, vehicle.data, CASE WHEN vehicle.data IS NULL THEN (SELECT payload FROM changes historical WHERE historical.vehicle_id=ids.vehicle_id AND json_extract(historical.payload,'$.kind')='vehicle' ORDER BY historical.created DESC,historical.rowid DESC LIMIT 1) END AS historical FROM (${ids ? ids.map(() => 'SELECT ? AS vehicle_id').join(' UNION ALL ') : 'SELECT DISTINCT vehicle_id FROM changes'}) ids LEFT JOIN records vehicle ON vehicle.id=ids.vehicle_id AND vehicle.kind='vehicle' ORDER BY ids.vehicle_id`).all(...(ids || []))
+    const rows = this.store.db.prepare(`SELECT ids.vehicle_id, vehicle.data, CASE WHEN vehicle.data IS NULL THEN (SELECT payload FROM changes historical WHERE historical.vehicle_id=ids.vehicle_id AND json_extract(historical.payload,'$.kind')='vehicle' ORDER BY historical.created DESC,historical.rowid DESC LIMIT 1) END AS historical FROM (${ids ? ids.map(() => 'SELECT ? AS vehicle_id').join(' UNION ALL ') : "SELECT DISTINCT vehicle_id FROM changes WHERE COALESCE(json_extract(payload,'$.action'),'') <> 'modification.enabled'"}) ids LEFT JOIN records vehicle ON vehicle.id=ids.vehicle_id AND vehicle.kind='vehicle' ORDER BY ids.vehicle_id`).all(...(ids || []))
     for (const row of rows) {
       const current = row.data ? JSON.parse(row.data as string) : null
       const historical = row.historical ? JSON.parse(row.historical as string) as Change : null
