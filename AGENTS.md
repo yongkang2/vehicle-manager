@@ -8,6 +8,14 @@
 - Read docs/design.md for the consolidated product scope, visual design and interface behavior. It replaces the former root PRODUCT.md, DESIGN.md and UX-CONTRACT.md; maintain this single source instead of recreating those root files.
 - The Chinese guide is docs/user-guide.zh-CN.md, the packaged English guide remains docs/portable-guide.en.md, and detailed implementation notes are in docs/developer-guide.md. See docs/README.md for the index.
 
+## Frontend consistency for every new feature
+
+- Before adding or changing UI, read docs/design.md and inspect the nearest existing workflow. Preserve the restrained navy engineering identity, existing layout and bilingual behavior.
+- Reuse src/theme.ts (palette/interfaceTheme/buttonTheme), the single App ConfigProvider, src/Refined.css and existing Ant Design/business components. Extend the shared owner when a pattern recurs; do not create page-local copies of shared controls or independent color/motion systems.
+- Keep established control sizes, page/section spacing, action emphasis, table behavior and accessible focus states. New overlays use the existing library motion; authored feedback must respect reduced motion and avoid layout animation or new runtime dependencies.
+- Reserve space for both translations in shared controls and responsive navigation. Language changes must not reflow the working area; overlays must not resize or shift the underlying page. Preserve the root scrollbar reservation and check geometry across locales and overlay open/close states.
+- Verify new screens alongside a sibling screen, including populated/empty/error/disabled states, English/Chinese, narrow layouts and keyboard interaction. Update docs/design.md and shared runtime tokens together when an intentional system-wide rule changes.
+
 ## English publication policy (required by the user on 2026-11-04)
 
 - Write all new commit subjects and bodies, PR titles and descriptions, Release titles and descriptions, asset names, and packaged instructions in English. This includes validation, compatibility and upgrade notes. Chat replies and the application's existing localization are outside this policy.

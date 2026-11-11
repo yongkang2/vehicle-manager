@@ -189,13 +189,15 @@
 }
 
 .vehicle-table-filter-bar .business-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) 160px 160px;
     margin: 0;
     gap: 16px;
     min-width: 0
 }
 
 .vehicle-table-filter-bar .business-filters>.ant-input-affix-wrapper {
-    width: 320px;
+    width: 100%;
     max-width: 100%;
     flex: 0 1 320px
 }
@@ -257,17 +259,18 @@
     gap: 12px;
     flex-wrap: wrap;
     margin-left: auto;
-    padding-left: 24px;
-    border-left: 1px solid var(--line)
+    padding-left: 0
 }
 
 .vehicle-column-tools>.ant-btn {
     height: 40px;
-    font-size: 13px
+    font-size: 13px;
+    min-width: 124px
 }
 
 .vehicle-column-tools>.ant-btn-icon-only {
     width: 40px;
+    min-width: 40px;
     flex-shrink: 0
 }
 
@@ -320,6 +323,12 @@
     color: var(--muted, #8791a2)
 }
 
+@media(max-width:900px) {
+    .vehicle-table-filter-bar .business-filters { grid-template-columns: minmax(120px, 1fr) 160px; }
+    .vehicle-table-filter-bar .business-filters>.ant-input-affix-wrapper { grid-column: 1 / -1; }
+    .vehicle-table-filter-bar .business-filters>.ant-select { width: 100%; }
+}
+
 @media(max-width:700px) {
     .vehicle-table-controls {
         gap: 16px;
@@ -328,16 +337,18 @@
     }
 
     .vehicle-table-filter-bar .business-filters {
-        gap: 12px
+        gap: 12px;
+        grid-template-columns: minmax(120px, 1fr) 160px
     }
 
     .vehicle-table-filter-bar .business-filters>.ant-input-affix-wrapper {
         width: 100%;
-        flex-basis: 100%
+        grid-column: 1 / -1
     }
 
     .vehicle-table-filter-bar .business-filters>.ant-select {
         flex: 1;
+        width: 100%;
         max-width: none
     }
 
@@ -349,6 +360,7 @@
 
     .vehicle-column-tools>.vehicle-columns-button {
         width: 40px;
+        min-width: 40px;
         padding-inline: 0;
         gap: 0;
         flex-shrink: 0
@@ -361,4 +373,8 @@
     .vehicle-column-settings-toolbar {
         flex-wrap: wrap
     }
+}
+
+@media(max-width:360px) {
+    .vehicle-table-filter-bar .business-filters { grid-template-columns: minmax(0,1fr); }
 }

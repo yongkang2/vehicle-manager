@@ -30,6 +30,12 @@ On Windows, a per-data-directory named pipe serializes launchers and releases au
 
 For development, run `npm run dev:server` and `npm run dev` in separate terminals. Vite uses 4411 and proxies API requests to 4410. Starting another application version against an already-running data directory is refused; stop the existing service with its matching `Stop.cmd` before upgrading.
 
+## Isolated UI review
+
+Run `npm run preview:ui` to build and serve a synthetic review workspace at `http://127.0.0.1:4426`. Sign in with username `preview` and password `Preview-2026!`. Every run creates a new temporary database and shared directory, printed in the terminal; it does not open the normal application data directory. Port 4426 must be free. Stop the terminal process with Ctrl+C. Temporary review data remains available for inspection; it is never included in portable delivery packages.
+
+The preview contains 12 vehicles spanning four statuses, controllers, batteries, eMotors, thermal components, equipment, modifications, original DOVE reports, attachments, published configuration revisions, history and audit entries. Use Atlas 01 or Orion 02 to inspect populated detail tabs. The remaining vehicles also exercise missing-data states. English/Chinese and normal editing, filtering and dialogs use the actual built application. Demo credentials and generated accounts exist only in this explicitly started preview.
+
 ## First Launch and Shared Path
 
 1. Create a local account; passwords must be 10–128 characters. There are no default credentials. The login and registration screen credits **Developer: TA98755**; this is recognition only, not an account or permission.

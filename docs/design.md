@@ -4,8 +4,8 @@ colors:
   primary: '#243882'
   ink: '#172642'
   muted: '#58677d'
-  line: '#dfe5ee'
-  canvas: '#f3f6fa'
+  line: '#e2e7ef'
+  canvas: '#f5f7fa'
   surface: '#ffffff'
   navy: '#18274d'
   success: '#187760'
@@ -41,6 +41,28 @@ Business and security evidence is maintained in the [development guide](develope
 
 ## Overview
 Operate mode. Reference: https://www.stellantis.com/en . Deep blue navigation anchors a white, quietly structured engineering workspace. The approved direction is restraint and precision, not a marketing landing page.
+
+## Application-wide visual refinement (2026-11-11)
+
+Approved by the user on 2026-11-11. Preserve the existing restrained engineering identity and layout across the application. The user reports that operation already feels responsive; this work addresses visual rigidity rather than assuming an existing performance defect.
+
+Approach: refine the shared theme and presentation layer, with targeted component changes only where shared styling cannot express the intended state. Per-page redesign would undermine consistency; a new animation system would add unnecessary weight. Retain the navy navigation, white working surfaces, local fonts, existing density, control sizes and bilingual workflows.
+
+- Refine neutral surface and border tones, heading/label hierarchy, separators, focus rings and hover/selected states. Preserve readable contrast, semantic status colors and visible disabled states; avoid decorative cards, blur and pronounced shadows.
+- Use brief, interruptible feedback for controls and navigation (approximately 120ms) and floating-panel opening/closing (approximately 180ms). Reuse Ant Design motion ownership for its overlays where appropriate; avoid duplicate CSS and library animations. Do not animate table rows, content height, column widths or entire working pages. Respect reduced-motion preferences, including when toggled while the app is open.
+- Cover authentication, navigation, vehicle lists/details, report/import flows, history/audit, configuration, synchronization and team/personal-workspace surfaces through their shared owners. Preserve geometry, pagination, selection, keyboard focus, confirmations, permissions and offline recovery.
+- Add no production dependencies, remote fonts, animation timers or business requests. Prefer opacity/transform for authored entrance motion and narrowly scoped state transitions; do not apply global transition-all or persistent will-change. Investigate rendering changes only if inspection reveals a concrete issue.
+- Validate with existing tests, lint and build, plus browser inspection with isolated synthetic data. Check representative desktop/narrow screens, English/Chinese, overlays, keyboard focus and reduced motion. Report the screens and flows actually inspected; browser preview does not establish real Windows SMB or large-fleet performance acceptance.
+
+Implementation details such as precise neutral shades, easing and shared selectors remain engineering choices within these constraints. This proposal does not change application version or authorize packaging, publication or merging.
+
+Runtime mapping: src/theme.ts owns palette and interfaceTheme; installThemeTokens exposes palette entries as CSS variables before rendering, and App's single ConfigProvider applies interfaceTheme to all Ant Design components, including portals. Additional state tokens: surfaceTint `#f8f9fc`, hover `#f0f4fa`, selected `#edf2fc`, focus `#b9c8ed`, navHover `#243657` and navActive `#30477b`. Refined.css owns authored states. Ant Design owns overlay transitions; App follows live prefers-reduced-motion changes and Refined.css disables authored motion. New pages inherit these owners and existing control sizes rather than introduce local palettes or motion libraries.
+
+### Stable bilingual geometry and floating panels
+
+Reserve the longer translation's space for shared actions instead of sizing buttons to the active locale: page-heading text buttons have a 140px minimum; vehicle export/column actions have a 124px minimum (column settings stays a 40px icon on narrow screens). The language selector reserves 64px per choice and the connection tag 112px. Vehicle filters use a deterministic grid and mobile navigation uses equal-width cells so language changes do not move the table or change navigation row counts. Narrow page headings stack actions consistently. Preserve natural data wrapping and table-owned horizontal scrolling; do not shrink or truncate operational button labels to force a fit.
+
+The root's stable scrollbar gutter owns viewport reservation. Body width remains auto while library scroll locks continue to prevent background scrolling, avoiding a second scrollbar-width deduction on Windows. Opening or closing a modal/drawer must leave the underlying workspace geometry unchanged. Modal motion uses opacity and at most 6px vertical travel; dropdowns fade without scaling. Feedback is 120ms, modal/menu motion 180ms and drawer motion 200ms. No content/page-scale effects, pressed-button displacement or animated layout dimensions. Reduced motion disables these effects. Future visual changes must compare main control bounds across English/Chinese and the workspace bounds before/during/after overlays, including scrollable and short pages.
 
 ## Colors
 Canonical runtime values live in src/theme.ts; installThemeTokens maps the palette to root CSS variables before React renders, and App.tsx adapts the same palette to Ant Design. Refined.css owns the presentation layer. Existing specialized component styles remain in their owners.
