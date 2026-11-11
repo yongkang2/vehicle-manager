@@ -2,13 +2,15 @@ import { fork, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, openSync, closeSync, existsSync } from 'node:fs'
 import path from 'node:path'
+import net from 'node:net'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const application = existsSync(path.join(root, 'app', 'dist-server')) ? path.join(root, 'app') : root
-const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
-const appVersion = String(packageInfo.version)
+let appVersion
 let prepared
+let startupLog
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 function context() {
   prepared ||= (async () => {
@@ -20,10 +22,54 @@ function context() {
 }
 
 const readState = stateFile => fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value)).catch(() => null)
-async function probe(port) {
-  try { const response = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, { signal: AbortSignal.timeout(1500) }); return response.ok ? await response.json() : null } catch { return null }
+async function probe(port, timeout = 1500) {
+  try { const response = await fetch(`http://127.0.0.1:${port}/api/bootstrap`, { signal: AbortSignal.timeout(timeout) }); return response.ok ? await response.json() : null } catch { return null }
 }
-function alive(pid) { try { process.kill(pid, 0); return true } catch { return false } }
+function alive(pid) { if (!Number.isSafeInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true } catch (error) { return error.code === 'EPERM' } }
+
+// Windows named pipes release automatically after a crash and serialize lock recovery.
+async function launchGuard(instanceId) {
+  if (process.platform !== 'win32') return () => {}
+  const deadline = Date.now() + 60000
+  for (;;) {
+    const guard = net.createServer(socket => socket.destroy())
+    try {
+      await new Promise((resolve, reject) => {
+        guard.once('error', reject)
+        guard.listen(`\\\\.\\pipe\\vehicle-manager-launch-${instanceId}`, resolve)
+      })
+      return () => guard.close()
+    } catch (error) {
+      if (error.code !== 'EADDRINUSE') throw error
+      if (Date.now() >= deadline) throw new Error('Another launcher is still starting this local data. Wait for it to finish, then retry.', { cause: error })
+      await delay(200)
+    }
+  }
+}
+
+async function acquireLock(lock, token) {
+  const deadline = Date.now() + 60000
+  for (;;) {
+    try { await fs.mkdir(lock); break } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      const owner = await readState(path.join(lock, 'owner.json'))
+      const stat = await fs.stat(lock).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
+      if (!stat) continue
+      if (owner && !alive(owner.pid)) {
+        await fs.rm(lock, { recursive: true, force: true })
+        continue
+      }
+      if (!owner && Date.now() - stat.mtimeMs > 5000) {
+        // Only remove an empty orphan; a concurrent owner write prevents rmdir.
+        try { await fs.rmdir(lock); continue } catch (error) { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error }
+      }
+      if (Date.now() >= deadline) throw new Error('A launch is still in progress, or its startup lock needs inspection. Retry after the other launcher closes.')
+      await delay(200)
+    }
+  }
+  try { await fs.writeFile(path.join(lock, 'owner.json'), JSON.stringify({ token, pid: process.pid }), { flag: 'wx' }) }
+  catch (error) { await fs.rmdir(lock).catch(() => {}); throw error }
+}
 
 async function stop() {
   const { stateFile, instanceId } = await context()
@@ -40,6 +86,7 @@ async function stop() {
 async function launch() {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Node.js 24 or newer is required.')
   const { dataDir, stateFile, instanceId } = await context()
+  startupLog = path.join(dataDir, 'startup.log')
   if (existsSync(`${dataDir}.update-lock`)) {
     throw new Error('A legacy application update lock exists. Finish the old update before starting this version.')
   }
@@ -47,18 +94,14 @@ async function launch() {
   let managedExit
   await fs.mkdir(dataDir, { recursive: true })
   const lock = path.join(dataDir, '.launch-lock'), token = randomUUID()
-  try { await fs.mkdir(lock) } catch (error) {
-    if (error.code !== 'EEXIST') throw error
-    const owner = await fs.readFile(path.join(lock, 'owner.json'), 'utf8').then(value => JSON.parse(value)).catch(() => null)
-    if (!owner || alive(owner.pid)) throw new Error('A launch is already in progress. Retry shortly.')
-    await fs.rm(lock, { recursive: true }); await fs.mkdir(lock)
-  }
-  await fs.writeFile(path.join(lock, 'owner.json'), JSON.stringify({ token, pid: process.pid }), { flag: 'wx' })
+  const releaseGuard = await launchGuard(instanceId)
   let port
   try {
+    await acquireLock(lock, token)
     const state = await readState(stateFile)
     if (state) {
-      const current = await probe(state.port)
+      let current = await probe(state.port)
+      if (!current && alive(state.pid)) current = await probe(state.port, 5000)
       if (current?.instanceId === instanceId && current.pid === state.pid) {
         if (current.version === appVersion && (!state.version || state.version === appVersion)) port = state.port
         else {
@@ -75,8 +118,10 @@ async function launch() {
       const entry = path.join(application, 'dist-server', 'server', 'main.js')
       if (!existsSync(entry)) throw new Error('Application build is missing. Run npm run build in the development project.')
       const base = Number(process.env.PORT || 4410)
+      if (!Number.isInteger(base) || base < 0 || base > 65535) throw new Error('PORT must be an integer between 0 and 65535.')
       for (let attempt = 0; attempt < 20 && !port; attempt++) {
         const candidate = base === 0 ? 0 : base + attempt
+        if (candidate > 65535) break
         if (candidate && await probe(candidate)) continue
         const log = openSync(path.join(dataDir, 'startup.log'), 'a')
         let child
@@ -88,12 +133,17 @@ async function launch() {
           if (managed) managedExit = new Promise(resolve => child.once('exit', code => resolve(code ?? 1)))
           port = await new Promise((resolve, reject) => {
             const notice = setTimeout(() => console.log('The application is still starting. A large local database migration may take several minutes; leave this window open.'), 20000)
-            child.once('message', message => { clearTimeout(notice); if (message.type === 'ready' && message.instanceId === instanceId) resolve(message.port); else reject(new Error('Port busy or startup failed.')) })
+            child.once('message', message => { clearTimeout(notice); if (message?.type === 'ready' && message.instanceId === instanceId && Number.isInteger(message.port) && message.port > 0 && message.port <= 65535) resolve(message.port); else reject(Object.assign(new Error(`Service startup failed${message?.code ? ` (${message.code})` : ': invalid startup response'}.`), { code: message?.code })) })
             child.once('error', error => { clearTimeout(notice); reject(error) })
-            child.once('exit', () => { clearTimeout(notice); reject(new Error('Application exited during startup.')) })
+            child.once('exit', (code, signal) => { clearTimeout(notice); reject(new Error(`Application exited during startup (code ${code}, signal ${signal || 'none'}).`)) })
           })
           child.disconnect(); if (!managed) child.unref()
-        } catch (error) { child?.kill(); if (attempt === 19 || base === 0) throw error } finally { closeSync(log) }
+        } catch (error) {
+          if (child?.pid && child.exitCode === null && child.signalCode === null) {
+            await new Promise(resolve => { child.once('exit', resolve); child.kill() })
+          }
+          if (error.code !== 'EADDRINUSE' || attempt === 19 || base === 0) throw error
+        } finally { closeSync(log) }
       }
     }
     if (!port) throw new Error('No free local port is available.')
@@ -104,13 +154,17 @@ async function launch() {
       await new Promise((resolve, reject) => { browser.once('spawn', resolve); browser.once('error', reject) }); browser.unref()
     }
   } finally {
-    const owner = await fs.readFile(path.join(lock, 'owner.json'), 'utf8').then(value => JSON.parse(value)).catch(() => null)
-    if (owner?.token === token) await fs.rm(lock, { recursive: true })
+    try {
+      const owner = await readState(path.join(lock, 'owner.json'))
+      if (owner?.token === token) await fs.rm(lock, { recursive: true })
+    } finally { releaseGuard() }
   }
   if (managedExit && await managedExit !== 0) throw new Error('The managed service did not exit cleanly.')
 }
 
 async function main() {
+  const packageInfo = JSON.parse(await fs.readFile(path.join(application, 'package.json'), 'utf8'))
+  appVersion = String(packageInfo.version)
   if (['--check', '--download', '--apply'].some(flag => process.argv.includes(flag))) throw new Error('Automatic updates are not supported. Download releases manually.')
   if (process.argv.includes('--stop')) return stop()
   return launch()
@@ -118,8 +172,10 @@ async function main() {
 
 if (path.resolve(process.argv[1] || '') === fileURLToPath(import.meta.url)) main().catch(async error => {
   console.error(error.message)
+  console.error(`Launcher log: ${path.join(root, 'launcher.log')}`)
+  if (startupLog) console.error(`Service startup log: ${startupLog}`)
   const stamp = new Date().toISOString()
   const lines = String(error.stack || error).split(/\r?\n/).map(line => `[${stamp}] [launcher] ${line}`).join('\n')
-  try { await fs.appendFile(path.join(root, 'launcher.log'), `${lines}\n`) } catch { }
+  try { await fs.appendFile(path.join(root, 'launcher.log'), `${lines}\n`) } catch (logError) { console.error(`Could not write launcher log: ${logError.message}`) }
   process.exitCode = 1
 })
