@@ -172,3 +172,29 @@ test('history export uses the complete filtered selection and each row own vehic
     }
   } finally { store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
 })
+
+test('history excludes modification activation from lists and exports while retaining audit evidence', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-history-activation-'))
+  const store = new LocalStore(root)
+  try {
+    const activation: Change = { id: 'activation', recordId: 'modification-activation', vehicleId: 'modification-activation', kind: 'modificationGroup', before: null, after: { name: 'Vehicle Modification enabled' }, archivedBefore: null, archivedAfter: false, actor: { id: 'admin', name: 'Admin', role: 'admin', deviceId: 'device' }, reason: 'Client forced update confirmed.', action: 'modification.enabled', sourceId: null, created: '2026-11-09T06:41:04Z' }
+    const edit: Change = { ...activation, id: 'edit', recordId: 'modification', vehicleId: 'car', kind: 'modification', action: 'modification.sharedUpdated', reason: 'Updated equipment', after: { name: 'New equipment' } }
+    const insert = store.db.prepare('INSERT INTO changes VALUES (?,?,?,?,?)')
+    for (const change of [activation, edit]) insert.run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
+    const history = new History(store)
+    assert.equal(history.query({}).total, 1)
+    assert.deepEqual(history.query({ summary: '1' }).items.map(item => item.id), ['edit'])
+    assert.equal(history.query({ q: 'forced update' }).total, 0)
+    assert.equal(history.query({ kind: 'modificationGroup' }).total, 0)
+    assert(!history.query({}).vehicleOptions.some(item => item.id === 'modification-activation'))
+    assert.equal(history.detail('activation').action, 'modification.enabled')
+    const file = await history.export()
+    try {
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.readFile(file.path)
+      const values = JSON.stringify(workbook.worksheets[0].getSheetValues())
+      assert(!values.includes('modification.enabled'))
+      assert(values.includes('modification.sharedUpdated'))
+    } finally { await file.cleanup() }
+  } finally { store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
+})
