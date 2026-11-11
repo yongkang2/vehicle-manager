@@ -8,8 +8,10 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { createReadStream } from 'node:fs'
 import { History } from './history.js'
+import { HistoryQueries } from './history-queries.js'
+import { WorkspaceSnapshots } from './workspace-snapshots.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
-import { Business, checksum, reason, validateManualRecordFields } from './business.js'
+import { Business, reason, validateManualRecordFields } from './business.js'
 import { BusinessSync, atomicFile } from './sync.js'
 import { SharedBusinessSnapshot } from './deletions.js'
 import { DoveService, compareReports } from './dove.js'
@@ -40,6 +42,8 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business), equipment = new EquipmentRecords(business)
   const configurationRevisions = new ConfigurationRevisions(business, synchronization, teams)
   const modifications = new Modifications(business, synchronization, teams)
+  const workspaceSnapshots = new WorkspaceSnapshots()
+  const historyQueries = new HistoryQueries(store.directory)
   function sessionGuard(req: BusinessRequest): () => void {
     const current = () => accounts.db.prepare('SELECT workspace_id,workspace_epoch FROM sessions WHERE token=? AND user_id=? AND expires>?').get(req.sessionToken || '', req.localUser!.id, Date.now()) as { workspace_id: string | null; workspace_epoch: number } | undefined
     const before = current()
@@ -147,9 +151,9 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   // history and sync reads. The fingerprint includes unsynchronized local edits.
   router.get('/workspace', (req: BusinessRequest, res) => {
     if (req.query.audit === '1' && req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
-    const data = { ...configurationRevisions.workingView(), historyRevision: store.get<number>('historyRevision') || 0, audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }
-    const revision = checksum(JSON.stringify(data))
-    res.json({ revision, ...(req.query.known === revision ? {} : { data }), sync: synchronization.status() })
+    const scope = `${req.query.audit === '1'}:${req.query.quarantined === '1'}`
+    const snapshot = workspaceSnapshots.read(scope, req.query.audit === '1' ? null : store.workspaceRevision, () => ({ ...configurationRevisions.workingView(), historyRevision: store.get<number>('historyRevision') || 0, audit: req.query.audit === '1' ? auditEntries() : [], quarantined: req.query.quarantined === '1' ? store.quarantineRows() : [] }), typeof req.query.known === 'string' ? req.query.known : undefined, req.query.delta === '1')
+    res.json({ ...snapshot, sync: synchronization.status() })
   })
   router.get('/records', (req, res) => {
     const kind = req.query.kind ? String(req.query.kind) : undefined
@@ -215,9 +219,12 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     } catch (error) { next(error) }
   })
   router.get('/history', (req, res) => res.json(business.history(req.query.vehicleId ? String(req.query.vehicleId) : undefined)))
-  router.get('/history/query', (req: BusinessRequest, res) => {
-    sessionGuard(req)()
-    res.json({ ...new History(store).query(req.query), sync: synchronization.status() })
+  router.get('/history/query', async (req: BusinessRequest, res) => {
+    const verify = finalAccess(req, res)
+    await verify()
+    const result = await historyQueries.query(req.query)
+    await verify()
+    res.json({ ...result, sync: synchronization.status() })
   })
   router.get('/history/options', (req: BusinessRequest, res) => {
     sessionGuard(req)()
@@ -598,5 +605,5 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     }
     if (pollError) { store.diagnostics.write('info', 'workspace.poll_recovered'); pollError = null }
   }
-  return { business, synchronization, configurationRevisions, tick }
+  return { business, synchronization, configurationRevisions, historyQueries, tick }
 }

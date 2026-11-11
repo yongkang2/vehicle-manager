@@ -19,12 +19,14 @@ await fs.mkdir(shared)
 // Keep the presence channel, but omit automatic idle shutdown for a review server.
 const browserPresence = new BrowserPresence({ onEmpty() {} }), presenceToken = randomBytes(32).toString('hex')
 const client = createApp({ dataDir: path.join(root, 'local'), staticDir: path.join(project, 'dist'), browserPresence, presenceToken })
-const server = client.app.listen(4426, '127.0.0.1')
+const port = Number(process.env.VEHICLE_MANAGER_PREVIEW_PORT || 4426)
+if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid VEHICLE_MANAGER_PREVIEW_PORT')
+const server = client.app.listen(port, '127.0.0.1')
 const disposePresence = installBrowserPresence(server, browserPresence, { token: presenceToken })
-let cookie = '', workspaceToken = ''
+let cookie = '', workspaceToken = '', baseUrl = ''
 async function request(route, method = 'GET', body) {
   const form = body instanceof FormData
-  const response = await fetch(`http://127.0.0.1:4426/api${route}`, {
+  const response = await fetch(`${baseUrl}/api${route}`, {
     method, headers: { Cookie: cookie, 'X-Workspace-Token': workspaceToken, 'X-App-Request': 'vehicle-manager', ...(body && !form ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? form ? body : JSON.stringify(body) : undefined,
   })
@@ -43,6 +45,7 @@ function upload(bytes, filename) {
 async function stop() { browserPresence.stop(); disposePresence(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await client.close() }
 try {
   if (!server.listening) await once(server, 'listening')
+  baseUrl = `http://127.0.0.1:${server.address().port}`
   await request('/register', 'POST', { username: 'preview', displayName: 'Design Review / 界面验收', password: 'Preview-2026!' })
   await request('/setup/configure', 'POST', { path: shared, mode: 'create', teamName: 'UI PREVIEW · 模拟数据', confirmed: true })
   await request('/business/backup/reminder/dismiss', 'POST', { day: localReminderDay() })
@@ -97,7 +100,7 @@ try {
   const records = await request('/business/records')
   const counts = Object.fromEntries([...new Set(records.map(record => record.kind))].map(kind => [kind, records.filter(record => record.kind === kind).length]))
   if (counts.vehicle !== 12 || counts.report !== 4 || counts.equipment !== 8 || counts.attachment !== 4 || counts.part !== 16 || counts.modification !== 4) throw new Error(`Unexpected preview data: ${JSON.stringify(counts)}`)
-  console.log(JSON.stringify({ url: 'http://127.0.0.1:4426', username: 'preview', password: 'Preview-2026!', dataRoot: root, counts }, null, 2))
+  console.log(JSON.stringify({ url: baseUrl, username: 'preview', password: 'Preview-2026!', dataRoot: root, counts }, null, 2))
   process.once('SIGINT', () => { void stop() })
   process.once('SIGTERM', () => { void stop() })
 } catch (error) {

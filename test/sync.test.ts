@@ -9,7 +9,41 @@ import { LocalStore } from '../server/store.js'
 import { Business } from '../server/business.js'
 import { BusinessSync } from '../server/sync.js'
 import { TeamDirectory } from '../server/team.js'
+import { AppError } from '../server/team.js'
+import { SharedBusinessSnapshot } from '../server/deletions.js'
 import type { Actor } from '../shared/business.js'
+
+test('multi-batch publication failure retains every pending operation and a retry applies each exactly once', async context => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-bulk-sync-')), shared = path.join(root, 'shared')
+  await fs.mkdir(shared)
+  const store = new LocalStore(path.join(root, 'local')), business = new Business(store), teams = new TeamDirectory(), sync = new BusinessSync(business, teams)
+  const identity = { deviceId: store.deviceId, deviceName: 'bulk-test', localUserId: 'owner', displayName: 'Owner' }
+  try {
+    const team = await teams.create(shared, 'Bulk retry', identity)
+    const actor: Actor = { id: team.members[0].id, deviceId: store.deviceId, name: 'Owner', role: 'admin' }
+    store.transaction(() => {
+      for (let index = 0; index < 260; index++) business.write({ kind: 'vehicle', data: { vin: `TEST${String(index).padStart(13, '0')}`, status: 'available' }, actor, reason: 'Batch retry fixture' })
+    })
+    let entered!: () => void, release!: () => void
+    const atPublication = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+    const failure = context.mock.method(SharedBusinessSnapshot.prototype, 'publish', async () => { entered(); await gate; throw new AppError('SHARE_IO_ERROR', 503) })
+    const job = sync.synchronize(shared, team.id, identity)
+    try { await atPublication; assert.equal(sync.status().progress?.stage, 'publishing') } finally { release() }
+    assert.equal((await job).phase, 'offline')
+    assert.equal(sync.status().pending, 260)
+    assert.equal(business.list().length, 260)
+    await assert.rejects(fs.access(path.join(shared, 'business', 'HEAD.json')), { code: 'ENOENT' })
+    failure.mock.restore()
+    const result = await sync.synchronize(shared, team.id, identity)
+    assert.equal(result.phase, 'ready'); assert.equal(result.pending, 0); assert.equal(result.progress, undefined)
+    assert.equal(typeof result.timings?.operations, 'number'); assert.equal(typeof result.timings?.records, 'number')
+    assert.equal(business.list().length, 260)
+    assert.equal(store.db.prepare('SELECT count(*) AS total FROM changes').get()!.total, 260)
+    assert.equal((await fs.readdir(path.join(shared, 'business', 'operations'))).length, 260)
+    await sync.synchronize(shared, team.id, identity)
+    assert.equal(store.db.prepare('SELECT count(*) AS total FROM changes').get()!.total, 260)
+  } finally { await sync.settle(); store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
+})
 
 test('approved clients sync records, parts and history, merge fields and retain offline changes', async () => {
   const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-')), shared = path.join(root, 'shared')
