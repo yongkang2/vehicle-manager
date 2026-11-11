@@ -3,7 +3,7 @@ import type { VehicleWatch, WatchColor } from './vehicle-watch'
 import { lazy, Suspense, useEffect, useEffectEvent, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
-import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, Clock3, ChevronRight, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Star, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
+import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, Clock3, ChevronRight, CloudOff, Download, Ellipsis, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
 import { api, ApiError, createWorkspaceScope, download } from './api'
 import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
@@ -519,18 +519,18 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       <ResizableVehicleTable language={language} preferences={tablePreferences.layout} onPreferencesChange={tablePreferences.onChange} saveStatus={tablePreferences.saveStatus} retry={tablePreferences.retry}
         toolbarFilters={filters}
         toolbarActions={<><Button icon={<FileSpreadsheet size={16} />} onClick={() => setCsvExportOpen(true)}>{text('exportCsv')}</Button></>}
-        toolbarMenu={<Dropdown trigger={['click']} menu={{
-          items: [{ key: 'personal-watch', label: text('setWatchedVehicles'), icon: <Star size={15} />, children: cars.filter(car => !car.archived).map(car => ({key:`watch-${car.id}`,label:<span>{Object.hasOwn(watch.vehicles,car.id) ? '✓ ' : ''}{display(car.data.name)}</span>,onClick:()=>markVehicle(car.id,Object.hasOwn(watch.vehicles,car.id)?undefined:'gold')})) }, ...(admin ? [
+        toolbarMenu={admin && <Dropdown trigger={['click']} menu={{
+          items: [
             { key: 'backup', label: language === 'zh' ? '备份数据' : 'Back up data', icon: <Download size={16} />, disabled: !online, onClick: () => void startBackup() },
             { key: 'restore', label: text('restoreBackup'), icon: <RotateCcw size={16} />, disabled: !online || syncPaused, onClick: () => setRestoreOpen(true) },
             { key: 'restore-results', label: language === 'zh' ? '恢复记录' : 'Restore history', icon: <ClipboardCheck size={16} />, onClick: () => void showReceipts() },
-          ] : [])]
+          ]
         }}><Button icon={<Ellipsis size={18} />} aria-label={text('more')} title={text('more')} /></Dropdown>}
         filters={vehicleColumnFilters} onFiltersChange={setVehicleColumnFilters} filterVehicles={cars.filter(car => archived || !car.archived)} filterValues={vehicleFilterValues} filterScopeKey={JSON.stringify([query, filter, archived])}
         rowKey="id" loading={loading} size="middle" pagination={{ pageSize: 10, hideOnSinglePage: true }} dataSource={cars.filter(car => (archived || !car.archived) && (!filter || car.data.status === filter) && Object.values(car.data).join(' ').toLowerCase().includes(query.toLowerCase()))} columns={[
           { key: 'vehicle', title: text('vehicle'), width: 250, fixed: 'left', render: (_, record) => {
             const watched = Object.hasOwn(watch.vehicles, record.id)
-            return <button className="record-link vehicle-details-link" title={text('openVehicleDetails')} onClick={() => openVehicle(record.id)}><span className={`car-symbol${watched ? ' car-symbol-watched' : ''}`}><CarFront size={21} />{watched && <Star size={9} fill="currentColor" className="vehicle-watch-badge" aria-label={text('watchVehicle')} />}</span><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span><ChevronRight size={14} className="vehicle-details-chevron" aria-hidden="true" /></button>
+            return <div className="vehicle-identity"><Tooltip title={text(watched ? 'unwatchVehicle' : 'watchVehicle')}><button type="button" className={`car-symbol vehicle-watch-toggle${watched ? ' car-symbol-watched' : ''}`} aria-label={`${text('watchVehicle')} · ${display(record.data.name)}`} aria-pressed={watched} onClick={() => markVehicle(record.id, watched ? undefined : 'gold')}><CarFront size={21} aria-hidden="true" /></button></Tooltip><button className="record-link vehicle-details-link" title={text('openVehicleDetails')} onClick={() => openVehicle(record.id)}><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span><ChevronRight size={14} className="vehicle-details-chevron" aria-hidden="true" /></button></div>
           } },
           { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
           { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },

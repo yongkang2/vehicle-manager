@@ -65,6 +65,8 @@ Reserve the longer translation's space for shared actions instead of sizing butt
 The root's stable scrollbar gutter owns viewport reservation. Body width remains auto while library scroll locks continue to prevent background scrolling, avoiding a second scrollbar-width deduction on Windows. Opening or closing a modal/drawer must leave the underlying workspace geometry unchanged. Modal motion uses opacity and at most 6px vertical travel; dropdowns fade without scaling. Feedback is 120ms, modal/menu motion 180ms and drawer motion 200ms. No content/page-scale effects, pressed-button displacement or animated layout dimensions. Reduced motion disables these effects. Future visual changes must compare main control bounds across English/Chinese and the workspace bounds before/during/after overlays, including scrollable and short pages.
 
 ## Colors
+Vehicle identity buttons indicate clickability through a quiet hover background, navy title and chevron feedback; do not underline the title or move its geometry. Desktop navigation selection uses its existing filled background and text emphasis, without a vertical accent line. Preserve visible keyboard focus.
+
 Canonical runtime values live in src/theme.ts; installThemeTokens maps the palette to root CSS variables before React renders, and App.tsx adapts the same palette to Ant Design. Refined.css owns the presentation layer. Existing specialized component styles remain in their owners.
 
 ## Typography
@@ -200,7 +202,7 @@ Use the vehicle overview as the visual reference: navy primary actions, white wo
 
 DOVE emphasizes file selection when empty, preview while files await parsing, and review when eligible previews are ready; no handlers or eligibility rules change. File limits move into a click popover, while warnings and import confirmations remain visible. History filters wrap without shrinking labels, and its result count/local-sync toolbar is separated by a quiet rule. Vehicle-scoped history retains its existing unboxed detail layout. Preserve report selection, history IME/search/export, import review and retention, permissions, offline/conflict recovery and both locales. AI remains outside the UI-only integration scope.
 
-Vehicle personal favorites (small fleet): no additional visible row buttons, color menus or favorites view switch. Keep all vehicles together without reordering. A single submenu in the existing vehicle-list More menu lets users toggle their vehicles; a passive gold icon tint and tiny star badge indicate selection. The identity remains one navigation target with a quiet chevron and hover underline. Store by user/workspace/vehicle identity in this browser only; no business writes or cross-device synchronization. Existing saved color values remain readable but render as the single restrained gold marker.
+Vehicle personal favorites (small fleet): click the existing vehicle icon to toggle personal attention; its amber ink (#a86610), pale amber background (#fff0cc) and matching border distinguish followed vehicles from the navy default. The name and chevron remain a separate details target. Use sibling native buttons, localized hover/focus tooltips, aria-pressed and visible keyboard focus; no star badge, visible status text, submenu, extra filter or list reordering. Shared watch colors live in src/theme.ts. Store by user/workspace/vehicle identity in this browser only; no business writes or cross-device synchronization. Existing saved color values remain readable but render as the single amber marker.
 
 ### History field presentation
 
