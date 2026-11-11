@@ -99,8 +99,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     } }
   }
   function auditEntries() {
-    const team = store.get<TeamDocument>('cachedTeam')
-    return store.db.prepare('SELECT * FROM local_events ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(row => ({ id: row.id, created: row.created, action: row.action, detail: JSON.parse(row.detail as string), actor: team?.members.find(member => member.id === row.actor_id)?.name || accounts.db.prepare('SELECT display_name FROM accounts WHERE id=?').get(row.actor_id)?.display_name || row.actor_id }))
+    return store.auditEntries(accounts)
   }
   const router = express.Router()
   function writeRoute(method: 'post' | 'put' | 'get' | 'delete', route: string, ...handlers: RequestHandler[]) {
@@ -234,7 +233,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const file = await new History(store).export(req.query)
     try {
       await verify()
-      store.event(req.businessContext!.actor.id, 'business.exported', { format: 'xlsx', filters: req.query })
+      store.event(req.businessContext!.actor, 'business.exported', { format: 'xlsx', filters: req.query })
       res.attachment('vehicle-history.xlsx').type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       await pipeline(createReadStream(file.path), res)
     } finally { await file.cleanup() }
@@ -325,7 +324,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     const record = business.get(String(req.params.id))
     if (!['report', 'attachment'].includes(record.kind)) throw new AppError('INVALID_INPUT')
     const bytes = await business.readBlob(String(record.data.checksum))
-    store.event(req.businessContext!.actor.id, 'file.downloaded', { recordId: record.id })
+    store.event(req.businessContext!.actor, 'file.downloaded', { recordId: record.id })
     res.attachment(String(record.data.name)).type('application/octet-stream').send(bytes)
   })
   writeRoute('post', '/dove/preview', upload.single('file'), async (req: BusinessRequest, res) => {
@@ -397,7 +396,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       archive.append(bytes, { name: `${index + 1}-${path.basename(String(record.data.name)).replace(/[\\/:*?"<>|]/g, '_')}` })
       try { await entry } catch (error) { if (res.destroyed) return; throw error }
     }
-    store.event(req.businessContext!.actor.id, 'file.downloaded', { recordIds: ids })
+    store.event(req.businessContext!.actor, 'file.downloaded', { recordIds: ids })
     if (res.destroyed) return
     await Promise.race([archive.finalize(), once(res, 'close')])
   })
@@ -431,7 +430,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     res.json(updated)
   })
   router.get('/export', (req: BusinessRequest, res) => {
-    store.event(req.businessContext!.actor.id, 'business.exported', {})
+    store.event(req.businessContext!.actor, 'business.exported', {})
     res.attachment('vehicle-data.json').json({ exportedAt: new Date().toISOString(), records: business.list() })
   })
   writeRoute('get', '/export/records', (_req, res) => res.json(business.list()))
@@ -455,7 +454,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     // write during ZIP creation must require a fresh selection rather than return stale matches.
     const currentVehicles = new Map(business.list('vehicle').map(record => [record.id, record]))
     if (vehicleIds.some(id => { const current = currentVehicles.get(id); return !current || !matchesExportVehicle(current, configuration) })) throw new AppError('EXPORT_SELECTION_CHANGED', 409)
-    store.event(req.businessContext!.actor.id, 'business.exported', { format: 'csv', vehicles: vehicleIds.length, columns: configuration.columns, counts, language: configuration.language })
+    store.event(req.businessContext!.actor, 'business.exported', { format: 'csv', vehicles: vehicleIds.length, columns: configuration.columns, counts, language: configuration.language })
     res.attachment(`vehicle-data-${new Date().toISOString().slice(0, 10)}.zip`).type('application/zip').send(bytes)
   })
   writeRoute('get', '/export-templates', (req: BusinessRequest, res) => res.json(exportTemplates.list(req.localUser!.id)))
@@ -505,10 +504,10 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     })
     res.attachment(`vehicle-${req.query.source === 'local' ? 'local' : 'team'}-backup-${context.configuration.teamId}-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`).type('application/zip')
     await pipeline(stream, res)
-    store.event(context.actor.id, 'backup.created', { source: req.query.source === 'local' ? 'local' : 'team' })
+    store.event(context.actor, 'backup.created', { source: req.query.source === 'local' ? 'local' : 'team' })
     if (req.query.source !== 'local') {
       try { cache(await teams.recordBackup(context.configuration.sharedPath, context.configuration.teamId, context.identity)) }
-      catch { store.event(context.actor.id, 'backup.reminder-update-failed', {}) }
+      catch { store.event(context.actor, 'backup.reminder-update-failed', {}) }
     }
   })
   writeRoute('get', '/restore/receipts', async (req: BusinessRequest, res) => { await access(req, true); res.json(restoreReceipts(business).map(receipt => ({ ...receipt, pendingModificationImportIds: pendingModificationRestores(business, receipt.requestId).map(entry => entry.id) }))) })

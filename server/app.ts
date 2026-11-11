@@ -6,7 +6,7 @@ import { rateLimit } from 'express-rate-limit'
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { LocalStore } from './store.js'
+import { LocalStore, auditAccountContext } from './store.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
 import type { Access, Identity, LocalUser, Role, Status, TeamDocument } from '../shared/types.js'
 import { Workspaces } from './workspaces.js'
@@ -90,7 +90,8 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       const account = store.db.prepare('SELECT accounts.* FROM sessions JOIN accounts ON accounts.id=sessions.user_id WHERE token=? AND expires>?').get(token, Date.now()) as Account | undefined
       if (account) { req.localUser = userOf(account); req.sessionToken = token }
     }
-    next()
+    if (req.localUser) auditAccountContext.run(req.localUser, next)
+    else next()
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
   app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
@@ -113,7 +114,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       const hash = scryptSync(password, salt, 64).toString('hex')
       store.transaction(() => {
         store.db.prepare('INSERT INTO accounts(id,username,display_name,salt,hash,created) VALUES(?,?,?,?,?,?)').run(id, username, displayName, salt, hash, new Date().toISOString())
-        store.event(id, 'account.registered', {})
+        store.event({ id, username, displayName }, 'account.registered', {})
       })
       const account = { id, username, display_name: displayName, salt, hash }
       session(res, account); res.status(201).json(userOf(account))
@@ -126,7 +127,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       const account = store.db.prepare('SELECT * FROM accounts WHERE username=?').get(username) as Account | undefined
       const candidate = scryptSync(password, account?.salt || 'unrecognized-user', 64)
       if (!account || !timingSafeEqual(candidate, Buffer.from(account.hash, 'hex'))) throw new AppError('INVALID_CREDENTIALS', 401)
-      store.event(account.id, 'account.login', {}); session(res, account); res.json(userOf(account))
+      store.event(userOf(account), 'account.login', {}); session(res, account); res.json(userOf(account))
     } catch (error) { next(error) }
   })
   app.use('/api', (req: AuthRequest, res, next) => req.localUser ? next() : next(new AppError('LOGIN_REQUIRED', 401)))
@@ -201,7 +202,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       const workspace = workspaces.connect(team, check.path, req.localUser!.id)
       const state = workspace.synchronization.status()
       select(req, team.id, !state.pending && !state.conflicts.length)
-      workspace.store.event(req.localUser!.id, 'workspace.configured', { teamId: team.id, mode: req.body.mode })
+      workspace.store.event(req.localUser!, 'workspace.configured', { teamId: team.id, mode: req.body.mode })
       res.set('X-Workspace-Token', workspaces.token(workspaces.session(req.sessionToken!)))
       res.json(await status(req))
     } catch (error) { next(error) }
