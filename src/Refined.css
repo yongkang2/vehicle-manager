@@ -244,13 +244,16 @@ h1 { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -.025
 
 .vehicle-details-link { flex: 1; min-width: 0; border-radius: 6px; padding: 6px 2px; }
 .vehicle-details-link strong { color: var(--brand); }
-.vehicle-details-link > span:nth-child(2) { flex: 1; min-width: 0; }
+.vehicle-identity { display: flex; align-items: center; gap: 9px; }
+.vehicle-details-link > span { flex: 1; min-width: 0; }
 .vehicle-details-link { transition: background-color 120ms ease; }
 .vehicle-details-link:hover { background: var(--hover); }
 .vehicle-details-link strong, .vehicle-details-chevron { transition: color 120ms ease; }
 .vehicle-details-link:is(:hover, :focus-visible) .vehicle-details-chevron { color: var(--brand); }
 .vehicle-details-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .vehicle-details-chevron { flex-shrink: 0; color: var(--muted); }
-/* One passive personal marker; no extra row controls. */
-.car-symbol-watched { position: relative; color: #9a6700; background: #faf3df; }
-.vehicle-watch-badge { position: absolute; right: -2px; bottom: -2px; background: var(--surface); border-radius: 50%; box-sizing: content-box; padding: 2px; }
+.vehicle-watch-toggle { cursor: pointer; transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease; }
+.workspace-layout .vehicle-watch-toggle:hover { background: var(--focus); border-color: var(--brand); }
+.workspace-layout .vehicle-watch-toggle.car-symbol-watched { color: var(--watchInk); background: var(--watchBg); border-color: var(--watchInk); }
+.workspace-layout .vehicle-watch-toggle.car-symbol-watched:hover { background: var(--watchHover); }
+.vehicle-watch-toggle:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
