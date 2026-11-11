@@ -1,6 +1,6 @@
 # Vehicle Manager: Portable User Guide
 
-This guide covers application **1.8.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+This guide covers application **1.9.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
 
 ## Installation
 
@@ -69,7 +69,7 @@ After all collaborating installations upgrade, an administrator can enable confi
 
 Administrators can disable, remove or restore any configuration component type, including the four built-ins. This changes future revision reviews only: vehicle sections, installed components and published history remain available. Removed types can be found through Show removed and restored with their original identity. Catalog changes invalidate open reviews. Published revisions stay read-only; corrections create another revision.
 
-Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.8.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
+Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.9.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
 
 
 ## Backups and upgrades
