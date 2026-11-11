@@ -8,7 +8,7 @@ import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
 import { AppError, TeamDirectory, assertTeamLock } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
-import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStage, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 import { componentTypeDefinitions, isProtectedKind, validateConfigurationRecords, validateConfigurationRevisionRecord, validateComponentTypeRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 import type { ConfigurationImport } from '../shared/configuration-revisions.js'
 import { collectChangeFileKeys, collectRecordFileKeys, hasEnhancedModificationText, modificationFiles, validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
@@ -64,6 +64,14 @@ export class BusinessSync {
   private previews = new Map<string, PreviewState>()
   private phase: SyncStatus['phase'] = 'idle'
   private error: string | null = null
+  private progress: SyncStatus['progress']
+  private timings: NonNullable<SyncStatus['timings']> = {}
+  private stageStarted = 0
+  private advance(stage?: SyncStage, total = 0): void {
+    if (this.progress) this.timings[this.progress.stage] = Math.round(performance.now() - this.stageStarted)
+    this.progress = stage ? { stage, completed: 0, total } : undefined
+    this.stageStarted = performance.now()
+  }
   // Only reuse a fully ingested snapshot in this process. Explicit sync and
   // maintenance always verify files; background checks also do so every 5 min.
   private verified: { directory: string; head: string; at: number } | null = null
@@ -75,7 +83,7 @@ export class BusinessSync {
     const configurationImports = store.get<ConfigurationImport[]>('pendingConfigurationImports') || []
     const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
     const modificationImports = store.get<ModificationImport[]>('pendingModificationImports') || []
-    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length + modificationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
+    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length + modificationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision'), ...(this.progress ? { progress: { ...this.progress } } : {}), ...(Object.keys(this.timings).length ? { timings: { ...this.timings } } : {}) }
   }
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity, options: { ifChanged?: boolean } = {}): Promise<SyncStatus> {
@@ -84,15 +92,17 @@ export class BusinessSync {
     let failure: unknown
     this.runningFull = !options.ifChanged
     this.phase = 'syncing'
+    this.timings = {}; this.advance('opening')
     this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team, options.ifChanged))).catch(error => {
       failure = error
       this.verified = null
       this.error = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
       this.phase = ['SHARE_BUSY', 'SHARE_LOCK_LOST', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
+      this.advance()
       return this.status()
     }).then(state => {
       const key = JSON.stringify([state.phase, state.error, state.pending, state.conflicts.length]), durationMs = Math.round(performance.now() - started)
-      if (key !== this.diagnosticState || !state.error && durationMs >= 2000) this.business.store.diagnostics.write(state.error ? 'warn' : 'info', state.error ? 'sync.failed' : 'sync.changed', { phase: state.phase, code: state.error, pending: state.pending, conflicts: state.conflicts.length, durationMs }, failure)
+      if (key !== this.diagnosticState || !state.error && durationMs >= 2000) this.business.store.diagnostics.write(state.error ? 'warn' : 'info', state.error ? 'sync.failed' : 'sync.changed', { phase: state.phase, code: state.error, pending: state.pending, conflicts: state.conflicts.length, durationMs, timings: state.timings }, failure)
       this.diagnosticState = key
       return state
     }).finally(() => { this.running = null })
@@ -358,6 +368,7 @@ export class BusinessSync {
       const head = await SharedBusinessSnapshot.readHead(this.business, shared, team.id)
       if (head && JSON.stringify(head) === previous.head && head.revision === state.revision) {
         this.error = null; this.phase = 'ready'
+        this.advance()
         return this.status()
       }
     }
@@ -451,32 +462,50 @@ export class BusinessSync {
       }
       const pending = this.business.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY seq").all().map(row => JSON.parse(row.payload as string) as Operation)
       const groups = new Map<string, Operation[]>()
+      const operationFiles: Operation[] = []
       for (const operation of pending) {
         const deleted = markers.find(marker => marker.recordIds.includes(operation.recordId) || marker.vehicleId === operation.vehicleId || marker.vehicleId === operation.recordId)
         if (deleted) { store.quarantineOperation(operation, deleted.vehicleId); continue }
-        if (!(protocol < 5 && operation.kind === 'modification' && operationHasEnhancedModificationText(operation))) await immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))
+        if (!(protocol < 5 && operation.kind === 'modification' && operationHasEnhancedModificationText(operation))) operationFiles.push(operation)
         if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) continue
         if (!groups.has(operation.recordId)) groups.set(operation.recordId, [])
         groups.get(operation.recordId)!.push(operation)
+      }
+      this.advance('operations', operationFiles.length)
+      for (let offset = 0; offset < operationFiles.length; offset += 8) {
+        const results = await Promise.allSettled(operationFiles.slice(offset, offset + 8).map(operation => immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))))
+        const failure = results.find(result => result.status === 'rejected')
+        if (failure?.status === 'rejected') throw failure.reason
+        this.progress!.completed = Math.min(offset + 8, operationFiles.length)
       }
       const conflicts: SyncConflict[] = []
       const operationOrder = (operation: Operation) => operation.kind === 'vehicle' ? 0 : operation.kind === 'equipment' ? 1 : operation.kind === 'attachment' ? 3 : 2
       const ordered = [...groups.values()].sort((left, right) => operationOrder(left[0]) - operationOrder(right[0]))
       const ordinals = new Map(pending.map((operation, index) => [operation.id, index]))
       const retainedEquipmentUploads = new Set<string>()
-      for (const operations of ordered) {
-        const conflict = this.checkConflict(master, operations, team, retainedEquipmentUploads)
-        if (conflict && !operations[0].decision) { conflicts.push(conflict); continue }
-        if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive', '_equipmentParent', '_equipmentLink'].includes(field))) { conflicts.push(conflict); continue }
-        await this.filesToShare(directory, operations)
+      this.advance('records', ordered.length)
+      for (let offset = 0; offset < ordered.length; offset += 128) {
         master.exec('BEGIN IMMEDIATE')
-        try { this.apply(master, operations); master.exec('COMMIT'); changed = true } catch (error) { master.exec('ROLLBACK'); throw error }
+        try {
+          for (const operations of ordered.slice(offset, offset + 128)) {
+            const conflict = this.checkConflict(master, operations, team, retainedEquipmentUploads)
+            if (conflict && !operations[0].decision) { conflicts.push(conflict); continue }
+            if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive', '_equipmentParent', '_equipmentLink'].includes(field))) { conflicts.push(conflict); continue }
+            await this.filesToShare(directory, operations)
+            this.apply(master, operations); changed = true
         // Files accepted before a local archive stay with that equipment in the
         // same atomic publication. A later remote archive never grants this.
-        const archive = operations.find(operation => operation.kind === 'equipment' && operation.desired.archived && !operation.base?.archived && !operation.decision)
-        if (archive) for (const queued of groups.values()) {
-          const upload = queued[0]
-          if (upload.kind === 'attachment' && !upload.base && parseEquipmentAttachmentId(upload.desired.data.equipmentId) === archive.recordId && ordinals.get(upload.id)! < ordinals.get(archive.id)!) retainedEquipmentUploads.add(upload.recordId)
+            const archive = operations.find(operation => operation.kind === 'equipment' && operation.desired.archived && !operation.base?.archived && !operation.decision)
+            if (archive) for (const queued of groups.values()) {
+              const upload = queued[0]
+              if (upload.kind === 'attachment' && !upload.base && parseEquipmentAttachmentId(upload.desired.data.equipmentId) === archive.recordId && ordinals.get(upload.id)! < ordinals.get(archive.id)!) retainedEquipmentUploads.add(upload.recordId)
+            }
+          }
+          master.exec('COMMIT')
+          this.progress!.completed = Math.min(offset + 128, ordered.length)
+        } catch (error) {
+          master.exec('ROLLBACK')
+          throw error
         }
       }
       for (const record of deferredModifications) {
@@ -522,14 +551,17 @@ export class BusinessSync {
       if (protocol >= 3) { try { const view = (master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow); assertConfigurationProtocol(view, protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
       try { validateModificationRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow), protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
       validateEquipmentAttachmentRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow))
+      this.advance('publishing')
       if (changed) {
         await snapshot.publish(team.id, protocol)
       }
+      this.advance('refreshing')
       await this.ingest(snapshot.db, directory, snapshot.head!, conflicts)
       this.error = null; this.phase = conflicts.length ? 'conflict' : 'ready'
       this.verified = { directory: shared, head: JSON.stringify(snapshot.head), at: Date.now() }
+      this.advance()
       return this.status()
-    } finally { await snapshot.close() }
+    } finally { this.advance(); await snapshot.close() }
   }
   async resolve(directory: string, teamId: string, identity: Identity, actor: Actor, recordId: string, token: string, choices: Record<string, string>, reason: string): Promise<SyncStatus> {
     return this.business.store.runWrite(() => this.resolveWithinWrite(directory, teamId, identity, actor, recordId, token, choices, reason))

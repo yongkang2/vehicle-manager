@@ -148,9 +148,15 @@ export class LocalStore {
         }
         this.db.exec(`CREATE INDEX IF NOT EXISTS changes_day ON changes(julianday(CASE WHEN created <> 'now' THEN created END));
           CREATE INDEX IF NOT EXISTS changes_vehicle_day ON changes(vehicle_id,julianday(CASE WHEN created <> 'now' THEN created END));
+          CREATE INDEX IF NOT EXISTS changes_kind_vehicle ON changes(json_extract(payload,'$.kind'),vehicle_id);
 `)
         // Local derived invalidation metadata; never copied into shared snapshots or backups.
         for (const action of ['INSERT', 'UPDATE', 'DELETE']) this.db.exec(`CREATE TRIGGER IF NOT EXISTS changes_revision_${action.toLowerCase()} AFTER ${action} ON changes BEGIN INSERT INTO settings VALUES('historyRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+        for (const table of ['records', 'changes', 'vehicle_deletions', 'quarantined_operations']) for (const action of ['INSERT', 'UPDATE', 'DELETE']) this.db.exec(`CREATE TRIGGER IF NOT EXISTS workspace_${table}_${action.toLowerCase()} AFTER ${action} ON ${table} BEGIN INSERT INTO settings VALUES('workspaceRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+        for (const action of ['INSERT', 'UPDATE', 'DELETE']) {
+          const row = action === 'DELETE' ? 'OLD' : 'NEW'
+          this.db.exec(`CREATE TRIGGER IF NOT EXISTS workspace_settings_${action.toLowerCase()} AFTER ${action} ON settings WHEN ${row}.key IN ('pendingConfigurationImports','businessProtocol','configurationEnabled','configurationPolicyEnabled') BEGIN INSERT INTO settings VALUES('workspaceRevision','1') ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1; END`)
+        }
       })
       this.deviceId = selectedDevice
     } catch (error) { this.db.close(); throw error }
@@ -215,6 +221,7 @@ export class LocalStore {
     for (const row of this.canonicalDeletions.values()) rows.set(row.vehicleId, row)
     return [...rows.values()]
   }
+  get workspaceRevision(): string { return `${this.get<number>('workspaceRevision') || 0}:${this.canonicalDeletions.size}` }
 
   /** Use only for deletions already committed to the canonical shared HEAD. */
   rememberDeletions(rows: VehicleDeletion[]): void {

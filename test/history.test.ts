@@ -7,6 +7,45 @@ import ExcelJS from 'exceljs'
 import { LocalStore } from '../server/store.js'
 import { History } from '../server/history.js'
 import type { Change } from '../shared/business.js'
+import { HistoryQueries } from '../server/history-queries.js'
+
+test('derived history search tracks append, update, delete and literal nested values without losing exact matching', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-history-search-')), store = new LocalStore(root)
+  try {
+    const insert = store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)')
+    const change: Change = { id: 'one', recordId: 'part', vehicleId: 'car', kind: 'part', before: null, after: { nested: { serial: 'OLD_100%', note: 'quote" slash\\ test', softwareVersion: 'v1', unicode: 'Äctor', state: true, nul: 'before\0notVisible', later: 'after-null-visible' } }, archivedBefore: null, archivedAfter: false, actor: { id: 'actor', name: 'Actor', role: 'member', deviceId: 'device' }, reason: 'indexed', action: 'created', sourceId: null, created: '2026-11-11T00:00:00Z' }
+    insert.run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
+    const history = new History(store)
+    for (const q of ['OLD_100%', 'quote"', 'slash\\', 'Actor 软件版本 v1', 'Äctor', 'after-null-visible']) assert.equal(history.query({ q }).total, 1, q)
+    assert.equal(history.query({ q: 'notVisible' }).total, 0)
+    assert.equal(history.query({ q: 'äctor' }).total, 0)
+    assert.equal(history.query({ q: 'missing' }).total, 0)
+    insert.run('two', 'part', 'car', JSON.stringify({ ...change, id: 'two', reason: 'appended' }), change.created)
+    assert.equal(history.query({ q: 'appended' }).total, 1)
+    store.db.prepare('UPDATE changes SET payload=? WHERE id=?').run(JSON.stringify({ ...change, reason: 'corrected' }), 'one')
+    assert.equal(history.query({ q: 'corrected' }).total, 1)
+    store.db.prepare('DELETE FROM changes WHERE id=?').run('one')
+    assert.equal(history.query({ q: 'corrected' }).total, 0)
+    assert.equal(history.query({ q: 'OLD_100%' }).total, 1)
+  } finally { store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
+})
+
+test('background history queries preserve results, observe new writes and release database handles', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-history-worker-')), store = new LocalStore(root), queries = new HistoryQueries(root)
+  try {
+    const change: Change = { id: 'one', recordId: 'part', vehicleId: 'car', kind: 'part', before: null, after: { software: 'indexed value' }, archivedBefore: null, archivedAfter: false, actor: { id: 'actor', name: 'Actor', role: 'member', deviceId: 'device' }, reason: 'background', action: 'created', sourceId: null, created: '2026-11-11T00:00:00Z' }
+    const insert = store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)')
+    insert.run(change.id, change.recordId, change.vehicleId, JSON.stringify(change), change.created)
+    assert.deepEqual(await queries.query({ q: 'indexed', summary: '1' }), new History(store).query({ q: 'indexed', summary: '1' }))
+    insert.run('two', 'part', 'car', JSON.stringify({ ...change, id: 'two' }), change.created)
+    assert.equal((await queries.query({ q: 'indexed', summary: '1' })).total, 2)
+    await assert.rejects(queries.query({ page: '0' }), /INVALID_INPUT/)
+    assert.equal((await queries.query({ q: 'indexed' })).total, 2)
+    store.db.prepare('DELETE FROM changes WHERE id=?').run('one')
+    assert.equal((await queries.query({ q: 'indexed' })).total, 1)
+  } finally { await queries.close(); store.db.close(); await fs.rm(root, { recursive: true, force: true }) }
+  await assert.rejects(queries.query({}), /REQUEST_CANCELLED/)
+})
 
 test('history searches all persisted changes, paginates stably and exports deleted fields and attribution', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-history-'))

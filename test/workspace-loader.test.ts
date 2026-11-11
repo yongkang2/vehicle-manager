@@ -40,3 +40,24 @@ test('refresh failures retain local data and manual refresh requests full valida
   }, value => accepted.push(value.revision), { localFirst: true, full: true }), /NETWORK_ERROR/)
   assert.deepEqual(accepted, ['local']); assert.match(calls[1], /full=1/); assert.equal(loader.busy, false)
 })
+
+test('delta refresh replaces changed records, removes deleted records and falls back on a mismatched baseline', async () => {
+  const loader = new WorkspaceLoader(), first = snapshot('first'), accepted: WorkspaceSnapshot[] = []
+  const record = (id: string, owner: string) => ({ id, kind: 'vehicle' as const, vehicleId: null, data: { owner }, archived: false, version: 1, updated: '2026-11-11T00:00:00Z' })
+  first.data!.records = [record('a', 'Before'), record('b', 'Removed')]
+  await loader.load(async <T>() => first as T, value => accepted.push(value), { localOnly: true })
+  const { records: _records, ...metadata } = first.data!
+  await loader.load(async <T>(url: string) => {
+    assert.match(url, /delta=1/)
+    return { ...snapshot('second', false), patch: { baseRevision: 'first', upsert: [record('a', 'After'), record('c', 'New')], removed: ['b'], data: metadata } } as T
+  }, value => accepted.push(value), { localOnly: true })
+  assert.deepEqual(accepted.at(-1)!.data!.records.map(item => [item.id, item.data.owner]), [['a', 'After'], ['c', 'New']])
+  let requests = 0
+  await loader.load(async <T>(url: string) => {
+    if (++requests === 1) return { ...snapshot('third', false), patch: { baseRevision: 'wrong', upsert: [], removed: [], data: metadata } } as T
+    assert.doesNotMatch(url, /known=|delta=/)
+    return snapshot('third') as T
+  }, value => accepted.push(value), { localOnly: true })
+  assert.equal(requests, 2)
+  assert.equal(accepted.at(-1)!.revision, 'third')
+})
