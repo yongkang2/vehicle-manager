@@ -6,7 +6,7 @@ import { createWorkspaceScope } from './api'
 import { errorText, type Language } from './i18n'
 import { translateBusiness } from './business-i18n'
 import type { Change, SyncStatus } from '../shared/business'
-import { historyChangedFields } from './history-presentation'
+import { historyChangedFields, historyFieldValue, historyIsReference } from './history-presentation'
 import './HistoryPanel.css'
 
 type HistoryItem = Change & { vehicleLabel: string; changedFieldCount: number; statusChanged: boolean }
@@ -32,7 +32,23 @@ function HistoryEntry({ change, language, reportIds, onOpenReport }: { change: H
   const kind = change.kind === 'part' ? category === 'battery' ? text('hvBattery') : category === 'controller' || /^(VCU|MCU|BMS|MSB|BMS\/MSB)$/i.test(name) ? text('part') : zh ? '部件' : 'component' : text(change.kind)
   const vehicleLabel = change.vehicleLabel && change.vehicleLabel !== change.vehicleId ? change.vehicleLabel : zh ? '未知车辆' : 'Unknown vehicle'
   const object = change.kind === 'vehicle' ? vehicleLabel : zh ? `${vehicleLabel} 的 ${name ? `${name} ` : ''}${kind}` : `${vehicleLabel} · ${name ? `${name} ` : ''}${kind}`
-  const diff = (key: string) => <div className="history-field" key={key}><strong>{text(key)}</strong><del>{value(detail?.before?.[key], missing)}</del><span aria-label={zh ? '变为' : 'changed to'}>→</span><ins>{value(detail?.after[key], missing)}</ins></div>
+  const fieldValue = (key: string, item: unknown, after = false) => {
+    if (historyIsReference(change.kind, key)) return item ? (zh ? '已关联' : 'Linked') : (zh ? '未关联' : 'Not linked')
+    if (key === 'checksum' && ['report', 'attachment'].includes(change.kind)) return item === undefined ? missing : after ? (zh ? '更新后的文件内容' : 'Updated file contents') : (zh ? '原文件内容' : 'Previous file contents')
+    const visible = historyFieldValue(key, item)
+    if (key === 'attachments' && Array.isArray(visible)) return visible.map(file => {
+      if (!file || typeof file !== 'object') return value(file, missing)
+      return `${file.name || '—'} (${text(file.archived ? 'archived' : 'available')})`
+    }).join('\n') || '—'
+    return value(visible, missing)
+  }
+  const fieldLabel = (key: string) => key === 'checksum' && ['report', 'attachment'].includes(change.kind) ? (zh ? '文件内容' : 'File contents') : text(key)
+  const fieldNotice = (key: string) => {
+    if (historyIsReference(change.kind, key) && detail?.before?.[key] && detail.after[key]) return zh ? '关联对象已更换；完整标识见导出。' : 'Linked object changed; full identifiers are included in the export.'
+    if (key === 'attachments' && JSON.stringify(historyFieldValue(key, detail?.before?.[key])) === JSON.stringify(historyFieldValue(key, detail?.after[key]))) return zh ? '文件内容已变更，文件名和归档状态相同。' : 'File contents changed; filenames and archive states are unchanged.'
+    return ''
+  }
+  const diff = (key: string) => <div className="history-field" key={key}><strong>{fieldLabel(key)}</strong><del>{fieldValue(key, detail?.before?.[key])}</del><span aria-label={zh ? '变为' : 'changed to'}>→</span><ins>{fieldValue(key, detail?.after[key], true)}</ins>{fieldNotice(key) && <p className="muted history-field-notice">{fieldNotice(key)}</p>}</div>
   return <article className="history-entry">
     <header><p className="history-summary"><strong>{change.actor.name}</strong><span className="history-action">{text(change.action === 'updated' ? 'updatedAction' : change.action)}</span><span className="history-object">{object}</span></p><time dateTime={change.created}>{new Date(change.created).toLocaleString(zh ? 'zh-CN' : 'en-GB')}</time></header>
     <p className="history-reason"><span>{text('reason')}{zh ? '： ' : ': '}</span>{change.reason || '—'}</p>
@@ -42,7 +58,7 @@ function HistoryEntry({ change, language, reportIds, onOpenReport }: { change: H
       {(fields.length > 0 || statusChanged) && <div className="history-diff-heading" aria-hidden="true"><span>{zh ? '字段' : 'Field'}</span><span>{zh ? '变更前' : 'Before'}</span><span /><span>{zh ? '变更后' : 'After'}</span></div>}
       <div className="history-diffs">{fields.map(diff)}
         {statusChanged && <div className="history-field"><strong>{text('status')}</strong><del>{text(detail.archivedBefore ? 'archived' : 'available')}</del><span>→</span><ins>{text(detail.archivedAfter ? 'archived' : 'available')}</ins></div>}
-        {!fields.length && !statusChanged && <p className="muted">{zh ? '没有字段值变更' : 'No field value changes'}</p>}
+        {!fields.length && !statusChanged && <p className="muted">{zh ? '没有可展示的业务字段变更；操作和完整审计信息仍保留。' : 'No displayable business field changes; the operation and full audit evidence are retained.'}</p>}
       </div>
       {change.sourceId && (reportIds?.includes(change.sourceId) && onOpenReport ? <Button type="link" onClick={() => onOpenReport(change.sourceId!)}>{text('source')}</Button> : <p className="muted">{text('sourceUnavailable')}</p>)}
       <p className="history-actor-id">{zh ? '操作人 ID' : 'Actor ID'}: {change.actor.id}</p>
@@ -55,7 +71,7 @@ function HistoryEntry({ change, language, reportIds, onOpenReport }: { change: H
 export default function HistoryPanel({ language, vehicleId, refreshToken, reportIds, onOpenReport }: { language: Language; vehicleId?: string; refreshToken?: unknown; reportIds?: string[]; onOpenReport?: (id: string) => void }) {
   const zh = language === 'zh', text = translateBusiness(language)
   const searchHelpId = useId()
-  const searchHelp = zh ? '搜索操作人、原因、字段名或内容；多个关键词用空格分隔，同时匹配。' : 'Search people, reasons, field names or content. Separate keywords with spaces to match all.'
+  const searchHelp = zh ? '搜索操作人、原因、字段名或内容；多个关键词用空格分隔，同时匹配。搜索也包括界面隐藏的审计信息。' : 'Search people, reasons, field names or content. Separate keywords with spaces to match all. Search also includes audit metadata hidden from this view.'
   const [selectedVehicle, setSelectedVehicle] = useState<string | undefined>(), [day, setDay] = useState<Exclude<DatePickerProps['value'], unknown[]>>(null)
   const activeVehicle = vehicleId || selectedVehicle
   const date = day?.format('YYYY-MM-DD') || ''
