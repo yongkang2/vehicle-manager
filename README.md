@@ -10,8 +10,8 @@ Before upgrading, save your work, stop the old service and independently back up
 
 ## Documentation
 
+- **[中文入门教程：从下载安装到录入第一辆车](docs/user-guide.zh-CN.md)**
 - [English user guide](docs/portable-guide.en.md)
-- [Chinese user guide](docs/user-guide.zh-CN.md)
 - [Development and implementation notes](docs/developer-guide.md)
 - [Product, design and interaction conventions](docs/design.md)
 - [Release history and publishing rules](docs/releases.md)
