@@ -82,6 +82,8 @@ Administrative business exports and backups are separate from complete local-dat
 
 If startup fails, read launcher.log next to Start.cmd and startup.log in the configured local data directory. A legacy update lock or an unverified running process can block startup to protect local data. Resolve the reported condition rather than deleting databases or shared files.
 
+The failure window prints full log paths. The default service log is `%LOCALAPPDATA%\VehicleManager\data\startup.log`; an explicit `VEHICLE_MANAGER_DATA_DIR` changes this location. Repeated clicks wait briefly for the first Windows launcher instead of starting another service. If startup is still in progress, allow it to finish. Empty locks left by an interrupted startup recover automatically; do not delete data or lock files manually to bypass a reported protection.
+
 Real multi-computer Windows SMB behavior and company endpoint policies require validation on the destination computers. Keep protected backups before investigating compatibility or recovery problems.
 
 ## Publication language
