@@ -123,6 +123,8 @@ History excludes team-level enhanced modification activation events from lists, 
 
 ## Business backup and recovery
 
+Device audit identity: new local events retain the original actor ID plus operation-time local account, team member (when applicable) and device snapshots. Prefer the recorded local display name and username in the actor column; retain the recorded team name as a separate detail, not as a replacement after a rename. Details distinguish recorded snapshots, legacy current-profile lookups and unconfirmed historical identities in both languages. Search includes identity IDs and names. Legacy rows remain unchanged; never infer a local account from a team member's current device bindings. Audit identity stays local and is not added to shared business history or business backups. Database schema and shared/backup formats do not change.
+
 Administrator-only backup actions distinguish a synchronized team backup (synchronization failures or pending/conflicting work block it) from a local working-copy backup (does not trigger synchronization). Review scope and synchronization state before downloading. ZIP names identify the team, source and UTC timestamp; manifests retain source revision/pending/conflict metadata.
 
 Restore previews validate original files before enabling execution, show searchable record effects and field differences, and require one explicit acknowledgement for all archive candidates. Existing permanent-deletion and immutable-configuration rules remain authoritative. No selection-based partial restore is implied.
