@@ -35,7 +35,7 @@ components:
 
 Vehicle Manager is a local Windows engineering workspace for vehicle records, controller and battery configurations, DOVE reports, attachments, history and shared-folder collaboration. English and Chinese interfaces are supported. Preserve permissions, offline/sync recovery, confirmations, pagination, exports and existing workflows. Do not ship populated accounts or sample business databases.
 
-This source targets **application 1.8.0**; the GitHub release page identifies officially published builds. Its compatibility target is local schema **6**, business protocols **1–5**, and new backup **format 5 / field version 4**, with readers for formats **1–4**. Real Windows SMB multi-computer acceptance remains a separate requirement.
+This source targets **application 1.9.1**; the GitHub release page identifies officially published builds. Its compatibility target is local schema **6**, business protocols **1–5**, and new backup **format 5 / field version 4**, with readers for formats **1–4**. Real Windows SMB multi-computer acceptance remains a separate requirement.
 
 Business and security evidence is maintained in the [development guide](developer-guide.md), [English user guide](portable-guide.en.md), API enforcement and shared domain types. API enforcement remains authoritative for authorization. This document consolidates the former root PRODUCT.md, DESIGN.md and UX-CONTRACT.md into one maintained source for product scope, visual design and interface behavior. Preserve the restrained, refined Stellantis-inspired direction; do not add production dependencies, remote fonts, decorative imagery or continuous animation for visual changes.
 

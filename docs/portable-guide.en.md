@@ -113,3 +113,7 @@ For startup failures, also preserve `startup.log` in the data directory and `lau
 Before retrying a write after an uncertain response, refresh and inspect its result. Do not delete the database, originals, shared snapshots or locks to fix a logging problem.
 
 Startup text logs now prefix each new stdout/stderr line and each launcher error/stack line with an ISO 8601 UTC timestamp (`Z`) and its source. The service preloads timestamp handling before the main module, keeps it after a detached launcher exits, and still exits with failure on uncaught exceptions. Existing historical log lines are preserved unchanged; timestamps cannot be reconstructed retrospectively.
+
+## Attachment preview
+
+In a vehicle’s Attachments tab, choose Preview for XLSX, XLS, PDF, PNG, JPG, JPEG or JFIF files. Excel previews are read only, support worksheet selection, and display up to 500 rows and 50 columns per sheet. Download the original for complete formatting, charts and formulas, or if preview fails. PDF preview requires browser support.
