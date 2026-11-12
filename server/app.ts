@@ -51,7 +51,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     res.once('close', () => record(!res.writableFinished))
     diagnosticContext.run({ requestId }, next)
   })
-  app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null, 'img-src': ["'self'", 'data:', 'blob:'] } } }))
+  app.use(helmet({ contentSecurityPolicy: { directives: { 'upgrade-insecure-requests': null, 'img-src': ["'self'", 'data:', 'blob:'], 'frame-src': ["'self'", 'blob:'] } } }))
   app.use((req, res, next) => {
     if (!['localhost', '127.0.0.1', '[::1]'].includes(req.hostname)) return next(new AppError('HOST_NOT_ALLOWED', 403))
     next()

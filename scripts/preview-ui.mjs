@@ -6,6 +6,7 @@ import path from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import ExcelJS from 'exceljs'
+import * as XLSX from 'xlsx'
 import { createApp } from '../dist-server/server/app.js'
 import { BrowserPresence, installBrowserPresence } from '../dist-server/server/browser-presence.js'
 import { localReminderDay } from '../dist-server/shared/backup-reminder.js'
@@ -97,9 +98,21 @@ try {
     }
     await request(`/business/vehicles/${car.id}/configuration-revisions`, 'POST', { previewToken: preview.token, requestId: randomUUID(), title: 'Baseline validation / 基线验证', summary: 'Synthetic reviewed configuration', decisions })
   }
+  const imageBytes = await fs.readFile(path.join(project, 'scripts/fixtures/preview.png'))
+  const jpegBytes = await fs.readFile(path.join(project, 'scripts/fixtures/preview.jpg'))
+  const demoBook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(demoBook, XLSX.utils.aoa_to_sheet([['Synthetic equipment / 模拟设备', 'Status', 'Quantity'], ['Charging adapter', 'Available', 2], ['CAN logger', 'Testing', 1]]), 'Equipment')
+  XLSX.utils.book_append_sheet(demoBook, XLSX.utils.aoa_to_sheet([['Notes'], ['Fictional review data only']]), 'Notes')
+  const xlsBytes = XLSX.write(demoBook, { type: 'buffer', bookType: 'biff8' })
+  const xlsxBytes = XLSX.write(demoBook, { type: 'buffer', bookType: 'xlsx' })
+  const pdfBytes = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 180]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length 52>>stream\nBT /F1 18 Tf 30 120 Td (Synthetic PDF preview) Tj ET\nendstream endobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF')
+  for (const [filename, bytes] of [['demo-workbook.xlsx', xlsxBytes], ['demo.xls', xlsBytes], ['demo.pdf', pdfBytes], ['demo.png', imageBytes], ['demo.jpg', jpegBytes], ['demo.jpeg', jpegBytes], ['demo.jfif', jpegBytes]]) {
+    const form = upload(bytes, filename); form.append('reason', 'Synthetic preview format coverage')
+    await request(`/business/vehicles/${vehicles[0].id}/attachments`, 'POST', form)
+  }
   const records = await request('/business/records')
   const counts = Object.fromEntries([...new Set(records.map(record => record.kind))].map(kind => [kind, records.filter(record => record.kind === kind).length]))
-  if (counts.vehicle !== 12 || counts.report !== 4 || counts.equipment !== 8 || counts.attachment !== 4 || counts.part !== 16 || counts.modification !== 4) throw new Error(`Unexpected preview data: ${JSON.stringify(counts)}`)
+  if (counts.vehicle !== 12 || counts.report !== 4 || counts.equipment !== 8 || counts.attachment !== 11 || counts.part !== 16 || counts.modification !== 4) throw new Error(`Unexpected preview data: ${JSON.stringify(counts)}`)
   console.log(JSON.stringify({ url: baseUrl, username: 'preview', password: 'Preview-2026!', dataRoot: root, counts }, null, 2))
   process.once('SIGINT', () => { void stop() })
   process.once('SIGTERM', () => { void stop() })
