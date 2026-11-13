@@ -10,7 +10,7 @@ import type { Language } from './i18n'
 import type { VehicleTableSaveStatus } from './vehicle-table-preference-session'
 import { translateBusiness } from './business-i18n'
 import { clampColumnWidth, keyboardColumnWidth, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, resizedColumnWidth } from './table-column-width'
-import { matchesVehicleColumnFilters, vehicleColumnFilterOptions, visibleVehicleColumnFilters } from './vehicle-table-filters'
+import { matchesVehicleColumnFilters, retainedVehicleFilterValue, vehicleColumnFilterOptions, visibleVehicleColumnFilters } from './vehicle-table-filters'
 import type { VehicleColumnFilters, VehicleFilterColumnId, VehicleFilterValues } from './vehicle-table-filters'
 import './ResizableVehicleTable.css'
 
@@ -19,6 +19,7 @@ type Props = Omit<TableProps<BusinessRecord>, 'columns' | 'components' | 'scroll
   columns: VehicleTableColumn[]; language: Language; preferences: VehicleTablePreferences; onPreferencesChange: (next: VehicleTablePreferences) => void; saveStatus: VehicleTableSaveStatus; retry?: () => void
   filters: VehicleColumnFilters; onFiltersChange: Dispatch<SetStateAction<VehicleColumnFilters>>; filterVehicles: readonly BusinessRecord[]; filterValues: VehicleFilterValues; filterScopeKey: string
   toolbarFilters?: ReactNode; toolbarActions?: ReactNode; toolbarMenu?: ReactNode
+  remote?: { total: number; page: number; options: Partial<Record<VehicleFilterColumnId, string[]>> }
 }
 type HeaderProps = HTMLAttributes<HTMLTableCellElement> & {
   columnKey: string
@@ -73,7 +74,7 @@ function ResizableHeaderCell({ columnKey, columnWidth, resizeLabel, hintId, resi
 
 const components = { header: { cell: ResizableHeaderCell } }
 
-export default function ResizableVehicleTable({ columns, language, preferences, onPreferencesChange, saveStatus, retry, filters, onFiltersChange, filterVehicles, filterValues, filterScopeKey, toolbarFilters, toolbarActions, toolbarMenu, dataSource, pagination, onChange, locale, ...props }: Props) {
+export default function ResizableVehicleTable({ columns, language, preferences, onPreferencesChange, saveStatus, retry, filters, onFiltersChange, filterVehicles, filterValues, filterScopeKey, toolbarFilters, toolbarActions, toolbarMenu, dataSource, pagination, onChange, locale, remote, ...props }: Props) {
   const [widths, setWidths] = useState<Record<string, number>>({}), [columnsOpen, setColumnsOpen] = useState(false)
   const [openFilter, setOpenFilter] = useState<VehicleFilterColumnId | null>(null)
   const [page, setPage] = useState({ signature: '', current: 1 })
@@ -86,14 +87,14 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
   useEffect(() => {
     if (saveStatus === 'saved' || saveStatus === 'saving') onFiltersChange(previous => visibleVehicleColumnFilters(previous, preferences.columns))
   }, [preferences.columns, saveStatus, onFiltersChange])
-  const rows = (dataSource || []).filter(record => {
+  const rows = remote ? [...(dataSource || [])] : (dataSource || []).filter(record => {
     const values = filterValues.get(record.id)
     return values ? matchesVehicleColumnFilters(values, activeFilters) : activeCount === 0
   })
   const signature = JSON.stringify([filterScopeKey, activeFilters])
   const pageSize = pagination && (pagination.pageSize || pagination.defaultPageSize) || 10
-  const lastPage = Math.max(1, Math.ceil(rows.length / pageSize))
-  const currentPage = Math.min(page.signature === signature ? page.current : 1, lastPage)
+  const lastPage = Math.max(1, Math.ceil((remote?.total ?? rows.length) / pageSize))
+  const currentPage = remote?.page ?? Math.min(page.signature === signature ? page.current : 1, lastPage)
   if (page.signature !== signature || page.current !== currentPage) setPage({ signature, current: currentPage })
   const catalog = new Map(columns.map(column => [column.key, column]))
   const clearPreview = (key: string) => setWidths(previous => { if (!(key in previous)) return previous; const next = { ...previous }; delete next[key]; return next })
@@ -102,7 +103,7 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
     if (!column) return []
     const width = widths[id] ?? preferences.widths[id] ?? clampColumnWidth(column.width)
     const filterId = id === 'actions' ? null : id
-    const options = filterId ? vehicleColumnFilterOptions(filterId, filterVehicles, filterValues, activeFilters[filterId] || [], language) : []
+    const options = filterId ? remote ? [...new Set([...(remote.options[filterId] || []), ...(activeFilters[filterId] || [])])].map(key => retainedVehicleFilterValue(filterId, key, language)).sort((a, b) => a.label.localeCompare(b.label, language === 'zh' ? 'zh-CN' : 'en-GB') || a.key.localeCompare(b.key)) : vehicleColumnFilterOptions(filterId, filterVehicles, filterValues, activeFilters[filterId] || [], language) : []
     const optionLabels = new Map(options.map(option => [option.key, option.label.toLocaleLowerCase()]))
     const columnFilters: ColumnType<BusinessRecord> = filterId ? {
       filters: options.map(option => ({ value: option.key, text: <span title={option.label}>{option.label}</span> })),
@@ -176,10 +177,10 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
     </div>
     <div className="vehicle-column-toolbar">
       <p id={hintId} className="vehicle-column-resize-hint">{text('vehicleColumnResizeHint')}</p>
-      <div className="vehicle-table-heading"><h3>{text('vehicleList')}</h3><span className="vehicle-table-count">{rows.length}</span></div>
+      <div className="vehicle-table-heading"><h3>{text('vehicleList')}</h3><span className="vehicle-table-count">{remote?.total ?? rows.length}</span></div>
     </div>
     {activeCount > 0 && <Space wrap className="vehicle-column-filter-summary"><span role="status" aria-live="polite">{text('vehicleColumnFiltersActive')}: {activeCount}</span><Button size="small" onClick={() => { setOpenFilter(null); onFiltersChange({}) }}>{text('vehicleColumnFiltersClear')}</Button></Space>}
-    <Table<BusinessRecord> {...props} dataSource={rows} pagination={pagination === false ? false : { ...pagination, current: currentPage }} onChange={tableChanged} locale={{ ...locale, filterConfirm: text('vehicleColumnFilterApply'), filterReset: text('vehicleColumnFilterReset'), filterSearchPlaceholder: text('vehicleColumnFilterSearch') }} className="vehicles-table" columns={resizedColumns} components={components} tableLayout="fixed" scroll={{ x: totalWidth }} />
+    <Table<BusinessRecord> {...props} dataSource={rows} pagination={pagination === false ? false : { ...pagination, current: currentPage, ...(remote ? { total: remote.total } : {}) }} onChange={tableChanged} locale={{ ...locale, filterConfirm: text('vehicleColumnFilterApply'), filterReset: text('vehicleColumnFilterReset'), filterSearchPlaceholder: text('vehicleColumnFilterSearch') }} className="vehicles-table" columns={resizedColumns} components={components} tableLayout="fixed" scroll={{ x: totalWidth }} />
     <Modal open={columnsOpen} className="vehicle-column-settings-modal" title={text('vehicleTableColumnsTitle')} onCancel={() => setColumnsOpen(false)} footer={<Button onClick={() => setColumnsOpen(false)}>{text('vehicleTableColumnsClose')}</Button>} width={620} destroyOnHidden>
       <p className="vehicle-column-settings-notice">{text('vehicleTableColumnsNotice')}</p>{status}
       <div className="vehicle-column-settings-toolbar"><h3>{text('vehicleTableShownColumns')}</h3><Button size="small" icon={<RotateCcw size={14} />} disabled={disabled} onClick={() => { setWidths({}); changeLayout(defaultVehicleTablePreferences()) }}>{text('vehicleTableResetColumns')}</Button></div>

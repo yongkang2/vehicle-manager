@@ -61,3 +61,19 @@ test('delta refresh replaces changed records, removes deleted records and falls 
   assert.equal(requests, 2)
   assert.equal(accepted.at(-1)!.revision, 'third')
 })
+
+test('vehicle pages use their own query and never reuse a whole-workspace delta baseline', async () => {
+  const loader = new WorkspaceLoader(), calls: string[] = []
+  const bodies: unknown[] = []
+  const read = async <T>(url: string, options?: { method?: string; body?: unknown }) => { calls.push(url); bodies.push(options); return snapshot('same-local-revision') as T }
+  await loader.load(read, () => {}, { localOnly: true })
+  const vehicleList = { search: 'VIN', archived: false, page: 2, pageSize: 10, filters: { notes: [JSON.stringify(['中'.repeat(4000)])] } }
+  await loader.load(read, () => {}, { localOnly: true, vehicleList })
+  const url = new URL(calls[1], 'http://localhost')
+  assert.equal(url.pathname, '/api/business/vehicle-list')
+  assert.deepEqual(bodies[1], { method: 'POST', body: vehicleList })
+  assert(calls[1].length < 200, 'long Chinese filters must not expand the request line')
+  assert.equal(url.searchParams.get('local'), '1')
+  assert.equal(url.searchParams.has('known'), false)
+  assert.equal(url.searchParams.has('delta'), false)
+})

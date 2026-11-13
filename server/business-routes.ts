@@ -10,6 +10,9 @@ import { createReadStream } from 'node:fs'
 import { History } from './history.js'
 import { HistoryQueries } from './history-queries.js'
 import { WorkspaceSnapshots } from './workspace-snapshots.js'
+import { VehicleListQueries } from './vehicle-list.js'
+import type { VehicleListQuery } from '../shared/vehicle-list.js'
+import { SyncPoll } from './sync-poll.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
 import { Business, reason, validateManualRecordFields } from './business.js'
 import { BusinessSync, atomicFile } from './sync.js'
@@ -91,7 +94,13 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     assertCurrent()
     return { directory: context.configuration.sharedPath, teamId: context.configuration.teamId, identity: context.identity, actor: context.actor, scopeKey: req.get('X-Workspace-Token') || '', syncEnabled: context.syncEnabled, assertCurrent }
   }
-  const checkForUpdates = async (context: Context) => context.syncEnabled ? synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity, { ifChanged: true }) : synchronization.status()
+  const pollSchedule = new SyncPoll()
+  const checkForUpdates = async (context: Context) => {
+    if (!context.syncEnabled || !pollSchedule.ready()) return synchronization.status()
+    const state = await synchronization.synchronize(context.configuration.sharedPath, context.configuration.teamId, context.identity, { ifChanged: true })
+    pollSchedule.complete(state.phase === 'busy')
+    return state
+  }
   async function modificationContext(request: express.Request, response: express.Response, admin = false): Promise<ModificationContext> {
     const req = request as BusinessRequest, assertCurrent = sessionGuard(req)
     const context = await store.runWrite(() => access(req, admin))
@@ -118,6 +127,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       await store.runWrite(async () => {
         req.businessContext = await access(req)
         const localPath = req.path.toLowerCase()
+        const vehicleListRead = req.method === 'POST' && localPath === '/vehicle-list'
         const localExport = localPath.startsWith('/backup/reminder') || localPath === '/backup/status' || (localPath === '/backup' && req.query.source === 'local') || localPath.startsWith('/export/') || localPath === '/export-templates' || localPath.startsWith('/export-templates/') || localPath === '/vehicle-table-preferences' || localPath === '/vehicle-table-preferences/'
         // Viewing published revisions uses the authorized local copy; explicit workspace refresh still synchronizes.
         const revisionRead = req.query.full !== '1' && req.method === 'GET' && /^\/vehicles\/[^/]+\/configuration-revisions(?:\/[^/]+)?\/?$/.test(localPath)
@@ -130,14 +140,14 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const deletePreview = req.method === 'GET' && /^\/vehicles\/[^/]+\/delete-preview$/.test(req.path)
         const configurationMutation = ['POST', 'PUT'].includes(req.method) && (localPath === '/configuration-revisions/enable' || localPath === '/component-types' || localPath.startsWith('/component-types/') || /^\/vehicles\/[^/]+\/configuration-revisions(?:\/preview)?\/?$/.test(localPath))
         const canonicalMaintenance = deletePreview || configurationMutation || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && (req.path === '/restore' || /^\/restore\/[^/]+\/publish$/.test(req.path)))
-        const workspaceRead = req.method === 'GET' && req.path === '/workspace'
+        const workspaceRead = vehicleListRead || req.method === 'GET' && ['/workspace', '/vehicle-list'].includes(req.path)
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if (req.method === 'GET' && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !revisionRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
+        if ((req.method === 'GET' || vehicleListRead) && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !revisionRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
           const state = await (workspaceRead && req.query.full !== '1' ? checkForUpdates(req.businessContext) : sync(req.businessContext))
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
         }
-        if (!localExport && !localDraftBinding && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => {
+        if (!vehicleListRead && !localExport && !localDraftBinding && ['POST', 'PUT', 'DELETE'].includes(req.method)) res.once('finish', () => {
           // An admitted upload may finish its HTTP response after shutdown has
           // drained its write. Do not reopen synchronization on a closing store.
           if (res.statusCode < 400 && backgroundSyncAllowed() && store.db.isOpen && synchronization.status().pending > 0) void sync(req.businessContext!)
@@ -149,6 +159,19 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   })
   // One authorized, synchronous local snapshot replaces separate records,
   // history and sync reads. The fingerprint includes unsynchronized local edits.
+  const vehicleListQueries = new VehicleListQueries(() => configurationRevisions.workingView())
+  router.post('/vehicle-list', (req, res) => {
+    const data = vehicleListQueries.read(store.workspaceRevision, req.body)
+    data.historyRevision = store.get<number>('historyRevision') || 0
+    res.json({ revision: store.workspaceRevision || '', data, sync: synchronization.status() })
+  })
+  router.get('/vehicle-list', (req, res) => {
+    let query: VehicleListQuery
+    try { if (typeof req.query.query !== 'string' || req.query.query.length > 64000) throw new Error(); query = JSON.parse(req.query.query) } catch { throw new AppError('INVALID_INPUT') }
+    const data = vehicleListQueries.read(store.workspaceRevision, query)
+    data.historyRevision = store.get<number>('historyRevision') || 0
+    res.json({ revision: store.workspaceRevision || '', data, sync: synchronization.status() })
+  })
   router.get('/workspace', (req: BusinessRequest, res) => {
     if (req.query.audit === '1' && req.businessContext!.actor.role !== 'admin') throw new AppError('ADMIN_REQUIRED', 403)
     const scope = `${req.query.audit === '1'}:${req.query.quarantined === '1'}`
@@ -592,12 +615,16 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
   app.use('/api/business', router)
   let pollError: string | null = null
   async function tick() {
+    if (!pollSchedule.ready()) return
     const configuration = store.get<Config>('configuration')
     if (!configuration) return
     try {
       const team = await teams.read(configuration.sharedPath, configuration.teamId); cache(team)
       const binding = team.bindings.find(item => item.deviceId === store.deviceId && item.enabled && team.members.some(member => member.id === item.memberId && member.enabled) && accounts.db.prepare('SELECT 1 FROM sessions WHERE user_id=? AND workspace_id=? AND sync_enabled=1 AND expires>?').get(item.localUserId, configuration.teamId, Date.now()))
-      if (binding) await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' }, { ifChanged: true })
+      if (binding) {
+        const state = await synchronization.synchronize(configuration.sharedPath, configuration.teamId, { deviceId: store.deviceId, deviceName: store.deviceName, localUserId: binding.localUserId, displayName: '' }, { ifChanged: true })
+        pollSchedule.complete(state.phase === 'busy')
+      }
     } catch (error) {
       const code = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
       if (code !== pollError) store.diagnostics.write('warn', 'workspace.poll_failed', { code }, error)

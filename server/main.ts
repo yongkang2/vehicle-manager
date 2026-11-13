@@ -22,9 +22,13 @@ const presenceToken = randomBytes(32).toString('hex')
 let closing = false
 const browserPresence = new BrowserPresence({ onEmpty: () => { console.log('All application pages are closed. Stopping the service.'); void shutdown() } })
 const { app, close, tick } = createApp({ dataDir, diagnostics, staticDir: path.join(project, 'dist'), controlToken, presenceToken, browserPresence, onShutdown: () => { void shutdown() } })
-const poll = () => { void tick().catch(error => diagnostics.write('error', 'service.poll_failed', {}, error)) }
+let interval: ReturnType<typeof setTimeout> | undefined
+const poll = () => {
+  void tick().catch(error => diagnostics.write('error', 'service.poll_failed', {}, error)).finally(() => {
+    if (!closing) interval = setTimeout(poll, 25000 + Math.random() * 10000).unref()
+  })
+}
 poll()
-const interval = setInterval(poll, 30000).unref()
 const stateFile = path.join(dataDir, 'service.json')
 const server = app.listen(port, '127.0.0.1', (error?: Error) => {
 	// Express 5 also calls this callback on listen errors; the error handler below reports them.
@@ -37,7 +41,7 @@ const disposePresence = installBrowserPresence(server, browserPresence, { token:
 async function shutdown() {
 	if (closing) return
 	diagnostics.write('info', 'service.stopping')
-	closing = true; clearInterval(interval); browserPresence.stop(); disposePresence()
+	closing = true; clearTimeout(interval); browserPresence.stop(); disposePresence()
 	server.close(() => {
 		void close().then(async () => {
 			const state = await fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value) as { pid: number }).catch(() => null)
@@ -47,4 +51,4 @@ async function shutdown() {
 	})
 }
 process.once('SIGINT', () => { void shutdown() }); process.once('SIGTERM', () => { void shutdown() })
-server.on('error', error => { diagnostics.write('error', 'service.listen_failed', {}, error); clearInterval(interval); browserPresence.stop(); disposePresence(); void close(); process.send?.({ type: 'error', code: (error as NodeJS.ErrnoException).code }); process.exitCode = 1 })
+server.on('error', error => { closing = true; diagnostics.write('error', 'service.listen_failed', {}, error); clearTimeout(interval); browserPresence.stop(); disposePresence(); void close(); process.send?.({ type: 'error', code: (error as NodeJS.ErrnoException).code }); process.exitCode = 1 })
