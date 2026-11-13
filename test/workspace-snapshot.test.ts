@@ -44,6 +44,15 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   assert.equal(first.status, 200); assert.equal(first.data.data.records[0].id, car.id)
   assert.equal('changes' in first.data.data, false)
   const memberWorkspace = member.workspaces.get(teamId)
+  const listQuery = encodeURIComponent(JSON.stringify({ search: '', archived: false, page: 1, pageSize: 10, filters: {} }))
+  const list = await request(member, `/business/vehicle-list?local=1&query=${listQuery}`)
+  assert.equal(list.status, 200)
+  assert.equal(list.data.data.vehicleList.total, 1)
+  assert.deepEqual(list.data.data.vehicleList.ids, [car.id])
+  const postList = await request(member, '/business/vehicle-list?local=1', 'POST', { search: '', archived: false, page: 1, pageSize: 10, filters: { notes: [JSON.stringify(['中'.repeat(4000)])] } })
+  assert.equal(postList.status, 200, 'long Chinese filter values fit a bounded POST body')
+  assert.equal(postList.data.data.vehicleList.total, 0)
+  assert.equal((await request(member, '/business/vehicle-list?local=1&query=broken')).status, 400)
   const originalChange = memberWorkspace.store.db.prepare('SELECT * FROM changes LIMIT 1').get()!
   const payload = JSON.parse(String(originalChange.payload)); payload.id = 'history-only'; payload.reason = 'History-only refresh fixture'
   memberWorkspace.store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(payload.id, String(originalChange.record_id), String(originalChange.vehicle_id), JSON.stringify(payload), String(originalChange.created))
@@ -97,6 +106,15 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   assert.equal(deleted.status, 200)
   const afterDeletion = await request(member, `/business/workspace?known=${archived.revision}`)
   assert.equal(afterDeletion.status, 200); assert.equal(afterDeletion.data.data.records.length, 0)
+  // Browser refreshes and the service tick share busy backoff; manual sync bypasses it.
+  const busySync = t.mock.method(memberWorkspace.synchronization, 'synchronize', async () => ({ ...memberWorkspace.synchronization.status(), phase: 'busy' as const, error: 'SHARE_BUSY' }))
+  await request(member, '/business/workspace')
+  await request(member, '/business/workspace')
+  await memberWorkspace.tick()
+  assert.equal(busySync.mock.callCount(), 1)
+  await request(member, '/business/sync', 'POST')
+  assert.equal(busySync.mock.callCount(), 2)
+  busySync.mock.restore()
   const validToken = member.token; member.token = 'old-workspace-token'
   assert.equal((await request(member, '/business/workspace?local=1')).data.error, 'WORKSPACE_CHANGED'); member.token = validToken
   const roster = (await request(admin, '/team')).data
@@ -113,6 +131,7 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   assert.equal((await inFlightHistory).status, 403, 'A background history result must recheck revoked access before returning')
   slowQuery.mock.restore()
   assert.equal((await request(member, `/business/workspace?local=1&known=${afterDeletion.data.revision}`)).status, 403)
+  assert.equal((await request(member, `/business/vehicle-list?local=1&query=${listQuery}`)).status, 403, 'revoked access cannot read a warmed list cache')
 })
 
 test('snapshot cache skips unchanged construction and scopes bounded record patches without breaking full clients', () => {

@@ -1,7 +1,8 @@
 import type { WorkspaceData, WorkspaceSnapshot } from '../shared/workspace'
+import type { VehicleListQuery } from '../shared/vehicle-list'
 
-type Reader = <T>(url: string) => Promise<T>
-type Options = { audit?: boolean; quarantined?: boolean; localFirst?: boolean; localOnly?: boolean; full?: boolean }
+type Reader = <T>(url: string, options?: { method?: string; body?: unknown }) => Promise<T>
+type Options = { audit?: boolean; quarantined?: boolean; localFirst?: boolean; localOnly?: boolean; full?: boolean; vehicleList?: VehicleListQuery }
 
 /** Per-mounted-workspace cache. Only the newest request may update the UI. */
 export class WorkspaceLoader {
@@ -17,12 +18,12 @@ export class WorkspaceLoader {
     this.active++
     const read = async (local: boolean, allowDelta = true): Promise<boolean> => {
       const query = new URLSearchParams()
-      if (this.revision && allowDelta) { query.set('known', this.revision); query.set('delta', '1') }
+      if (this.revision && allowDelta && !options.vehicleList) { query.set('known', this.revision); query.set('delta', '1') }
       if (options.audit) query.set('audit', '1')
       if (options.quarantined) query.set('quarantined', '1')
       if (local) query.set('local', '1')
       else if (options.full) query.set('full', '1')
-      const snapshot = await request<WorkspaceSnapshot>(`/api/business/workspace?${query}`)
+      const snapshot = await request<WorkspaceSnapshot>(`/api/business/${options.vehicleList ? 'vehicle-list' : 'workspace'}?${query}`, options.vehicleList ? { method: 'POST', body: options.vehicleList } : undefined)
       if (generation !== this.generation) return false
       if (snapshot.patch) {
         if (!allowDelta) throw new Error('SERVER_ERROR')

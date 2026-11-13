@@ -1,6 +1,8 @@
 # Vehicle Manager: Portable User Guide
 
-This guide covers application **1.9.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+This guide covers application **1.10.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+
+Unmerged pull-request packages are acceptance candidates, not official releases. For an upgrade from 1.9.1, stop the old service and independently preserve the complete shared folder and your own local data directory. Start the new application with the same data-directory configuration and existing team folder; do not initialize a replacement team or copy another person's data. This update retains schema 6, business protocols 1–5 and backup format 5. Review retained pending changes and explicitly resume synchronization if prompted.
 
 ## Installation
 

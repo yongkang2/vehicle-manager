@@ -65,6 +65,19 @@ try {
     const unchanged = await request(client, `/business/workspace?local=1&known=${snapshot.data.revision}`)
     assert.equal(unchanged.data.data, undefined)
     metrics.push({ scenario: `${client.name}-unchanged`, ms: unchanged.ms, bytes: unchanged.bytes })
+    const query = { search: '', archived: false, page: 1, pageSize: 10, filters: {} }
+    const page = await request(client, `/business/vehicle-list?local=1&query=${encodeURIComponent(JSON.stringify(query))}`)
+    assert.equal(page.data.data.vehicleList.total, 1000)
+    assert.equal(page.data.data.vehicleList.counts.total, 1000)
+    assert.equal(page.data.data.records.length, 10, 'equipment is not part of the vehicle list payload')
+    assert(page.bytes < snapshot.bytes / 4, 'summary page must be substantially smaller than the full working view')
+    const last = await request(client, `/business/vehicle-list?local=1&query=${encodeURIComponent(JSON.stringify({ ...query, page: 100 }))}`)
+    assert.equal(last.data.data.records.length, 10)
+    assert.equal(last.data.data.vehicleList.page, 100)
+    const selected = await request(client, `/business/vehicle-list?local=1&query=${encodeURIComponent(JSON.stringify({ ...query, search: String(firstVehicle!.data.vin), detailId: firstVehicle!.id }))}`)
+    assert.equal(selected.data.data.vehicleList.total, 1)
+    assert.equal(selected.data.data.records.filter((record: BusinessRecord) => record.kind === 'equipment').length, 5)
+    metrics.push({ scenario: `${client.name}-vehicle-page`, ms: page.ms, bytes: page.bytes, records: 10 })
   }
   const target = firstVehicle!
   await request(engineer, `/business/records/${target.id}`, 'PUT', { version: target.version, data: { ...target.data, owner: 'Engineer update under load' }, reason: 'Synthetic propagation check' })
