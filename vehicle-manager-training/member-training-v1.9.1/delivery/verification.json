@@ -1,0 +1,1159 @@
+{
+  "passed": true,
+  "sourceCommit": "6f9354ac76e7999e9a115ad6aa95417366f01a0a",
+  "version": "1.9.1",
+  "video": "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\vehicle-manager-member-training-v1.9.1-zh-CN.mp4",
+  "sha256": "5e8a2a088c58617748d020780957e9e5be5801dc03292ecc3aa7b5d35b13a427",
+  "duration": 289.53333333333336,
+  "videoFrames": 8686,
+  "width": 1920,
+  "height": 1080,
+  "fps": "30",
+  "videoCodec": "h264",
+  "pixelFormat": "yuv420p",
+  "audioCodec": "aac",
+  "audioSampleRate": 48000,
+  "audioChannels": 2,
+  "fullDecodePassed": true,
+  "captionChecksPassed": true,
+  "speechPreservationPassed": true,
+  "signal": {
+    "peakDbFS": -3.7009840474663873,
+    "rmsDbFS": -21.444662394333285,
+    "clippedSamples": 0,
+    "decodedStereoSamples": 27795200,
+    "musicResidualRmsDbFS": -34.252115876047405,
+    "musicContinuity": {
+      "passed": true,
+      "windowSeconds": 1,
+      "windowsChecked": 286,
+      "minimumResidualRmsDbFS": -57.960634435879335,
+      "thresholdDbFS": -65,
+      "intentionalOpeningAndClosingFadesExcluded": true
+    },
+    "musicLoopStarts": [
+      93.1059375,
+      186.211875,
+      279.3178125
+    ],
+    "cues": [
+      {
+        "id": "01",
+        "speechSamples": 354816,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9858953419560877,
+        "finalMixRmsDbFS": -21.282123231170928
+      },
+      {
+        "id": "02",
+        "speechSamples": 360576,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9850083344843776,
+        "finalMixRmsDbFS": -21.493272204982595
+      },
+      {
+        "id": "03",
+        "speechSamples": 395136,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9813429592360067,
+        "finalMixRmsDbFS": -20.99002863737732
+      },
+      {
+        "id": "04",
+        "speechSamples": 288000,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9767025925346199,
+        "finalMixRmsDbFS": -21.077571578655082
+      },
+      {
+        "id": "05",
+        "speechSamples": 298368,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9733919946215107,
+        "finalMixRmsDbFS": -20.651596783171918
+      },
+      {
+        "id": "06",
+        "speechSamples": 381312,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9895194081234359,
+        "finalMixRmsDbFS": -20.973938701144633
+      },
+      {
+        "id": "07",
+        "speechSamples": 343296,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9770579419151366,
+        "finalMixRmsDbFS": -20.908164502322386
+      },
+      {
+        "id": "08",
+        "speechSamples": 343296,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9897619012940719,
+        "finalMixRmsDbFS": -21.26789227810825
+      },
+      {
+        "id": "09",
+        "speechSamples": 340992,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9915147355744489,
+        "finalMixRmsDbFS": -20.80385906730867
+      },
+      {
+        "id": "10",
+        "speechSamples": 326016,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9806396055060128,
+        "finalMixRmsDbFS": -21.103497612775392
+      },
+      {
+        "id": "11",
+        "speechSamples": 314496,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9780105344954194,
+        "finalMixRmsDbFS": -21.10075938078578
+      },
+      {
+        "id": "12",
+        "speechSamples": 326016,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.963982952338334,
+        "finalMixRmsDbFS": -21.46006937352036
+      },
+      {
+        "id": "13",
+        "speechSamples": 292608,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9912252231244912,
+        "finalMixRmsDbFS": -20.35205309626892
+      },
+      {
+        "id": "14",
+        "speechSamples": 347904,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.982675034059908,
+        "finalMixRmsDbFS": -21.151039358733463
+      },
+      {
+        "id": "15",
+        "speechSamples": 412416,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.981353655784053,
+        "finalMixRmsDbFS": -20.842552342973107
+      },
+      {
+        "id": "16",
+        "speechSamples": 319104,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9759974350079834,
+        "finalMixRmsDbFS": -21.25633461962442
+      },
+      {
+        "id": "17",
+        "speechSamples": 252288,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9748477995081557,
+        "finalMixRmsDbFS": -20.842639337923885
+      },
+      {
+        "id": "18",
+        "speechSamples": 247680,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9765607445456691,
+        "finalMixRmsDbFS": -20.929477655440042
+      },
+      {
+        "id": "19",
+        "speechSamples": 299520,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9846705579738456,
+        "finalMixRmsDbFS": -20.56741312995177
+      },
+      {
+        "id": "20",
+        "speechSamples": 350208,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9819621469749751,
+        "finalMixRmsDbFS": -20.715436825086204
+      },
+      {
+        "id": "21",
+        "speechSamples": 345600,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9920953493494269,
+        "finalMixRmsDbFS": -21.691499284468513
+      },
+      {
+        "id": "22",
+        "speechSamples": 367488,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9851469913377165,
+        "finalMixRmsDbFS": -21.25571167336458
+      },
+      {
+        "id": "23",
+        "speechSamples": 266112,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9765703531360189,
+        "finalMixRmsDbFS": -20.855382095458182
+      },
+      {
+        "id": "24",
+        "speechSamples": 340992,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9691039383625101,
+        "finalMixRmsDbFS": -21.655320756226118
+      },
+      {
+        "id": "25",
+        "speechSamples": 263808,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9682594544194951,
+        "finalMixRmsDbFS": -20.85507145714462
+      },
+      {
+        "id": "26",
+        "speechSamples": 284544,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.98748453826465,
+        "finalMixRmsDbFS": -21.280205475088533
+      },
+      {
+        "id": "27",
+        "speechSamples": 304128,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9807089028330652,
+        "finalMixRmsDbFS": -21.792666026115718
+      },
+      {
+        "id": "28",
+        "speechSamples": 304128,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9830297130893709,
+        "finalMixRmsDbFS": -20.536855303356877
+      },
+      {
+        "id": "29",
+        "speechSamples": 282240,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9729959921317077,
+        "finalMixRmsDbFS": -21.869476426748655
+      },
+      {
+        "id": "30",
+        "speechSamples": 262656,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9749451731876178,
+        "finalMixRmsDbFS": -21.06901577836476
+      },
+      {
+        "id": "31",
+        "speechSamples": 254592,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9740446470468083,
+        "finalMixRmsDbFS": -20.406310192157314
+      },
+      {
+        "id": "32",
+        "speechSamples": 292608,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9862974671900572,
+        "finalMixRmsDbFS": -21.092469132685117
+      },
+      {
+        "id": "33",
+        "speechSamples": 368640,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9795829465126731,
+        "finalMixRmsDbFS": -20.865783106922358
+      },
+      {
+        "id": "34",
+        "speechSamples": 267264,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9807239203552904,
+        "finalMixRmsDbFS": -22.074923074615906
+      },
+      {
+        "id": "35",
+        "speechSamples": 323712,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9836211809408684,
+        "finalMixRmsDbFS": -21.831043450823536
+      },
+      {
+        "id": "36",
+        "speechSamples": 372096,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9751063266342621,
+        "finalMixRmsDbFS": -21.685369219914538
+      },
+      {
+        "id": "37",
+        "speechSamples": 368640,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9724992157418851,
+        "finalMixRmsDbFS": -21.449339082250283
+      },
+      {
+        "id": "38",
+        "speechSamples": 331776,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9681198503183923,
+        "finalMixRmsDbFS": -21.84959407307589
+      },
+      {
+        "id": "39",
+        "speechSamples": 274176,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9890080026093687,
+        "finalMixRmsDbFS": -21.038548071590984
+      },
+      {
+        "id": "40",
+        "speechSamples": 254592,
+        "originalSpeechRetainedExactlyBeforeMix": true,
+        "finalMixCorrelation": 0.9843912989346115,
+        "finalMixRmsDbFS": -21.41834902133879
+      }
+    ]
+  },
+  "roleChecks": [
+    {
+      "cueId": "04",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "09",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "10",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "15",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "20",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "28",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "36",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    },
+    {
+      "cueId": "39",
+      "role": "member",
+      "access": "approved",
+      "adminNavigationAbsent": true
+    }
+  ],
+  "capturedRole": "member",
+  "equipmentCsvVinVerified": true,
+  "equipmentCsvRows": 1,
+  "shutdownEvidence": {
+    "method": "Actual isolated v1.9.1 Stop.cmd with explicit synthetic data directory",
+    "output": "Service stop requested. Pending work will finish before the database closes.",
+    "performedOffCamera": true,
+    "completed": true
+  },
+  "sampleFrames": [
+    {
+      "id": "01",
+      "chapter": "intro",
+      "time": 1.9416666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-01-1.png"
+    },
+    {
+      "id": "01",
+      "chapter": "intro",
+      "time": 6.213333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-01-2.png"
+    },
+    {
+      "id": "02",
+      "chapter": "intro",
+      "time": 9.733333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-02-1.png"
+    },
+    {
+      "id": "02",
+      "chapter": "intro",
+      "time": 14.059999999999999,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-02-2.png"
+    },
+    {
+      "id": "03",
+      "chapter": "intro",
+      "time": 17.78333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-03-1.png"
+    },
+    {
+      "id": "03",
+      "chapter": "intro",
+      "time": 22.513333333333335,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-03-2.png"
+    },
+    {
+      "id": "04",
+      "chapter": "intro",
+      "time": 25.825000000000003,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-04-1.png"
+    },
+    {
+      "id": "04",
+      "chapter": "intro",
+      "time": 29.326666666666668,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-04-2.png"
+    },
+    {
+      "id": "05",
+      "chapter": "vehicle",
+      "time": 32.35,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-05-1.png"
+    },
+    {
+      "id": "05",
+      "chapter": "vehicle",
+      "time": 36.2,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-05-2.png"
+    },
+    {
+      "id": "06",
+      "chapter": "vehicle",
+      "time": 39.675,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-06-1.png"
+    },
+    {
+      "id": "06",
+      "chapter": "vehicle",
+      "time": 44.24,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-06-2.png"
+    },
+    {
+      "id": "07",
+      "chapter": "vehicle",
+      "time": 47.9,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-07-1.png"
+    },
+    {
+      "id": "07",
+      "chapter": "vehicle",
+      "time": 52.3,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-07-2.png"
+    },
+    {
+      "id": "08",
+      "chapter": "vehicle",
+      "time": 55.78333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-08-1.png"
+    },
+    {
+      "id": "08",
+      "chapter": "vehicle",
+      "time": 59.92666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-08-2.png"
+    },
+    {
+      "id": "09",
+      "chapter": "vehicle",
+      "time": 63.43333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-09-1.png"
+    },
+    {
+      "id": "09",
+      "chapter": "vehicle",
+      "time": 67.83333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-09-2.png"
+    },
+    {
+      "id": "10",
+      "chapter": "vehicle",
+      "time": 71.43333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-10-1.png"
+    },
+    {
+      "id": "10",
+      "chapter": "vehicle",
+      "time": 75.83333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-10-2.png"
+    },
+    {
+      "id": "11",
+      "chapter": "records",
+      "time": 79.18333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-11-1.png"
+    },
+    {
+      "id": "11",
+      "chapter": "records",
+      "time": 83.03333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-11-2.png"
+    },
+    {
+      "id": "12",
+      "chapter": "records",
+      "time": 86.225,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-12-1.png"
+    },
+    {
+      "id": "12",
+      "chapter": "records",
+      "time": 90.16666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-12-2.png"
+    },
+    {
+      "id": "13",
+      "chapter": "records",
+      "time": 93.35,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-13-1.png"
+    },
+    {
+      "id": "13",
+      "chapter": "records",
+      "time": 97.19999999999999,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-13-2.png"
+    },
+    {
+      "id": "14",
+      "chapter": "records",
+      "time": 100.6,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-14-1.png"
+    },
+    {
+      "id": "14",
+      "chapter": "records",
+      "time": 105.0,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-14-2.png"
+    },
+    {
+      "id": "15",
+      "chapter": "records",
+      "time": 108.84166666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-15-1.png"
+    },
+    {
+      "id": "15",
+      "chapter": "records",
+      "time": 113.77333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-15-2.png"
+    },
+    {
+      "id": "16",
+      "chapter": "records",
+      "time": 117.56666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-16-1.png"
+    },
+    {
+      "id": "16",
+      "chapter": "records",
+      "time": 121.96666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-16-2.png"
+    },
+    {
+      "id": "17",
+      "chapter": "dove",
+      "time": 125.06666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-17-1.png"
+    },
+    {
+      "id": "17",
+      "chapter": "dove",
+      "time": 128.36666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-17-2.png"
+    },
+    {
+      "id": "18",
+      "chapter": "dove",
+      "time": 131.06666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-18-1.png"
+    },
+    {
+      "id": "18",
+      "chapter": "dove",
+      "time": 134.36666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-18-2.png"
+    },
+    {
+      "id": "19",
+      "chapter": "dove",
+      "time": 137.21666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-19-1.png"
+    },
+    {
+      "id": "19",
+      "chapter": "dove",
+      "time": 140.84666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-19-2.png"
+    },
+    {
+      "id": "20",
+      "chapter": "dove",
+      "time": 144.08333333333331,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-20-1.png"
+    },
+    {
+      "id": "20",
+      "chapter": "dove",
+      "time": 148.3,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-20-2.png"
+    },
+    {
+      "id": "21",
+      "chapter": "dove",
+      "time": 151.72500000000002,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-21-1.png"
+    },
+    {
+      "id": "21",
+      "chapter": "dove",
+      "time": 155.88666666666668,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-21-2.png"
+    },
+    {
+      "id": "22",
+      "chapter": "dove",
+      "time": 159.40833333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-22-1.png"
+    },
+    {
+      "id": "22",
+      "chapter": "dove",
+      "time": 163.82666666666668,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-22-2.png"
+    },
+    {
+      "id": "23",
+      "chapter": "dove",
+      "time": 166.93333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-23-1.png"
+    },
+    {
+      "id": "23",
+      "chapter": "dove",
+      "time": 170.23333333333335,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-23-2.png"
+    },
+    {
+      "id": "24",
+      "chapter": "dove",
+      "time": 173.3,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-24-1.png"
+    },
+    {
+      "id": "24",
+      "chapter": "dove",
+      "time": 177.40666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-24-2.png"
+    },
+    {
+      "id": "25",
+      "chapter": "reports",
+      "time": 180.4,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-25-1.png"
+    },
+    {
+      "id": "25",
+      "chapter": "reports",
+      "time": 183.70000000000002,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-25-2.png"
+    },
+    {
+      "id": "26",
+      "chapter": "reports",
+      "time": 186.475,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-26-1.png"
+    },
+    {
+      "id": "26",
+      "chapter": "reports",
+      "time": 189.94,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-26-2.png"
+    },
+    {
+      "id": "27",
+      "chapter": "reports",
+      "time": 192.875,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-27-1.png"
+    },
+    {
+      "id": "27",
+      "chapter": "reports",
+      "time": 196.56,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-27-2.png"
+    },
+    {
+      "id": "28",
+      "chapter": "reports",
+      "time": 199.65,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-28-1.png"
+    },
+    {
+      "id": "28",
+      "chapter": "reports",
+      "time": 203.5,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-28-2.png"
+    },
+    {
+      "id": "29",
+      "chapter": "export",
+      "time": 206.45833333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-29-1.png"
+    },
+    {
+      "id": "29",
+      "chapter": "export",
+      "time": 209.88666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-29-2.png"
+    },
+    {
+      "id": "30",
+      "chapter": "export",
+      "time": 212.63333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-30-1.png"
+    },
+    {
+      "id": "30",
+      "chapter": "export",
+      "time": 215.93333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-30-2.png"
+    },
+    {
+      "id": "31",
+      "chapter": "export",
+      "time": 218.63333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-31-1.png"
+    },
+    {
+      "id": "31",
+      "chapter": "export",
+      "time": 221.93333333333334,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-31-2.png"
+    },
+    {
+      "id": "32",
+      "chapter": "export",
+      "time": 224.75,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-32-1.png"
+    },
+    {
+      "id": "32",
+      "chapter": "export",
+      "time": 228.30666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-32-2.png"
+    },
+    {
+      "id": "33",
+      "chapter": "export",
+      "time": 231.60833333333332,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-33-1.png"
+    },
+    {
+      "id": "33",
+      "chapter": "export",
+      "time": 236.02666666666667,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-33-2.png"
+    },
+    {
+      "id": "34",
+      "chapter": "sync",
+      "time": 239.63333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-34-1.png"
+    },
+    {
+      "id": "34",
+      "chapter": "sync",
+      "time": 244.03333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-34-2.png"
+    },
+    {
+      "id": "35",
+      "chapter": "sync",
+      "time": 247.63333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-35-1.png"
+    },
+    {
+      "id": "35",
+      "chapter": "sync",
+      "time": 252.03333333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-35-2.png"
+    },
+    {
+      "id": "36",
+      "chapter": "sync",
+      "time": 255.66666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-36-1.png"
+    },
+    {
+      "id": "36",
+      "chapter": "sync",
+      "time": 260.14,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-36-2.png"
+    },
+    {
+      "id": "37",
+      "chapter": "sync",
+      "time": 263.775,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-37-1.png"
+    },
+    {
+      "id": "37",
+      "chapter": "sync",
+      "time": 268.1933333333333,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-37-2.png"
+    },
+    {
+      "id": "38",
+      "chapter": "sync",
+      "time": 271.8,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-38-1.png"
+    },
+    {
+      "id": "38",
+      "chapter": "sync",
+      "time": 276.2,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-38-2.png"
+    },
+    {
+      "id": "39",
+      "chapter": "recap",
+      "time": 279.31666666666666,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-39-1.png"
+    },
+    {
+      "id": "39",
+      "chapter": "recap",
+      "time": 282.65333333333336,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-39-2.png"
+    },
+    {
+      "id": "40",
+      "chapter": "recap",
+      "time": 285.28333333333336,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-40-1.png"
+    },
+    {
+      "id": "40",
+      "chapter": "recap",
+      "time": 288.40000000000003,
+      "path": "C:\\Python\\VibeCoding\\vehicle-manager\\.runtime\\training-v1.9.1\\verification\\scene-40-2.png"
+    }
+  ],
+  "contactSheet": "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet.jpg",
+  "chapterContactSheets": [
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-intro.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-vehicle.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-records.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-dove.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-reports.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-export.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-sync.jpg",
+    "C:\\Python\\VibeCoding\\vehicle-manager\\vehicle-manager-training\\member-training-v1.9.1\\delivery\\contact-sheet-recap.jpg"
+  ],
+  "asr": [
+    {
+      "id": "01",
+      "expectedSpokenText": "欢迎使用车辆管理。本片演示普通成员的日常操作，所有资料均为虚构。",
+      "recognized": "欢迎使用车辆管理本片演示普通成员的日常操作所有资料均为虚构",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "02",
+      "expectedSpokenText": "完整解压后运行启动脚本，首次先注册本地账号，再使用自己的账号登录。",
+      "recognized": "完整解压后运行启动脚本首次先注册本地账号再使用自己的账号登录",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "03",
+      "expectedSpokenText": "首次使用先申请加入已有团队；账号和设备获批后，确认当前团队与连接状态。",
+      "recognized": "首次使用先申请加入已有团队账号和设备获批后确认当前团队与连接状态",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "04",
+      "expectedSpokenText": "左侧进入车辆总览、报告档案、变更历史和共享同步。",
+      "recognized": "左侧进入车辆总览报告档案变更历史和共享同步",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "05",
+      "expectedSpokenText": "在车辆总览输入昵称或车辆识别码，再用状态筛选缩小范围。",
+      "recognized": "在车辆总览输入昵称或车辆识别码再用状态筛选缩小范围",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "06",
+      "expectedSpokenText": "点击车辆名称打开档案。左侧车辆图标可标记个人关注，不改变团队数据。",
+      "recognized": "点击车辆名称打开档案左侧车辆图标可标记个人关注不改变团队数据",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "07",
+      "expectedSpokenText": "填写未重复的十七位车辆识别码，明确选择车辆状态和排放合规等级。",
+      "recognized": "填写未重复的十七位车辆识别码明确选择车辆状态和排放合规等级",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "08",
+      "expectedSpokenText": "昵称、实际位置、项目和负责人按需填写；保存前再核对一次。",
+      "recognized": "昵称实际位置项目和负责人按需填写保存前再核对一次",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "09",
+      "expectedSpokenText": "填写清楚的变更原因，再点击保存。确认新车辆已出现在列表中。",
+      "recognized": "填写清楚的变更原因再点击保存确认新车辆已出现在列表中",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "10",
+      "expectedSpokenText": "资料变化时点击编辑，更新实际位置等内容，写明原因后保存。",
+      "recognized": "资料变化时点击编辑更新实际位置等内容写明原因后保存",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "11",
+      "expectedSpokenText": "在车辆档案查看控制器固定位置，展开更多信息核对软硬件配置。",
+      "recognized": "在车辆档案查看控制器固定位置展开更多信息核对软硬件配置",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "12",
+      "expectedSpokenText": "切换电池、电机、热管理和车辆改装，查看这辆车的关联记录。",
+      "recognized": "切换电池电机热管理和车辆改装查看这辆车的关联记录",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "13",
+      "expectedSpokenText": "新增车载设备时，先选择设备类型，再填写设备名称。",
+      "recognized": "新增车在设备时先选择设备类型再填写设备名称",
+      "characterErrorRate": 0.047619047619047616,
+      "suggestedReview": false
+    },
+    {
+      "id": "14",
+      "expectedSpokenText": "设备说明、安装和拆除日期可以按需补充；备注只记录相关信息。",
+      "recognized": "设备说明安装和拆除日期可以按需补充备注只记录相关信息",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "15",
+      "expectedSpokenText": "需要时选择设备附件，写明原因并保存。程序先保存设备，再逐份上传附件。",
+      "recognized": "需要时选择设备附件写明原因并保存程序先保存设备再逐分上传附件",
+      "characterErrorRate": 0.03333333333333333,
+      "suggestedReview": false
+    },
+    {
+      "id": "16",
+      "expectedSpokenText": "核对每份附件结果。支持的图片和文档可以预览，也能下载原件。",
+      "recognized": "核对每份附件结果支持的图片和文档可以预览也能下载原件",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "17",
+      "expectedSpokenText": "进入诊断报告导入，选择两份同一车辆的演示报告。",
+      "recognized": "进入诊断报告导入选择两份同一车辆的演示报告",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "18",
+      "expectedSpokenText": "每批最多八份电子表格工作簿，每份不超过十兆。",
+      "recognized": "每批最多八份电子表格工作簿每份不超过十兆",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "19",
+      "expectedSpokenText": "点击上传并预览。预览只是解析内容，还没有正式留存报告。",
+      "recognized": "点击上传并预览预览只是解析内容还没有正式留存报告",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "20",
+      "expectedSpokenText": "逐份核对车辆、车辆识别码和采集时间。车辆匹配依据工作簿内容。",
+      "recognized": "逐分核对车辆车辆识别码和采集时间车辆匹配依据工作部内容",
+      "characterErrorRate": 0.07407407407407407,
+      "suggestedReview": false
+    },
+    {
+      "id": "21",
+      "expectedSpokenText": "需要同时录入配置时，先比较当前档案值和报告值，再确认更新内容。",
+      "recognized": "需要同时录入配置时先比较当前档案值和报告值再确认更新内容",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "22",
+      "expectedSpokenText": "缺失或无效字段保留有效旧值；只留存报告时，取消同时录入配置。",
+      "recognized": "缺失或无效字段保留有效就值只留存报告时取消同时录入配置",
+      "characterErrorRate": 0.037037037037037035,
+      "suggestedReview": false
+    },
+    {
+      "id": "23",
+      "expectedSpokenText": "确认无误后点击确认导入，等待每份文件处理完成。",
+      "recognized": "确认无误后点击确认导入等待每份文件处理完成",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "24",
+      "expectedSpokenText": "逐份检查留存结果。有失败时先查看原因，不要把失败当作成功。",
+      "recognized": "逐份检查留存结果有失败时先查看原因不要把失败当做成功",
+      "characterErrorRate": 0.038461538461538464,
+      "suggestedReview": false
+    },
+    {
+      "id": "25",
+      "expectedSpokenText": "进入报告档案，点击文件名，打开刚才留存的报告。",
+      "recognized": "进入报告档案点击文件名打开刚才留存的报告",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "26",
+      "expectedSpokenText": "查看摘要、控制器和故障记录，需要核查时下载原件。",
+      "recognized": "查看摘要控制器和故障记录需要核查时下载原件",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "27",
+      "expectedSpokenText": "选中同一车辆的两份报告，点击对比，查看配置和故障变化。",
+      "recognized": "选中同一车辆的两份报告点击对比查看配置和故障变化",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "28",
+      "expectedSpokenText": "差异只是报告观测，不代表问题已修复，也不代表车辆可以放行。",
+      "recognized": "差异只是报告观测不代表问题已修复也不代表车辆可以放行",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "29",
+      "expectedSpokenText": "在车辆总览打开数据导出，再筛选和勾选需要导出的车辆。",
+      "recognized": "在车辆总览打开数据导出再筛选和勾选需要导出的车辆",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "30",
+      "expectedSpokenText": "在类别与导出列中启用车载设备，再核对所选车辆。",
+      "recognized": "在类别与导出列中启用车载设备再核对所选车辆",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "31",
+      "expectedSpokenText": "保留设备的车辆识别码列，让每一行都对应到所属车辆。",
+      "recognized": "保留设备的车辆识别马列让每一行都对应到所属车辆",
+      "characterErrorRate": 0.043478260869565216,
+      "suggestedReview": false
+    },
+    {
+      "id": "32",
+      "expectedSpokenText": "确认字段后导出并下载，再检查文件中的车辆和设备信息。",
+      "recognized": "确认字段后导出并下载再检查文件中的车辆和设备信息",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "33",
+      "expectedSpokenText": "用电子表格软件导入时，将车辆识别码和长编号设为文本，避免自动转换。",
+      "recognized": "用电子表格软件导入时将车辆识别码和长边号设为文本避免自动转换",
+      "characterErrorRate": 0.03333333333333333,
+      "suggestedReview": false
+    },
+    {
+      "id": "34",
+      "expectedSpokenText": "变更历史记录谁在何时改了什么，也保留本次操作的原因。",
+      "recognized": "变更历史记录谁在何时改了什么也保留本次操作的原因",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "35",
+      "expectedSpokenText": "按车辆、日期或关键词筛选，展开记录，核对修改前后的值。",
+      "recognized": "按车辆日期或关键词筛选展开记录核对修改前后的值",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "36",
+      "expectedSpokenText": "操作结束后检查待同步操作和冲突。遇到冲突，先核对，再按提示处理。",
+      "recognized": "操作结束后检查待同步操作和冲突遇到冲突先核对再按提示处理",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "37",
+      "expectedSpokenText": "离线时看到的是本地缓存。本机待同步为零，也不代表所有同事都已刷新。",
+      "recognized": "离线时看到的是本地缓存本机带同步为零也不代表所有同事都已刷新",
+      "characterErrorRate": 0.03333333333333333,
+      "suggestedReview": false
+    },
+    {
+      "id": "38",
+      "expectedSpokenText": "同步暂停时，从个人工作空间核对修改，再按提示恢复团队同步。",
+      "recognized": "同步暂停时从个人工作空间核对修改再按提示恢复团队同步",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "39",
+      "expectedSpokenText": "找到车辆，写明变更原因，核对报告，最后检查同步。",
+      "recognized": "找到车辆写明变更原因核对报告最后检查同步",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    },
+    {
+      "id": "40",
+      "expectedSpokenText": "确认保存并检查同步后，使用停止脚本安全退出。",
+      "recognized": "确认保存并检查同步后使用停止脚本安全退出",
+      "characterErrorRate": 0.0,
+      "suggestedReview": false
+    }
+  ],
+  "humanListeningPerformed": false,
+  "humanVisualReviewPerformed": false,
+  "limitations": "Decoding, signal, timing, speech comparison and optional ASR checks do not replace complete human listening. Contact sheets require visual review for member-only UI and caption readability."
+}

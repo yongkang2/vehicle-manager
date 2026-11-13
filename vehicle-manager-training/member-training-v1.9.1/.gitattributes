@@ -1,0 +1,2 @@
+# Preserve curated media, subtitle and provenance bytes across platforms.
+* -text whitespace=trailing-space,space-before-tab,cr-at-eol

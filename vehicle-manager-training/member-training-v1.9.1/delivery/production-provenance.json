@@ -1,0 +1,47 @@
+{
+  "sourceCommit": "6f9354ac76e7999e9a115ad6aa95417366f01a0a",
+  "version": "1.9.1",
+  "duration": 289.53333333333336,
+  "frames": 8686,
+  "narrationSha256": "30ce7a1e92c86a5550a05ba384cf46dcb49d05d78f41feda7023b348a078deef",
+  "audioManifestSha256": "559f9f49747c5917472238e0ded8b9f0d81b320560126893cbbda8b6b060c8b9",
+  "captureManifestSha256": "4c00f7235d7f8bb947c24404ec27e5318ae27247fe40c7a942900c4fe3ef4d4d",
+  "captureFrameSequenceSha256": "9d92bfef8a7bea3c96dbd98d15254b7144f1c6fb4b17632000ba5369b84006a8",
+  "sourceMusicSha256": "a7f05a29d07a84d38072ccd2b35204bca812db86e75b2a837e71cc144d3e739b",
+  "music": "Close Up",
+  "musicArtist": "Michael Ramir C.",
+  "tools": {
+    "archiveSha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+    "binaries": {
+      "ffmpeg.exe": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec",
+      "ffprobe.exe": "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52"
+    },
+    "version": "ffmpeg version 9.0.2-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "mix": {
+    "voiceGainDb": 0.9750912542322027,
+    "musicGainDb": -11.351628244629444,
+    "musicBaseRmsDbFS": -29,
+    "duckDb": -8,
+    "crossfadeSeconds": 2.0,
+    "loopStarts": [
+      93.1059375,
+      186.211875,
+      279.3178125
+    ],
+    "fadeInSeconds": 0.8,
+    "fadeOutSeconds": 1.8,
+    "limiterGainDb": 0.0,
+    "mixedPeakDbFS": -3.6583572811509457,
+    "clippedSamples": 0,
+    "speechTimeStretching": false,
+    "speechCuts": false,
+    "originalNarrationTimelineSha256": "9cfbb3f908859504ef821691ab8680ce8fa1ac4004743d99ba70c389ef4e534f",
+    "soundtrackSha256": "83e540b0ff143bdd26d81094a64f83c04fcf1a5befc931422e6be866b013e6fa"
+  },
+  "videoSha256": "5e8a2a088c58617748d020780957e9e5be5801dc03292ecc3aa7b5d35b13a427",
+  "shutdownEvidenceOverlay": true,
+  "humanListeningPerformed": false,
+  "humanVisualReviewPerformed": false,
+  "limitation": "Automated rendering does not establish natural pronunciation, member-only workflow correctness or complete human listening."
+}

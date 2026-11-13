@@ -1,0 +1,13 @@
+{
+  "sourceCommit": "6f9354ac76e7999e9a115ad6aa95417366f01a0a",
+  "sourceClean": true,
+  "appVersion": "1.9.1",
+  "frontendVersion": "1.9.1",
+  "nodeVersion": "v26.13.0",
+  "platform": "win32",
+  "arch": "x64",
+  "sourceKind": "isolated detached worktree of official release v1.9.1",
+  "build": "passed",
+  "data": "fictional isolated training workspace",
+  "applicationSourceModified": false
+}
