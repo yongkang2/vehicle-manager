@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { promises as fs, existsSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
 import { randomUUID, createHash } from 'node:crypto'
@@ -21,8 +21,8 @@ async function extract(zip, name) {
   const destination = path.join(root, name)
   await fs.mkdir(destination)
   const quote = value => value.replaceAll("'", "''")
-  const command = `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${quote(zip)}' -DestinationPath '${quote(destination)}'`
-  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], { windowsHide: true })
+  const command = `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; Expand-Archive -LiteralPath '${quote(zip)}' -DestinationPath '${quote(destination)}'`
+  await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')], { windowsHide: true })
   const folders = (await fs.readdir(destination, { withFileTypes: true })).filter(entry => entry.isDirectory())
   assert.equal(folders.length, 1)
   const directory = path.join(destination, folders[0].name)
@@ -60,7 +60,9 @@ const credentials = { username: 'upgrade-check', displayName: 'Synthetic upgrade
 const write = (c, kind, fields, vehicleId) => request(c, '/business/records', 'POST', { kind, vehicleId, data: fields, reason: 'Synthetic packaged upgrade acceptance' })
 const sync = async c => { const state = await request(c, '/business/sync', 'POST'); assert.equal(state.phase, 'ready'); assert.equal(state.pending, 0); return state }
 try {
-  const old = await extract(inputs[0], 'old-package'), next = await extract(inputs[1], 'new-package')
+  const extracted = await Promise.allSettled([extract(inputs[0], 'old-package'), extract(inputs[1], 'new-package')])
+  for (const result of extracted) if (result.status === 'rejected') throw result.reason
+  const [old, next] = extracted.map(result => result.value)
   assert.equal(old.version, '1.9.1'); assert.notEqual(next.version, old.version)
   const primary = client(old, data)
   await fs.mkdir(shared); await start(primary)
@@ -97,6 +99,10 @@ try {
   const frozenRevision = await request(primary, `${revisionPath}/${revision.revisionId}`)
   const backup = await request(primary, '/business/backup')
   assert.equal(backup.subarray(0, 2).toString(), 'PK')
+  // Backup completion updates shared metadata after sending its HTTP body.
+  // Drain that lease before simulating an unavailable share by renaming it.
+  await sync(primary)
+  await assert.rejects(fs.access(path.join(shared, '.vehicle-manager-team-lock')), { code: 'ENOENT' })
   // Simulate a disconnected test share; both paths are exclusively under root.
   assert.equal(path.dirname(shared), root); assert.equal(path.dirname(offline), root)
   await fs.rename(shared, offline)
