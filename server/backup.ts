@@ -616,7 +616,7 @@ export async function restoreBackup(business: Business, bytes: Buffer, teamId: s
     // History must also publish when working records already match the backup.
     if (historical.length) business.store.set('pendingHistoryImports', [...(business.store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []), { id: randomUUID(), actor, changes: historical } satisfies RestoredHistoryImport])
     summary.changed = changed + protectedImport.records.length + modificationImport.records.length
-    business.store.event(actor.id, 'backup.restored', { reason, ...summary, teamId })
+    business.store.event(actor, 'backup.restored', { reason, ...summary, teamId })
     options.committed?.(summary)
   })
   return summary

@@ -6,9 +6,9 @@ import { Business, checksum, fromRow, now, reason, validateEquipmentAttachmentRe
 import { assertConfigurationProtocol, SharedBusinessSnapshot, validateVehicleDeletion } from './deletions.js'
 import type { BusinessHead } from './deletions.js'
 import type { RecordRow } from './business.js'
-import { AppError, TeamDirectory, assertTeamLock } from './team.js'
+import { AppError, TeamDirectory, assertTeamLock, bindingFor } from './team.js'
 import type { Identity, TeamDocument } from '../shared/types.js'
-import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
+import type { Actor, BusinessRecord, Change, Fields, Operation, RecordKind, RestoredHistoryImport, SyncConflict, SyncStage, SyncStatus, VehicleDeletion, VehicleDeletePreview, VehicleDeleteRequest, VehicleDeleteReceipt } from '../shared/business.js'
 import { componentTypeDefinitions, isProtectedKind, validateConfigurationRecords, validateConfigurationRevisionRecord, validateComponentTypeRecord, validateConfigurationReceiptEntry } from '../shared/configuration-revisions.js'
 import type { ConfigurationImport } from '../shared/configuration-revisions.js'
 import { collectChangeFileKeys, collectRecordFileKeys, hasEnhancedModificationText, modificationFiles, validateModificationRecords, validateModificationReceiptEntry } from '../shared/modifications.js'
@@ -64,6 +64,14 @@ export class BusinessSync {
   private previews = new Map<string, PreviewState>()
   private phase: SyncStatus['phase'] = 'idle'
   private error: string | null = null
+  private progress: SyncStatus['progress']
+  private timings: NonNullable<SyncStatus['timings']> = {}
+  private stageStarted = 0
+  private advance(stage?: SyncStage, total = 0): void {
+    if (this.progress) this.timings[this.progress.stage] = Math.round(performance.now() - this.stageStarted)
+    this.progress = stage ? { stage, completed: 0, total } : undefined
+    this.stageStarted = performance.now()
+  }
   // Only reuse a fully ingested snapshot in this process. Explicit sync and
   // maintenance always verify files; background checks also do so every 5 min.
   private verified: { directory: string; head: string; at: number } | null = null
@@ -75,28 +83,62 @@ export class BusinessSync {
     const configurationImports = store.get<ConfigurationImport[]>('pendingConfigurationImports') || []
     const historyImports = store.get<RestoredHistoryImport[]>('pendingHistoryImports') || []
     const modificationImports = store.get<ModificationImport[]>('pendingModificationImports') || []
-    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length + modificationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision') }
+    return { phase: this.phase, error: this.error, pending: pendingOperations + pendingImports.length + configurationImports.length + historyImports.length + modificationImports.length, quarantined: store.quarantineRows().length, conflicts: store.db.prepare('SELECT payload FROM conflicts').all().map(row => JSON.parse(row.payload as string)), lastSync: store.get<string>('businessLastSync'), revision: store.get<string>('businessRevision'), ...(this.progress ? { progress: { ...this.progress } } : {}), ...(Object.keys(this.timings).length ? { timings: { ...this.timings } } : {}) }
   }
   async settle(): Promise<void> { await this.business.store.settleWork(); if (this.running) await this.running }
   synchronize(directory: string, teamId: string, identity: Identity, options: { ifChanged?: boolean } = {}): Promise<SyncStatus> {
     if (this.running) return !options.ifChanged && !this.runningFull ? this.running.then(() => this.synchronize(directory, teamId, identity, options)) : this.running
     const started = performance.now()
+    let lockWaitMs = 0, lockHeldMs = 0
     let failure: unknown
     this.runningFull = !options.ifChanged
     this.phase = 'syncing'
-    this.running = this.business.store.runWrite(() => this.teams.withAccess(directory, teamId, identity, false, team => this.cycle(directory, team, options.ifChanged))).catch(error => {
+    this.timings = {}; this.advance('opening')
+    this.running = this.business.store.runWrite(async () => {
+      if (options.ifChanged && this.canCheckUnchanged(directory)) {
+        await this.checkAccess(directory, teamId, identity)
+        const head = await SharedBusinessSnapshot.readHead(this.business, directory, teamId)
+        await this.checkAccess(directory, teamId, identity)
+        // Recheck local queues after asynchronous reads. A concurrent local save
+        // must not be acknowledged as published by this read-only shortcut.
+        if (this.canCheckUnchanged(directory) && head && JSON.stringify(head) === this.verified!.head && head.revision === this.status().revision) {
+          this.error = null; this.phase = 'ready'; this.advance()
+          return this.status()
+        }
+      }
+      const requested = performance.now()
+      let acquired: number | undefined
+      try {
+        return await this.teams.withAccess(directory, teamId, identity, false, team => {
+          acquired = performance.now(); lockWaitMs = Math.round(acquired - requested)
+          return this.cycle(directory, team, options.ifChanged)
+        })
+      } finally {
+        if (acquired === undefined) lockWaitMs = Math.round(performance.now() - requested)
+        else lockHeldMs = Math.round(performance.now() - acquired)
+      }
+    }).catch(error => {
       failure = error
       this.verified = null
       this.error = error instanceof AppError ? error.code : 'SHARE_IO_ERROR'
       this.phase = ['SHARE_BUSY', 'SHARE_LOCK_LOST', 'MAINTENANCE_IN_PROGRESS'].includes(this.error) ? 'busy' : 'offline'
+      this.advance()
       return this.status()
     }).then(state => {
       const key = JSON.stringify([state.phase, state.error, state.pending, state.conflicts.length]), durationMs = Math.round(performance.now() - started)
-      if (key !== this.diagnosticState || !state.error && durationMs >= 2000) this.business.store.diagnostics.write(state.error ? 'warn' : 'info', state.error ? 'sync.failed' : 'sync.changed', { phase: state.phase, code: state.error, pending: state.pending, conflicts: state.conflicts.length, durationMs }, failure)
+      if (key !== this.diagnosticState || !state.error && durationMs >= 2000) this.business.store.diagnostics.write(state.error ? 'warn' : 'info', state.error ? 'sync.failed' : 'sync.changed', { phase: state.phase, code: state.error, pending: state.pending, conflicts: state.conflicts.length, durationMs, lockWaitMs, lockHeldMs, timings: state.timings }, failure)
       this.diagnosticState = key
       return state
     }).finally(() => { this.running = null })
     return this.running
+  }
+  private canCheckUnchanged(directory: string): boolean {
+    const previous = this.verified, state = this.status()
+    return Boolean(previous?.directory === directory && Date.now() >= previous.at && Date.now() - previous.at < 300000 && !state.pending && !state.conflicts.length)
+  }
+  private async checkAccess(directory: string, teamId: string, identity: Identity): Promise<void> {
+    const { member, binding } = bindingFor(await this.teams.read(directory, teamId), identity)
+    if (!member?.enabled || !binding?.enabled) throw new AppError('ACCESS_DISABLED', 403)
   }
   async refreshLocked(directory: string, team: TeamDocument): Promise<SyncStatus> { return this.cycle(directory, team) }
   async ingestLocked(snapshot: SharedBusinessSnapshot): Promise<boolean> {
@@ -262,11 +304,13 @@ export class BusinessSync {
       master.prepare('INSERT INTO applied VALUES(?,?)').run(operation.id, JSON.stringify(operation))
     }
   }
-  private async filesToShare(directory: string, operations: Operation[]): Promise<void> {
+  private async filesToShare(directory: string, operations: Operation[], transferred: Set<string>): Promise<void> {
     for (const key of new Set(operations.flatMap(operation => [...operation.files, ...operation.changes.flatMap(collectChangeFileKeys)]))) {
       if (!hashKey(key)) throw new AppError('INVALID_INPUT')
+      if (transferred.has(key)) continue
       const bytes = await this.business.readBlob(key)
       await immutableFile(path.join(directory, 'blobs', key), bytes)
+      transferred.add(key)
     }
   }
   private acceptCanonical(master: DatabaseSync): VehicleDeletion[] {
@@ -276,7 +320,8 @@ export class BusinessSync {
     store.transaction(() => {
       for (const operation of store.db.prepare("SELECT id FROM outbox WHERE state='pending'").all()) if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) store.db.prepare("UPDATE outbox SET state='sent' WHERE id=?").run(operation.id)
       store.applyDeletions(markers)
-      for (const change of master.prepare('SELECT * FROM changes').all()) store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
+      const saveHistory = store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)')
+      for (const change of master.prepare('SELECT * FROM changes').all()) saveHistory.run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
       const imports = store.get<{ deletion: VehicleDeletion; actor: Actor }[]>('pendingDeletionImports') || []
       if (imports.length) store.set('pendingDeletionImports', imports.filter(item => !markers.some(marker => marker.vehicleId === item.deletion.vehicleId && marker.id === item.deletion.id)))
     })
@@ -285,12 +330,12 @@ export class BusinessSync {
   private async ingest(master: DatabaseSync, directory: string, head: BusinessHead, conflicts: SyncConflict[]): Promise<void> {
     this.acceptCanonical(master)
     const records = master.prepare(`SELECT * FROM records ORDER BY ${kinds},id`).all() as RecordRow[]
-    if (head.protocol >= 3) { try { const view = records.map(fromRow); assertConfigurationProtocol(view, head.protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
-    try { validateModificationRecords(records.map(fromRow), head.protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
-    validateEquipmentAttachmentRecords(records.map(fromRow))
+    const view = records.map(fromRow)
+    if (head.protocol >= 3) { try { assertConfigurationProtocol(view, head.protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
+    try { validateModificationRecords(view, head.protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
+    validateEquipmentAttachmentRecords(view)
     const files = new Map<string, number>()
-    for (const row of records) {
-      const record = fromRow(row)
+    for (const record of view) {
       const references = ['report', 'attachment'].includes(record.kind) ? [{ checksum: String(record.data.checksum), size: Number(record.data.size) }] : modificationFiles(record)
       for (const file of references) {
         if (!hashKey(file.checksum) || files.has(file.checksum) && files.get(file.checksum) !== file.size) throw new AppError('FILE_CORRUPTED', 409)
@@ -315,26 +360,30 @@ export class BusinessSync {
       await atomicFile(localPath, bytes)
     }
     const store = this.business.store
+    const findRecord = store.db.prepare('SELECT * FROM records WHERE id=?')
+    const findVin = store.db.prepare('SELECT id FROM records WHERE vin=? AND id<>?')
+    const insertRecord = store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)')
+    const updateRecord = store.db.prepare('UPDATE records SET data=?,vin=?,archived=?,version=version+1,updated=? WHERE id=?')
+    const updateGroup = store.db.prepare('UPDATE records SET data=?,archived=?,version=?,updated=? WHERE id=?')
     store.transaction(() => {
       for (const operation of store.db.prepare("SELECT id FROM outbox WHERE state='pending'").all()) if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) store.db.prepare("UPDATE outbox SET state='sent' WHERE id=?").run(operation.id)
       const pending = new Set(store.db.prepare("SELECT record_id FROM outbox WHERE state='pending'").all().map(row => row.record_id))
       for (const row of records) {
         if (pending.has(row.id)) continue
-        const duplicate = row.kind === 'vehicle' ? store.db.prepare('SELECT id FROM records WHERE vin=? AND id<>?').get(JSON.parse(row.data).vin, row.id) : null
+        const duplicate = row.kind === 'vehicle' ? findVin.get(JSON.parse(row.data).vin, row.id) : null
         if (duplicate) {
           if (!pending.has(duplicate.id)) throw new AppError('VIN_EXISTS', 409)
           store.db.prepare('UPDATE records SET vin=?,version=version+1 WHERE id=?').run(`pending:${duplicate.id}`, duplicate.id)
         }
-        const local = store.db.prepare('SELECT * FROM records WHERE id=?').get(row.id) as RecordRow | undefined
+        const local = findRecord.get(row.id) as RecordRow | undefined
         if (row.kind === 'configurationRevision' && local && (local.kind !== row.kind || local.vehicle_id !== row.vehicle_id || local.data !== row.data || local.archived !== row.archived)) throw new AppError('CONFIGURATION_CORRUPTED', 409)
         if (row.kind === 'modificationGroup') {
-          if (!local) store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, null, null, row.data, row.archived, row.version, row.updated)
-          else store.db.prepare('UPDATE records SET data=?,archived=?,version=?,updated=? WHERE id=?').run(row.data, row.archived, row.version, row.updated, row.id)
+          if (!local) insertRecord.run(row.id, row.kind, null, null, row.data, row.archived, row.version, row.updated)
+          else updateGroup.run(row.data, row.archived, row.version, row.updated, row.id)
         }
-        else if (!local) store.db.prepare('INSERT INTO records VALUES(?,?,?,?,?,?,?,?)').run(row.id, row.kind, row.vehicle_id, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.data, row.archived, 1, row.updated)
-        else if (row.data !== local.data || row.archived !== local.archived) store.db.prepare('UPDATE records SET data=?,vin=?,archived=?,version=version+1,updated=? WHERE id=?').run(row.data, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.archived, row.updated, row.id)
+        else if (!local) insertRecord.run(row.id, row.kind, row.vehicle_id, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.data, row.archived, 1, row.updated)
+        else if (row.data !== local.data || row.archived !== local.archived) updateRecord.run(row.data, row.kind === 'vehicle' ? String(JSON.parse(row.data).vin) : null, row.archived, row.updated, row.id)
       }
-      for (const change of master.prepare('SELECT * FROM changes').all()) store.db.prepare('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)').run(change.id, change.record_id, change.vehicle_id, change.payload, change.created)
       store.db.exec('DELETE FROM conflicts')
       for (const conflict of conflicts) store.db.prepare('INSERT INTO conflicts VALUES(?,?)').run(conflict.recordId, JSON.stringify(conflict))
       store.set('businessRevision', head.revision); store.set('businessSequence', head.sequence); store.set('businessProtocol', head.protocol); store.set('businessLastSync', now())
@@ -358,6 +407,7 @@ export class BusinessSync {
       const head = await SharedBusinessSnapshot.readHead(this.business, shared, team.id)
       if (head && JSON.stringify(head) === previous.head && head.revision === state.revision) {
         this.error = null; this.phase = 'ready'
+        this.advance()
         return this.status()
       }
     }
@@ -451,32 +501,51 @@ export class BusinessSync {
       }
       const pending = this.business.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY seq").all().map(row => JSON.parse(row.payload as string) as Operation)
       const groups = new Map<string, Operation[]>()
+      const operationFiles: Operation[] = []
       for (const operation of pending) {
         const deleted = markers.find(marker => marker.recordIds.includes(operation.recordId) || marker.vehicleId === operation.vehicleId || marker.vehicleId === operation.recordId)
         if (deleted) { store.quarantineOperation(operation, deleted.vehicleId); continue }
-        if (!(protocol < 5 && operation.kind === 'modification' && operationHasEnhancedModificationText(operation))) await immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))
+        if (!(protocol < 5 && operation.kind === 'modification' && operationHasEnhancedModificationText(operation))) operationFiles.push(operation)
         if (master.prepare('SELECT id FROM applied WHERE id=?').get(operation.id)) continue
         if (!groups.has(operation.recordId)) groups.set(operation.recordId, [])
         groups.get(operation.recordId)!.push(operation)
+      }
+      this.advance('operations', operationFiles.length)
+      for (let offset = 0; offset < operationFiles.length; offset += 8) {
+        const results = await Promise.allSettled(operationFiles.slice(offset, offset + 8).map(operation => immutableFile(path.join(directory, 'operations', `${operation.id}.json`), Buffer.from(JSON.stringify(operation)))))
+        const failure = results.find(result => result.status === 'rejected')
+        if (failure?.status === 'rejected') throw failure.reason
+        this.progress!.completed = Math.min(offset + 8, operationFiles.length)
       }
       const conflicts: SyncConflict[] = []
       const operationOrder = (operation: Operation) => operation.kind === 'vehicle' ? 0 : operation.kind === 'equipment' ? 1 : operation.kind === 'attachment' ? 3 : 2
       const ordered = [...groups.values()].sort((left, right) => operationOrder(left[0]) - operationOrder(right[0]))
       const ordinals = new Map(pending.map((operation, index) => [operation.id, index]))
       const retainedEquipmentUploads = new Set<string>()
-      for (const operations of ordered) {
-        const conflict = this.checkConflict(master, operations, team, retainedEquipmentUploads)
-        if (conflict && !operations[0].decision) { conflicts.push(conflict); continue }
-        if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive', '_equipmentParent', '_equipmentLink'].includes(field))) { conflicts.push(conflict); continue }
-        await this.filesToShare(directory, operations)
+      const transferred = new Set<string>()
+      this.advance('records', ordered.length)
+      for (let offset = 0; offset < ordered.length; offset += 128) {
         master.exec('BEGIN IMMEDIATE')
-        try { this.apply(master, operations); master.exec('COMMIT'); changed = true } catch (error) { master.exec('ROLLBACK'); throw error }
+        try {
+          for (const operations of ordered.slice(offset, offset + 128)) {
+            const conflict = this.checkConflict(master, operations, team, retainedEquipmentUploads)
+            if (conflict && !operations[0].decision) { conflicts.push(conflict); continue }
+            if (conflict?.fields.some(field => ['_permission', '_protected', '_configurationDisabled', '_componentType', '_modificationManaged', '_modificationLink', '_modificationDisabled', '_modificationLinkedArchive', '_equipmentParent', '_equipmentLink'].includes(field))) { conflicts.push(conflict); continue }
+            await this.filesToShare(directory, operations, transferred)
+            this.apply(master, operations); changed = true
         // Files accepted before a local archive stay with that equipment in the
         // same atomic publication. A later remote archive never grants this.
-        const archive = operations.find(operation => operation.kind === 'equipment' && operation.desired.archived && !operation.base?.archived && !operation.decision)
-        if (archive) for (const queued of groups.values()) {
-          const upload = queued[0]
-          if (upload.kind === 'attachment' && !upload.base && parseEquipmentAttachmentId(upload.desired.data.equipmentId) === archive.recordId && ordinals.get(upload.id)! < ordinals.get(archive.id)!) retainedEquipmentUploads.add(upload.recordId)
+            const archive = operations.find(operation => operation.kind === 'equipment' && operation.desired.archived && !operation.base?.archived && !operation.decision)
+            if (archive) for (const queued of groups.values()) {
+              const upload = queued[0]
+              if (upload.kind === 'attachment' && !upload.base && parseEquipmentAttachmentId(upload.desired.data.equipmentId) === archive.recordId && ordinals.get(upload.id)! < ordinals.get(archive.id)!) retainedEquipmentUploads.add(upload.recordId)
+            }
+          }
+          master.exec('COMMIT')
+          this.progress!.completed = Math.min(offset + 128, ordered.length)
+        } catch (error) {
+          master.exec('ROLLBACK')
+          throw error
         }
       }
       for (const record of deferredModifications) {
@@ -519,17 +588,21 @@ export class BusinessSync {
         master.prepare('INSERT INTO metadata VALUES(?,?)').run(`historyImport:${entry.id}`, '1')
         changed = true
       }
-      if (protocol >= 3) { try { const view = (master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow); assertConfigurationProtocol(view, protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
-      try { validateModificationRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow), protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
-      validateEquipmentAttachmentRecords((master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow))
+      const finalRecords = (master.prepare('SELECT * FROM records').all() as RecordRow[]).map(fromRow)
+      if (protocol >= 3) { try { const view = finalRecords; assertConfigurationProtocol(view, protocol); validateConfigurationRecords(view) } catch { throw new AppError('CONFIGURATION_CORRUPTED', 409) } }
+      try { validateModificationRecords(finalRecords, protocol) } catch { throw new AppError('MODIFICATION_CORRUPTED', 409) }
+      validateEquipmentAttachmentRecords(finalRecords)
+      this.advance('publishing')
       if (changed) {
         await snapshot.publish(team.id, protocol)
       }
+      this.advance('refreshing')
       await this.ingest(snapshot.db, directory, snapshot.head!, conflicts)
       this.error = null; this.phase = conflicts.length ? 'conflict' : 'ready'
       this.verified = { directory: shared, head: JSON.stringify(snapshot.head), at: Date.now() }
+      this.advance()
       return this.status()
-    } finally { await snapshot.close() }
+    } finally { this.advance(); await snapshot.close() }
   }
   async resolve(directory: string, teamId: string, identity: Identity, actor: Actor, recordId: string, token: string, choices: Record<string, string>, reason: string): Promise<SyncStatus> {
     return this.business.store.runWrite(() => this.resolveWithinWrite(directory, teamId, identity, actor, recordId, token, choices, reason))

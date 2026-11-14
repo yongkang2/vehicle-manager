@@ -8,6 +8,10 @@ Review English wording before committing, opening a PR or publishing. Future pac
 
 最新正式版本以 [GitHub Latest](https://github.com/yongkang2/vehicle-manager/releases/latest) 为准。本地源码可能是尚未发布的开发版本，不能据此断言线上最新版。
 
+## Version increments
+
+Use a patch increment for fixes and small compatible features, a minor increment for larger compatible feature updates, and a major increment for incompatible changes. This policy was confirmed on 2026-11-12; attachment preview ships as 1.9.1.
+
 ## 唯一版本来源
 
 `package.json.version` → `npm version X.Y.Z --no-git-tag-version` 同步锁文件与 `shared/version.ts` → build → 打包。

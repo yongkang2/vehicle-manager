@@ -1,6 +1,8 @@
 # Vehicle Manager: Portable User Guide
 
-This guide covers application **1.7.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+This guide covers application **1.10.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+
+Unmerged pull-request packages are acceptance candidates, not official releases. For an upgrade from 1.9.1, stop the old service and independently preserve the complete shared folder and your own local data directory. Start the new application with the same data-directory configuration and existing team folder; do not initialize a replacement team or copy another person's data. This update retains schema 6, business protocols 1–5 and backup format 5. Review retained pending changes and explicitly resume synchronization if prompted.
 
 ## Installation
 
@@ -20,6 +22,8 @@ Double-click Start.cmd to start the local service and open your browser. The ser
 Create your own local account. Local data normally resides in %LOCALAPPDATA%\VehicleManager\data. An explicitly configured VEHICLE_MANAGER_DATA_DIR takes precedence. The application can migrate supported legacy data directories on startup after verifying the copied files.
 
 Do not copy another person's local data or distribute a populated data directory. Keep your own device identity, accounts, sessions, pending changes and files together. Do not delete SQLite databases or WAL files to resolve synchronization problems.
+
+Administrators can inspect the Device audit log. New entries display the local account name and username recorded at operation time; details retain the original actor ID, device ID and applicable team identity. Later profile changes do not rename these snapshots. Older entries are explicitly identified as current-profile lookups or unconfirmed historical identities, rather than reconstructed as operation-time evidence. Search accepts identity names and IDs. Local audit identity is not synchronized or included in business backups.
 
 ## Team collaboration
 
@@ -67,7 +71,7 @@ After all collaborating installations upgrade, an administrator can enable confi
 
 Administrators can disable, remove or restore any configuration component type, including the four built-ins. This changes future revision reviews only: vehicle sections, installed components and published history remain available. Removed types can be found through Show removed and restored with their original identity. Catalog changes invalidate open reviews. Published revisions stay read-only; corrections create another revision.
 
-Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.7.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
+Configuration activation requires at least shared business protocol 3; the first review-policy change raises it to at least 4. **Enable enhanced modifications** upgrades it to 5 and unlocks Requestor, Lead, files and Linked mode. Application 1.9.0 supports protocols **1–5** and local schema **6**; activation, synchronization and restore never downgrade an active protocol. Upgrade collaborating clients together. Current business backups use **format 5, field version 4**, preserving configuration history, modification groups/files and durable receipts. Formats **1–4** remain readable; older backups cannot reactivate removed types or rewrite published history. Historical policy-enabled format-4 backups use field version 3.
 
 
 ## Backups and upgrades
@@ -81,6 +85,8 @@ Administrative business exports and backups are separate from complete local-dat
 ## Troubleshooting
 
 If startup fails, read launcher.log next to Start.cmd and startup.log in the configured local data directory. A legacy update lock or an unverified running process can block startup to protect local data. Resolve the reported condition rather than deleting databases or shared files.
+
+The failure window prints full log paths. The default service log is `%LOCALAPPDATA%\VehicleManager\data\startup.log`; an explicit `VEHICLE_MANAGER_DATA_DIR` changes this location. Repeated clicks wait briefly for the first Windows launcher instead of starting another service. If startup is still in progress, allow it to finish. Empty locks left by an interrupted startup recover automatically; do not delete data or lock files manually to bypass a reported protection.
 
 Real multi-computer Windows SMB behavior and company endpoint policies require validation on the destination computers. Keep protected backups before investigating compatibility or recovery problems.
 
@@ -109,3 +115,7 @@ For startup failures, also preserve `startup.log` in the data directory and `lau
 Before retrying a write after an uncertain response, refresh and inspect its result. Do not delete the database, originals, shared snapshots or locks to fix a logging problem.
 
 Startup text logs now prefix each new stdout/stderr line and each launcher error/stack line with an ISO 8601 UTC timestamp (`Z`) and its source. The service preloads timestamp handling before the main module, keeps it after a detached launcher exits, and still exits with failure on uncaught exceptions. Existing historical log lines are preserved unchanged; timestamps cannot be reconstructed retrospectively.
+
+## Attachment preview
+
+In a vehicle’s Attachments tab, choose Preview for XLSX, XLS, PDF, PNG, JPG, JPEG or JFIF files. Excel previews are read only, support worksheet selection, and display up to 500 rows and 50 columns per sheet. Download the original for complete formatting, charts and formulas, or if preview fails. PDF preview requires browser support.

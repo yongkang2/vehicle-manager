@@ -6,6 +6,8 @@ import { once } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { createApp } from '../server/app.js'
 import { SharedBusinessSnapshot } from '../server/deletions.js'
+import { WorkspaceSnapshots } from '../server/workspace-snapshots.js'
+import type { WorkspaceData } from '../shared/workspace.js'
 import type { BusinessRecord } from '../shared/business.js'
 
 test('workspace snapshots show local data promptly, refresh changes, and preserve access, deletion and paused-session rules', async t => {
@@ -42,6 +44,15 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   assert.equal(first.status, 200); assert.equal(first.data.data.records[0].id, car.id)
   assert.equal('changes' in first.data.data, false)
   const memberWorkspace = member.workspaces.get(teamId)
+  const listQuery = encodeURIComponent(JSON.stringify({ search: '', archived: false, page: 1, pageSize: 10, filters: {} }))
+  const list = await request(member, `/business/vehicle-list?local=1&query=${listQuery}`)
+  assert.equal(list.status, 200)
+  assert.equal(list.data.data.vehicleList.total, 1)
+  assert.deepEqual(list.data.data.vehicleList.ids, [car.id])
+  const postList = await request(member, '/business/vehicle-list?local=1', 'POST', { search: '', archived: false, page: 1, pageSize: 10, filters: { notes: [JSON.stringify(['中'.repeat(4000)])] } })
+  assert.equal(postList.status, 200, 'long Chinese filter values fit a bounded POST body')
+  assert.equal(postList.data.data.vehicleList.total, 0)
+  assert.equal((await request(member, '/business/vehicle-list?local=1&query=broken')).status, 400)
   const originalChange = memberWorkspace.store.db.prepare('SELECT * FROM changes LIMIT 1').get()!
   const payload = JSON.parse(String(originalChange.payload)); payload.id = 'history-only'; payload.reason = 'History-only refresh fixture'
   memberWorkspace.store.db.prepare('INSERT INTO changes VALUES(?,?,?,?,?)').run(payload.id, String(originalChange.record_id), String(originalChange.vehicle_id), JSON.stringify(payload), String(originalChange.created))
@@ -95,10 +106,52 @@ test('workspace snapshots show local data promptly, refresh changes, and preserv
   assert.equal(deleted.status, 200)
   const afterDeletion = await request(member, `/business/workspace?known=${archived.revision}`)
   assert.equal(afterDeletion.status, 200); assert.equal(afterDeletion.data.data.records.length, 0)
+  // Browser refreshes and the service tick share busy backoff; manual sync bypasses it.
+  const busySync = t.mock.method(memberWorkspace.synchronization, 'synchronize', async () => ({ ...memberWorkspace.synchronization.status(), phase: 'busy' as const, error: 'SHARE_BUSY' }))
+  await request(member, '/business/workspace')
+  await request(member, '/business/workspace')
+  await memberWorkspace.tick()
+  assert.equal(busySync.mock.callCount(), 1)
+  await request(member, '/business/sync', 'POST')
+  assert.equal(busySync.mock.callCount(), 2)
+  busySync.mock.restore()
   const validToken = member.token; member.token = 'old-workspace-token'
   assert.equal((await request(member, '/business/workspace?local=1')).data.error, 'WORKSPACE_CHANGED'); member.token = validToken
   const roster = (await request(admin, '/team')).data
   const memberId = roster.bindings.find((binding: { deviceId: string }) => binding.deviceId === member.store.deviceId).memberId
-  await request(admin, `/team/members/${memberId}`, 'POST', { role: 'member', enabled: false, reason: 'Revoke test access' })
+  let enteredQuery!: () => void, releaseQuery!: () => void
+  const queryStarted = new Promise<void>(resolve => { enteredQuery = resolve }), queryGate = new Promise<void>(resolve => { releaseQuery = resolve })
+  const originalQuery = memberWorkspace.historyQueries.query.bind(memberWorkspace.historyQueries)
+  const slowQuery = t.mock.method(memberWorkspace.historyQueries, 'query', async input => { enteredQuery(); await queryGate; return originalQuery(input) })
+  const inFlightHistory = request(member, '/business/history/query?summary=1')
+  try {
+    await queryStarted
+    await request(admin, `/team/members/${memberId}`, 'POST', { role: 'member', enabled: false, reason: 'Revoke test access' })
+  } finally { releaseQuery() }
+  assert.equal((await inFlightHistory).status, 403, 'A background history result must recheck revoked access before returning')
+  slowQuery.mock.restore()
   assert.equal((await request(member, `/business/workspace?local=1&known=${afterDeletion.data.revision}`)).status, 403)
+  assert.equal((await request(member, `/business/vehicle-list?local=1&query=${listQuery}`)).status, 403, 'revoked access cannot read a warmed list cache')
+})
+
+test('snapshot cache skips unchanged construction and scopes bounded record patches without breaking full clients', () => {
+  const snapshots = new WorkspaceSnapshots()
+  const record = (id: string, owner: string): BusinessRecord => ({ id, kind: 'vehicle', vehicleId: null, data: { owner, notes: 'Large retained content '.repeat(100) }, archived: false, version: 1, updated: '2026-11-11T00:00:00Z' })
+  const data: WorkspaceData = { records: [record('a', 'Before'), record('b', 'Retained')], historyRevision: 1, catalog: { enabled: false, types: [] }, revisionSummaries: [], audit: [], quarantined: [] }
+  let builds = 0
+  const build = () => { builds++; return data }
+  const first = snapshots.read('normal', '1', build)
+  assert(first.data)
+  assert.deepEqual(snapshots.read('normal', '1', build, first.revision, true), { revision: first.revision })
+  assert.equal(builds, 1)
+  const changed = { ...data, records: [record('a', 'After'), data.records[1]], historyRevision: 2 }
+  const patch = snapshots.read('normal', '2', () => changed, first.revision, true)
+  assert.equal(patch.data, undefined)
+  assert.deepEqual(patch.patch!.upsert.map(item => item.id), ['a'])
+  assert.equal(patch.patch!.baseRevision, first.revision)
+  assert(snapshots.read('normal', '2', () => changed, first.revision).data)
+  assert(snapshots.read('normal', '2', () => changed, 'expired', true).data)
+  assert(snapshots.read('audit', '2', () => changed, first.revision, true).data)
+  const removed = snapshots.read('normal', '3', () => ({ ...changed, records: [changed.records[1]] }), patch.revision, true)
+  assert.deepEqual(removed.patch!.removed, ['a'])
 })

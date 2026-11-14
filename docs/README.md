@@ -11,6 +11,7 @@
 - [Product, design and interaction conventions](design.md): product scope, visual tokens, component ownership and interface behavior.
 - [HV battery notes](hv-battery.md)
 - [Loading performance notes](loading-performance.md)
+- [User feedback and multi-client usage audit](benchmarks/usage-audit-2026-11-11.md): observed load timings, feedback changes, remaining risks and prioritized remediation.
 
 ## Releases and engineering history
 

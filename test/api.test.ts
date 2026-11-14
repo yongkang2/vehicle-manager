@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { createApp } from '../server/app.js'
 import type { Status, TeamDocument } from '../shared/types.js'
+import { LocalStore, auditAccountContext } from '../server/store.js'
 
 test('separate local accounts join one team, require approval and never expose credentials', async () => {
   const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
@@ -59,6 +60,22 @@ test('separate local accounts join one team, require approval and never expose c
     assert.equal(refreshed.member!.name, 'Real Name')
     assert.equal(refreshed.member!.nickname, 'Team Nickname')
     assert.equal(refreshed.user!.displayName, 'Member')
+    const auditBefore = alpha.store.auditEntries()
+    const configured = auditBefore.find(entry => entry.action === 'workspace.configured')!
+    const registered = auditBefore.find(entry => entry.action === 'account.registered')!
+    assert.equal(configured.actor, 'Member (same-name)')
+    assert.equal(registered.actor, configured.actor)
+    assert.equal(configured.identity!.source, 'recorded')
+    assert.equal(configured.identity!.account!.id, created.data.user.id)
+    const exported = await request(alpha, '/api/business/export')
+    assert.equal(exported.status, 200)
+    const exportAudit = (await request(alpha, '/api/business/audit')).data.find((entry: { action: string }) => entry.action === 'business.exported')
+    assert.equal(exportAudit.actor, configured.actor)
+    assert.equal(exportAudit.identity.member.id, created.data.member.id)
+    assert.equal(exportAudit.identity.account.id, created.data.user.id)
+    assert.equal(exportAudit.detail.__auditActor, undefined)
+    assert.ok(!JSON.stringify(exportAudit).includes('"hash"'))
+    assert.ok(!JSON.stringify(exportAudit).includes('"salt"'))
     const sharedText = await fs.readFile(path.join(shared, 'team.json'), 'utf8')
     assert.ok(!sharedText.includes('setup-test-password')); assert.ok(!sharedText.includes('"hash"')); assert.ok(!sharedText.includes('"salt"'))
     await fs.rename(shared, `${shared}-offline`)
@@ -86,6 +103,55 @@ test('separate local accounts join one team, require approval and never expose c
     assert.equal(alpha.store.db.prepare('PRAGMA integrity_check').get()!.integrity_check, 'ok')
   } finally {
     for (const client of clients) { await new Promise<void>(resolve => client.server.close(() => resolve())); client.store.db.close() }
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('device audit preserves identity snapshots across rename, missing members, offline reads and restart without guessing legacy accounts', async () => {
+  const root = await fs.mkdtemp(path.join(import.meta.dirname, 'test-data-'))
+  let store = new LocalStore(root)
+  const account = { id: 'local-alice', username: 'alice', displayName: 'Local Alice' }
+  const other = { id: 'local-bob', username: 'bob', displayName: 'Local Bob' }
+  const actor = { id: 'team-alice', name: 'Team Alice', role: 'admin' as const, deviceId: store.deviceId }
+  try {
+    for (const user of [account, other]) store.db.prepare('INSERT INTO accounts VALUES(?,?,?,?,?,?)').run(user.id, user.username, user.displayName, 'private-salt', 'private-hash', '2026-11-11')
+    store.event(account, 'workspace.configured', { mode: 'create' })
+    await Promise.all([account, other].map(user => auditAccountContext.run(user, async () => {
+      await new Promise(resolve => setImmediate(resolve))
+      store.event(actor, 'business.exported', { owner: user.id })
+    })))
+    store.set('cachedTeam', { members: [{ id: actor.id, name: 'Renamed Team Alice' }], bindings: [{ memberId: actor.id, localUserId: account.id, deviceId: store.deviceId }, { memberId: actor.id, localUserId: other.id, deviceId: store.deviceId }] })
+    const legacy = store.db.prepare('INSERT INTO local_events VALUES(?,?,?,?,?)')
+    for (const id of [account.id, actor.id, 'missing-identity']) legacy.run(`legacy-${id}`, id, 'legacy.event', '{}', '2026-11-10')
+    const check = () => {
+      const entries = store.auditEntries()
+      const exports = entries.filter(entry => entry.action === 'business.exported')
+      assert.equal(exports.length, 2)
+      for (const entry of exports) {
+        const user = entry.detail.owner === account.id ? account : other
+        assert.equal(entry.actor, `${user.displayName} (${user.username})`)
+        assert.equal(entry.identity!.account!.id, user.id)
+        assert.equal(entry.identity!.member!.name, 'Team Alice')
+        assert.equal(entry.identity!.source, 'recorded')
+        assert.equal(entry.identity!.actorId, actor.id)
+        assert.equal(entry.identity!.deviceId, store.deviceId)
+      }
+      assert.equal(entries.find(entry => entry.id === `legacy-${account.id}`)!.identity!.source, 'resolved')
+      assert.equal(entries.find(entry => entry.id === `legacy-${actor.id}`)!.identity!.account, undefined)
+      assert.equal(entries.find(entry => entry.id === 'legacy-missing-identity')!.identity!.source, 'unknown')
+      assert.equal(entries.find(entry => entry.id === 'legacy-missing-identity')!.actor, 'missing-identity')
+      assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 6)
+    }
+    check()
+    store.set('cachedTeam', { members: [], bindings: [] })
+    store.db.prepare('UPDATE accounts SET display_name=? WHERE id=?').run('Renamed local account', account.id)
+    check()
+    store.db.close()
+    store = new LocalStore(root)
+    check()
+    assert.equal(store.db.prepare("SELECT detail FROM local_events WHERE id='legacy-team-alice'").get()!.detail, '{}')
+  } finally {
+    store.db.close()
     await fs.rm(root, { recursive: true, force: true })
   }
 })

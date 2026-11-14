@@ -49,6 +49,29 @@ test('unchanged background checks skip snapshots, but local edits, remote edits 
   assert.equal(open.mock.callCount(), before + 2, 'background full validation is bounded to five minutes')
 })
 
+test('unchanged background checks do not acquire the publication lock and recheck access after HEAD', async t => {
+  const f = await fixture(); t.after(f.close)
+  const locked = t.mock.method(f.teams, 'withAccess')
+  assert.equal((await f.sync(1)).phase, 'ready')
+  assert.equal(locked.mock.callCount(), 0)
+  const readHead = SharedBusinessSnapshot.readHead.bind(SharedBusinessSnapshot)
+  t.mock.method(SharedBusinessSnapshot, 'readHead', async (...args) => {
+    const head = await readHead(...args)
+    await f.teams.changeMember(f.shared, f.team.id, f.clients[0].identity, f.actors[1].id, 'member', false, 'Revoke during check')
+    return head
+  })
+  assert.equal((await f.sync(1)).error, 'ACCESS_DISABLED')
+})
+
+test('unchanged checks complete while another client holds the team lock', async t => {
+  const f = await fixture(); t.after(f.close)
+  let entered!: () => void, release!: () => void
+  const acquired = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  const holder = f.teams.withAccess(f.shared, f.team.id, f.clients[0].identity, false, async () => { entered(); await gate })
+  await acquired
+  try { assert.equal((await f.sync(1)).phase, 'ready') } finally { release(); await holder }
+})
+
 test('fast checks preserve conflicts, revocation, rollback and corrupted HEAD detection', async t => {
   const f = await fixture(); t.after(f.close)
   f.edit(0, 'Admin'); f.edit(1, 'Member'); await f.sync(0)
@@ -78,4 +101,28 @@ test('failed attachment ingestion is retried even when the shared revision is un
   const snapshotHead = JSON.parse(await fs.readFile(path.join(f.shared, 'business', 'HEAD.json'), 'utf8'))
   await fs.writeFile(path.join(f.shared, 'business', 'snapshots', `${snapshotHead.revision}.sqlite`), 'corrupted')
   assert.equal((await f.sync(1, false)).error, 'SHARE_CORRUPTED', 'manual sync never trusts the background cache')
+})
+
+test('one publication verifies and transfers each referenced blob only once', async t => {
+  const f = await fixture(); t.after(f.close)
+  const bytes = Buffer.from('shared attachment bytes'), checksum = await f.clients[0].business.blob(bytes)
+  for (const name of ['first.txt', 'second.txt']) f.clients[0].business.write({ kind: 'attachment', vehicleId: f.car.id, data: { name, checksum, size: bytes.length }, actor: f.actors[0], reason: 'Attach', internal: true })
+  const read = t.mock.method(f.clients[0].business, 'readBlob')
+  assert.equal((await f.sync(0, false)).phase, 'ready')
+  assert.equal(read.mock.callCount(), 1)
+  assert.equal((await f.sync(1, false)).phase, 'ready')
+  assert.deepEqual(await f.clients[1].business.readBlob(checksum), bytes)
+})
+
+test('ingestion reuses record and history statements as fleet size grows', async t => {
+  const f = await fixture(); t.after(f.close)
+  for (let index = 2; index <= 32; index++) f.clients[0].business.write({ kind: 'vehicle', data: { vin: `TEST${String(index).padStart(13, '0')}`, status: 'available' }, actor: f.actors[0], reason: 'Fleet fixture' })
+  assert.equal((await f.sync(0, false)).phase, 'ready')
+  const prepare = t.mock.method(f.clients[1].store.db, 'prepare')
+  assert.equal((await f.sync(1, false)).phase, 'ready')
+  const count = (sql: string) => prepare.mock.calls.filter(call => call.arguments[0] === sql).length
+  assert.equal(count('SELECT * FROM records WHERE id=?'), 1, 'compile the lookup once per ingest, not once per row')
+  assert.equal(count('INSERT OR IGNORE INTO changes VALUES(?,?,?,?,?)'), 2, 'one statement for each canonical acceptance; no third history copy')
+  assert.equal(f.clients[1].business.list('vehicle').length, 32)
+  assert.deepEqual(f.clients[1].store.db.prepare('SELECT * FROM changes ORDER BY id').all(), f.clients[0].store.db.prepare('SELECT * FROM changes ORDER BY id').all())
 })

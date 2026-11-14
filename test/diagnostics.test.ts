@@ -5,6 +5,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { Diagnostics } from '../server/diagnostics.js'
 
+test('sync timing diagnostics retain numeric stages only', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-diagnostics-timing-'))
+  try {
+    new Diagnostics(root).write('info', 'sync.changed', { lockWaitMs: 42, lockHeldMs: 75, timings: { opening: 12, refreshing: 30, password: 'secret', records: -1, publishing: Infinity } })
+    const entry = JSON.parse(await fs.readFile(path.join(root, 'logs', 'diagnostics.jsonl'), 'utf8'))
+    assert.equal(entry.lockWaitMs, 42); assert.equal(entry.lockHeldMs, 75)
+    assert.deepEqual(entry.timings, { opening: 12, refreshing: 30 })
+  } finally { await fs.rm(root, { recursive: true, force: true }) }
+})
+
 test('diagnostics retain only safe fields and bounded error frames', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vm-diagnostics-'))
   try {

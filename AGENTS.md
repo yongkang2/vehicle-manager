@@ -8,6 +8,14 @@
 - Read docs/design.md for the consolidated product scope, visual design and interface behavior. It replaces the former root PRODUCT.md, DESIGN.md and UX-CONTRACT.md; maintain this single source instead of recreating those root files.
 - The Chinese guide is docs/user-guide.zh-CN.md, the packaged English guide remains docs/portable-guide.en.md, and detailed implementation notes are in docs/developer-guide.md. See docs/README.md for the index.
 
+## Frontend consistency for every new feature
+
+- Before adding or changing UI, read docs/design.md and inspect the nearest existing workflow. Preserve the restrained navy engineering identity, existing layout and bilingual behavior.
+- Reuse src/theme.ts (palette/interfaceTheme/buttonTheme), the single App ConfigProvider, src/Refined.css and existing Ant Design/business components. Extend the shared owner when a pattern recurs; do not create page-local copies of shared controls or independent color/motion systems.
+- Keep established control sizes, page/section spacing, action emphasis, table behavior and accessible focus states. New overlays use the existing library motion; authored feedback must respect reduced motion and avoid layout animation or new runtime dependencies.
+- Reserve space for both translations in shared controls and responsive navigation. Language changes must not reflow the working area; overlays must not resize or shift the underlying page. Preserve the root scrollbar reservation and check geometry across locales and overlay open/close states.
+- Verify new screens alongside a sibling screen, including populated/empty/error/disabled states, English/Chinese, narrow layouts and keyboard interaction. Update docs/design.md and shared runtime tokens together when an intentional system-wide rule changes.
+
 ## English publication policy (required by the user on 2026-11-04)
 
 - Write all new commit subjects and bodies, PR titles and descriptions, Release titles and descriptions, asset names, and packaged instructions in English. This includes validation, compatibility and upgrade notes. Chat replies and the application's existing localization are outside this policy.
@@ -19,7 +27,7 @@
 ## 发布版本一致性（用户于 2026-11-04 明确要求）
 
 - `package.json.version` 是应用版本的唯一来源；生成的前后端版本、发布包内版本、Git 标签 `vX.Y.Z`、Release 标题和 ZIP 文件名中的版本必须一致。禁止通过打包参数或环境变量单独改写某一处版本。
-- 正式版本使用三段数字；修复升 patch、新增兼容功能升 minor、不兼容变更升 major。数据库结构版本、共享协议版本、备份格式版本独立管理，不要求与应用版本数字一致。
+- 正式版本使用三段数字；小功能和修复升 patch、较大的功能更新升 minor、不兼容变更升 major。数据库结构版本、共享协议版本、备份格式版本独立管理，不要求与应用版本数字一致。
 - 发布前先读取 GitHub 最新正式 Release、远程标签和对应源码，区分本地版本、开发版本和正式版本。不得仅根据本地源码判断“最新版”；不得从陈旧分支发布。
 - 正式发布必须对应可追溯的干净源码提交。测试、lint、build、最终解压包验收和版本一致性检查通过后才可发布；记录提交 SHA、包 SHA-256 和验收结果。
 - 一个正式版本只对应一个最终应用 ZIP。正式发布后不得用不同内容覆盖同版本包或移动标签；修复或重新交付不同内容必须提升版本。未发布的临时构建不能作为正式版本交付。

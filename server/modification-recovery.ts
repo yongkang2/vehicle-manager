@@ -65,7 +65,7 @@ export async function abandonModificationRestore(business: Business, synchroniza
         }
         store.set('pendingModificationImports', (store.get<ModificationImport[]>('pendingModificationImports') || []).filter(entry => !entries.some(discarded => discarded.id === entry.id)))
         saveRestoreReceipt(business, { ...receipt, state: 'failed', error: 'MODIFICATION_RESTORE_REVIEW_REQUIRED' })
-        store.event(actor.id, 'backup.modification-restore-retained', { requestId, reason: why, imports: entries.map(entry => entry.id) })
+        store.event(actor, 'backup.modification-restore-retained', { requestId, reason: why, imports: entries.map(entry => entry.id) })
       })
       return { retained: entries.length, pending: synchronization.status().pending, needsNewPreview: true }
     } finally { await snapshot.close() }

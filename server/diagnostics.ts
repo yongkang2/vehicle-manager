@@ -21,7 +21,11 @@ export class Diagnostics {
   write(level: 'info' | 'warn' | 'error', event: string, fields: Record<string, unknown> = {}, error?: unknown): void {
     try {
       const data: Record<string, unknown> = {}
-      for (const key of ['status', 'durationMs', 'pending', 'conflicts', 'port', 'bytes', 'exitCode']) if (typeof fields[key] === 'number' && Number.isFinite(fields[key])) data[key] = fields[key]
+      for (const key of ['status', 'durationMs', 'pending', 'conflicts', 'port', 'bytes', 'exitCode', 'lockWaitMs', 'lockHeldMs']) if (typeof fields[key] === 'number' && Number.isFinite(fields[key])) data[key] = fields[key]
+      if (fields.timings && typeof fields.timings === 'object') {
+        const timings = fields.timings as Record<string, unknown>
+        data.timings = Object.fromEntries(['opening', 'operations', 'records', 'publishing', 'refreshing'].filter(key => typeof timings[key] === 'number' && Number.isFinite(timings[key]) && Number(timings[key]) >= 0).map(key => [key, timings[key]]))
+      }
       if (typeof fields.requestId === 'string' && /^[a-f0-9-]{36}$/.test(fields.requestId)) data.requestId = fields.requestId
       if (typeof fields.method === 'string' && ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'].includes(fields.method)) data.method = fields.method
       if (typeof fields.route === 'string' && fields.route.length <= 180 && /^\/api(?:\/[A-Za-z0-9:_-]+)*$/.test(fields.route)) data.route = fields.route

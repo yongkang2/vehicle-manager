@@ -49,3 +49,5 @@
   .history-field { grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); }
   .history-field > strong { grid-column: 1 / -1; }
 }
+
+.history-field-notice { grid-column: 1 / -1; margin: 0; }

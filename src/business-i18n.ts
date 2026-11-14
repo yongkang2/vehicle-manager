@@ -1,5 +1,12 @@
 import type { Language } from './i18n'
 const labels: Record<string, [string, string]> = {
+  setWatchedVehicles: ['Choose favorite vehicles', '设置关注车辆'],
+  watchVehicleHint: ['Click the star beside a vehicle to add it here. Favorites are private to this account and workspace in this browser.', '点击车辆旁的星标，将常用车辆放到这里。关注仅保存在本浏览器的当前账号和工作区中。'],
+  vehicleWatchView: ['Vehicle view', '车辆视图'], allVehicles: ['All vehicles', '全部车辆'], myWatchedVehicles: ['My favorites', '我的关注'],
+  watchVehicle: ['Follow vehicle', '关注车辆'], unwatchVehicle: ['Unfollow vehicle', '取消关注'], personalVehicleMark: ['Personal marker color', '个人标记颜色'], openVehicleDetails: ['Open vehicle details', '打开车辆档案'],
+  watchColorgold: ['Gold', '金色'], watchColorblue: ['Blue', '蓝色'], watchColorpurple: ['Purple', '紫色'], watchColorteal: ['Teal', '青色'], watchColororange: ['Orange', '橙色'],
+
+  doveImportRequirements: ['File requirements', '文件要求'],
   equipmentType: ['Type', '类型'],
   equipmentSaveBlocked: ['Close this editor, refresh or sign in again as needed, and inspect the equipment list before starting another save.', '请关闭此窗口，按需刷新或重新登录，并先核对设备列表，再开始新的保存。'],
   equipmentInstalledOptional: ['Installed on (optional)', '安装日期（可选）'], equipmentRemovedOptional: ['Removed on (optional)', '拆除日期（可选）'],
@@ -151,6 +158,7 @@ const labels: Record<string, [string, string]> = {
   batchLimits: ['Up to 8 .xlsx files per batch · Maximum 10 MB per file', '每批最多 8 份 .xlsx 文件 · 每份最大 10 MB'], batchSelectionLimit: ['Only the first files that fit the eight-file limit were added. Remove files or start another batch to add the rest.', '已添加可容纳的前几份文件，每批最多 8 份。请移除文件或另开一批添加其余文件。'],
   queued: ['Ready to upload', '待上传'], parsing: ['Uploading / parsing', '上传 / 解析中'], retaining: ['Retaining', '留存中'], retained: ['Retained', '已留存'], failed: ['Failed', '失败'], previewExpired: ['Preview expired', '预览已过期'], previewReport: ['View preview', '查看预览'], retryUpload: ['Retry upload', '重新上传'], removeFile: ['Remove file', '移除文件'],
   draft: ['Unsaved preview', '未留存预览'], retain: ['Confirm retention', '确认留存'], matched: ['VIN matched', 'VIN 已匹配'], unmatched: ['VIN not matched', 'VIN 未匹配'], ambiguous: ['Needs manual review', '需人工核对'], existingReport: ['Original already retained', '原件已留存'], openReport: ['Open report', '查看报告'],
+  equipmentId: ['Associated equipment', '关联设备'], modificationId: ['Associated modification', '关联改装'], fileId: ['Associated file', '关联文件'], previousRevisionId: ['Previous configuration revision', '上一配置版本'], vehicleId: ['Associated vehicle', '关联车辆'],
   recordedAt: ['Recorded at', '采集时间'], savedAt: ['Retained at', '留存时间'], mileage: ['Mileage', '总里程'], soc: ['SOC', 'SOC'], reportSoftware: ['Report software', '报告软件'], vehicleMode: ['Vehicle mode', '车辆模式'], parserVersion: ['Parser version', '解析器版本'],
   controllers: ['Controllers', '控制器'], faults: ['Fault records', '故障记录'], code: ['DTC', '故障码'], network: ['Diagnostic network', '诊断网络'], statusByte: ['Status byte', '状态字节'], context: ['Original context', '原始上下文'], flashingDate: ['Flashed on', '刷写日期'], productionDate: ['Produced on', '生产日期'],
   MILEAGE_UNKNOWN: ['The report does not provide valid mileage.', '报告未提供有效里程。'], CONTROLLER_PLACEHOLDER: ['Some controller fields contain original invalid values or placeholders.', '部分控制器字段包含原始无效值或占位符。'],

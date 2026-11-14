@@ -282,7 +282,7 @@ export class Modifications {
       await this.verifyLocal(context)
       const current = this.detail(id), actual = current.files.find(entry => entry.id === fileId)
       if (!actual || actual.checksum !== file.checksum || bytes.length !== actual.size) throw new AppError('FILE_MISSING', 404)
-      this.business.store.event(context.actor.id, 'file.downloaded', { recordId: id, fileId })
+      this.business.store.event(context.actor, 'file.downloaded', { recordId: id, fileId })
       return { name: file.name, bytes }
     })
   }
