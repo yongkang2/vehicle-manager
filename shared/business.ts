@@ -70,7 +70,8 @@ export type Controller = { name: string; description: string; network: string; s
 export type Fault = { controller: string; code: string; status: string; statusByte: string; description: string; context: string }
 export type DoveData = { vin: string; rawVin: string; vehicleId: string; recordedAt: string; software: string; mileage: number | null; soc: number | null; vehicleMode: string; controllers: Controller[]; faults: Fault[]; warnings: string[]; sheets: string[] }
 export type DoveReportAssociation = { method: 'manual'; vehicleId: string; vin: string; actor: Actor; assignedAt: string }
-export type ReportData = { name: string; checksum: string; size: number; recordedAt: string; savedAt: string; parserVersion: string; parsed: DoveData; vehicleSnapshot: Fields; association?: DoveReportAssociation }
+export type ReportData = { name: string; checksum: string; size: number; recordedAt: string; savedAt: string; parserVersion: string; parsed: DoveData; vehicleSnapshot: Fields; association?: DoveReportAssociation; comment?: string }
+export type ReportCommentRequest = { comment: string; version: number; reason: string }
 const reportObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 const reportedVin = (value: unknown): value is string => typeof value === 'string' && /^[A-HJ-NPR-Z0-9]{17}$/.test(value)
 const blankReportVin = (value: unknown) => value === undefined || (typeof value === 'string' && !value.trim())

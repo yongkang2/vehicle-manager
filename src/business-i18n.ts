@@ -1,5 +1,12 @@
 import type { Language } from './i18n'
 const labels: Record<string, [string, string]> = {
+  comment: ['Comment', '备注'], reportComment: ['Report comment', '报告备注'], editReportComment: ['Edit comment', '编辑备注'],
+  reportCommentEmpty: ['No comment', '暂无备注'], reportCommentSharedNotice: ['Shared with the team. Leave blank to clear the comment; original report contents remain unchanged.', '团队成员共享此备注。留空可清除备注，报告原件内容保持不变。'],
+  reportCommentReadOnly: ['Comments on archived reports or vehicles are read-only.', '已归档报告或车辆的备注仅可查看。'],
+  reportCommentLength: ['Enter up to 4,000 characters.', '最多可填写 4,000 字。'],
+  reportCommentDiscardTitle: ['Discard unsaved comment changes?', '放弃尚未保存的备注修改？'], reportCommentDiscardNotice: ['Your unsaved comment and change reason will be discarded.', '尚未保存的备注和变更原因将被放弃。'], reportCommentDiscard: ['Discard changes', '放弃修改'], reportCommentKeepEditing: ['Keep editing', '继续编辑'],
+  reportCommentInspectNotice: ['Keep your draft and inspect the latest saved comment before trying another save.', '请保留草稿，先核对最新已保存的备注，再尝试保存。'], reportCommentInspect: ['Inspect saved comment', '核对已保存备注'], reportCommentLatest: ['Latest saved comment', '最新已保存备注'], reportCommentReviewed: ['I have reviewed this version', '我已核对此版本'],
+  reportCommentSaved: ['Comment saved', '备注已保存'], reportCommentSavedRefreshFailed: ['Comment saved. Workspace refresh did not finish; close this editor and refresh when available.', '备注已保存，工作空间刷新未完成。可关闭此窗口，待可用时再刷新。'], reportCommentClose: ['Close', '关闭'],
   setWatchedVehicles: ['Choose favorite vehicles', '设置关注车辆'],
   watchVehicleHint: ['Click the star beside a vehicle to add it here. Favorites are private to this account and workspace in this browser.', '点击车辆旁的星标，将常用车辆放到这里。关注仅保存在本浏览器的当前账号和工作区中。'],
   vehicleWatchView: ['Vehicle view', '车辆视图'], allVehicles: ['All vehicles', '全部车辆'], myWatchedVehicles: ['My favorites', '我的关注'],

@@ -217,6 +217,42 @@
     margin-bottom: 25px
 }
 
+.report-comment-snippet {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.report-comment-section {
+    margin-block: 20px;
+}
+
+.report-comment-section > p,
+.report-comment-inspection > p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.report-comment-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.report-comment-editor .ant-input-textarea-show-count {
+    margin-bottom: 24px
+}
+
+.report-comment-inspection {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+}
+
 .configuration-form {
     display: flex;
     flex-direction: column;

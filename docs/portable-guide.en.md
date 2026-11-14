@@ -39,6 +39,10 @@ Pending offline changes remain local until synchronization succeeds. Pausing syn
 
 Report archive shows active and archived reports together. Filter by vehicle model/VIN, or combine space-separated keywords across vehicle identity, project, report name and dates. Select one or more reports to download originals (a ZIP for multiple reports); administrators can archive selected active reports with a reason. Selection persists across pages and clears when filters change. Failed archive items remain selected for retry. Open a report to view its contents or restore an archived report.
 
+Each retained report can have one team-shared **Comment**, shown in the report archive, the vehicle's Reports tab and the saved-report viewer. Approved members and administrators can edit or clear this plain-text value while the report and vehicle are active. Enter up to 4,000 characters and a required change reason of up to 500 characters. A stale record must be refreshed and reviewed before saving. Older reports without a comment start with an empty value.
+
+Comment changes retain history and follow ordinary synchronization, including local saves while offline or synchronization is paused and field-conflict review when necessary. They do not resume paused synchronization or alter the original workbook, parsed observations or vehicle association. Reimporting the same original preserves the comment. Business backups retain comments; an older backup without them may clear current comments, so review the restore differences. No schema, shared-protocol or backup-format upgrade is needed. Existing report search and CSV export fields are unchanged.
+
 To compare, select exactly two unarchived reports belonging to the same vehicle and associated VIN. The earlier acquisition is the left baseline; acquisition time and filename identify each side. Comparison uses the authorized local snapshot without waiting for shared synchronization. Differences appear first with details collapsed; turn off Differences only to inspect unchanged entries. Expand a row to see aligned values, and review ambiguous duplicate matches manually.
 
 ## Onboard equipment

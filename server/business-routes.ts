@@ -26,6 +26,7 @@ import { ExportTemplates } from './export-templates.js'
 import { VehicleTablePreferencesStore } from './vehicle-table-preferences.js'
 import { VehiclePhotos } from './vehicle-photos.js'
 import { EquipmentRecords, validateAttachmentFile } from './equipment.js'
+import { ReportComments } from './report-comments.js'
 import { ConfigurationRevisions } from './configuration-revisions.js'
 import { Modifications } from './modifications.js'
 import { installModificationRoutes } from './modification-routes.js'
@@ -43,6 +44,7 @@ const recordKinds = ['vehicle', 'part', 'modification', 'equipment', 'report', '
 export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: LocalStore, teams: TeamDirectory, cache: (team: TeamDocument) => void, accounts = store, backgroundSyncAllowed = () => true) {
   const business = new Business(store), synchronization = new BusinessSync(business, teams), dove = new DoveService(business), exportTemplates = new ExportTemplates(store)
   const tablePreferences = new VehicleTablePreferencesStore(store), photos = new VehiclePhotos(business), equipment = new EquipmentRecords(business)
+  const reportComments = new ReportComments(business)
   const configurationRevisions = new ConfigurationRevisions(business, synchronization, teams)
   const modifications = new Modifications(business, synchronization, teams)
   const workspaceSnapshots = new WorkspaceSnapshots()
@@ -406,6 +408,10 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
       catch (error) { results.push({ draftId, error: error instanceof AppError ? error.code : 'DOVE_PARSE_FAILED' }) }
     }
     res.status(201).json(results)
+  })
+  writeRoute('put', '/reports/:id/comment', (req: BusinessRequest, res) => {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some(key => !['comment', 'version', 'reason'].includes(key))) throw new AppError('INVALID_INPUT')
+    res.json(reportComments.save({ id: String(req.params.id), comment: req.body.comment, version: req.body.version, reason: req.body.reason }, req.businessContext!.actor))
   })
   writeRoute('post', '/reports/download', async (req: BusinessRequest, res) => {
     const ids: unknown = req.body?.ids
