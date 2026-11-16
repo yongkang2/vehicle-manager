@@ -132,6 +132,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         // Viewing published revisions uses the authorized local copy; explicit workspace refresh still synchronizes.
         const revisionRead = req.query.full !== '1' && req.method === 'GET' && /^\/vehicles\/[^/]+\/configuration-revisions(?:\/[^/]+)?\/?$/.test(localPath)
         const photoRead = req.method === 'GET' && /^\/vehicles\/[^/]+\/photo\/?$/.test(localPath)
+        const fileRead = req.method === 'GET' && /^\/files\/[^/]+\/?$/.test(localPath)
         // History uses the authorized local snapshot; the existing workspace tick
         // refreshes shared data without making every search/page hash all blobs.
         const reportCompare = req.method === 'GET' && localPath === '/reports/compare'
@@ -142,7 +143,7 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
         const canonicalMaintenance = deletePreview || configurationMutation || (req.method === 'DELETE' && /^\/vehicles\/[^/]+$/.test(req.path)) || (req.method === 'POST' && (req.path === '/restore' || /^\/restore\/[^/]+\/publish$/.test(req.path)))
         const workspaceRead = vehicleListRead || req.method === 'GET' && ['/workspace', '/vehicle-list'].includes(req.path)
         if (!req.businessContext.syncEnabled && (canonicalMaintenance || (req.method !== 'GET' && req.path.startsWith('/sync')))) throw new AppError('CONFIRM_RESUME', 409)
-        if ((req.method === 'GET' || vehicleListRead) && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !revisionRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
+        if ((req.method === 'GET' || vehicleListRead) && req.path !== '/sync' && !deletePreview && !localExport && !photoRead && !fileRead && !revisionRead && !historyRead && !reportCompare && !(workspaceRead && req.query.local === '1')) {
           const state = await (workspaceRead && req.query.full !== '1' ? checkForUpdates(req.businessContext) : sync(req.businessContext))
           if (state.error === 'ACCESS_DISABLED' || state.error === 'ADMIN_REQUIRED') throw new AppError(state.error, 403)
           res.set('X-Sync-State', state.phase)
