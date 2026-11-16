@@ -15,7 +15,9 @@ Choose the application ZIP, rather than GitHub's source-code archives. Extract t
 
 Double-click Create-Desktop-Shortcut.cmd to create a Vehicle Manager desktop shortcut with the application icon. Keep the extracted folder in place; recreate the shortcut after moving the folder or installing a new release.
 
-Double-click Start.cmd to start the local service and open your browser. The service uses a free local port. Run Stop.cmd to stop safely and finish pending work before the database closes. Closing all application pages also permits automatic shutdown after the browser-presence checks and reconnect grace period. Hidden or minimized pages keep the service running.
+Double-click Start.cmd to start the local service and open your browser. The service uses a free local port. Run Stop.cmd to stop safely and finish pending work before the database closes. After every application page reports that it has closed, the service can stop at the next five-minute check once the five-second reconnect grace has elapsed. Hidden, minimized or frozen pages and lost connections do not count as closed. If no page connects, a page cannot confirm its state, or the browser crashes before reporting closure, the service stays running; use Stop.cmd when finished. Reopen a stopped service with Start.cmd.
+
+If loading fails, choose **Retry loading** to check the local service, reconnect the page and read fresh workspace data. Your view and unsaved drafts remain available; this does not resubmit saves or uploads. If the service has stopped, run Start.cmd and retry. Inspect the saved result before retrying any write whose response was lost.
 
 ## Accounts and local data
 

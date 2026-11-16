@@ -4,7 +4,9 @@ import { lazy, Suspense, useEffect, useEffectEvent, useImperativeHandle, useMemo
 import type { Ref } from 'react'
 import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
 import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, Clock3, ChevronRight, CloudOff, Download, Ellipsis, Eye, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
-import { api, ApiError, createWorkspaceScope, download } from './api'
+import { api, ApiError, createWorkspaceScope, download, probeLocalService } from './api'
+import { repairBrowserPresence } from './browser-presence'
+import { WorkspaceRecovery } from './workspace-recovery'
 import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
@@ -41,7 +43,7 @@ import './BusinessApp.css'
 
 const ReportViewer = lazy(() => import('./ReportViewer'))
 export type BusinessView = 'vehicles' | 'dove' | 'reports' | 'history' | 'sync' | 'audit'
-export type BusinessRefreshHandle = { refresh: () => Promise<void> }
+export type BusinessRefreshHandle = { refresh: () => Promise<boolean> }
 type Editor = { kind: RecordKind; record: BusinessRecord | null; vehicleId: string | null; initialName?: string; initialCategory?: 'battery' }
 type Action = { record: BusinessRecord; type: 'archive' | 'remove'; archived?: boolean; requestId: string; groupVersions?: Record<string, number> }
 type Difference = { key: string; status: string; before: unknown; after: unknown; fields: string[] }
@@ -161,7 +163,7 @@ function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel,
   </Modal>
 }
 
-export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef, personalScope }: { personalScope?: string; view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
+export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef, personalScope, userId }: { userId: string; personalScope?: string; view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
   const text = translateBusiness(language), { message, modal } = App.useApp()
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
   const watchStorageKey = personalScope ? `vdm-vehicle-watch:${personalScope}` : null
@@ -210,6 +212,8 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [quarantined, setQuarantined] = useState<QuarantinedOperation[]>([]), [deleteVehicle, setDeleteVehicle] = useState<BusinessRecord | null>(null), [deleteReceipt, setDeleteReceipt] = useState<VehicleDeleteReceipt | null>(null)
   const deletedRecordIds = useRef(new Set<string>())
   const [workspaceLoader] = useState(() => new WorkspaceLoader())
+  const [recovery] = useState(() => new WorkspaceRecovery())
+  const [recovering, setRecovering] = useState(false)
   const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10))
   useEffect(() => { const timer = setInterval(() => setToday(new Date().toISOString().slice(0, 10)), 60000); return () => clearInterval(timer) }, [])
   const [vehicleList, setVehicleList] = useState<VehicleListMeta | null>(null)
@@ -246,7 +250,25 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       await workspaceLoader.load((url, options) => scope.request(url, options), acceptWorkspace, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: !options.background, full: options.full })
     } catch (error) { reportWorkspaceError(error) } finally { setLoading(false) }
   }
-  useImperativeHandle(refreshRef, () => ({ refresh: () => load({ full: true }) }))
+  async function retryLoading(): Promise<boolean> {
+    setRecovering(true)
+    try {
+      await recovery.run({
+        cancelReads: () => workspaceLoader.invalidate(),
+        probe: signal => probeLocalService(userId, signal),
+        repair: signal => repairBrowserPresence({ signal }),
+        reload: signal => {
+          const scope = createWorkspaceScope()
+          return workspaceLoader.load((url, options) => scope.request(url, options), acceptWorkspace, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: true, full: true, signal })
+        },
+      })
+      return true
+    } catch (error) {
+      if (!(error instanceof Error && error.name === 'AbortError')) reportWorkspaceError(error instanceof ApiError && error.message === 'LOGIN_REQUIRED' ? new ApiError('RECOVERY_SESSION_CHANGED') : error)
+      return false
+    } finally { setRecovering(false); setLoading(false) }
+  }
+  useImperativeHandle(refreshRef, () => ({ refresh: retryLoading }))
   async function refreshCsvRecords() {
     const scope = createWorkspaceScope()
     const next = await scope.request<ConfigurationWorkingView>('/api/business/export/working-view')
@@ -261,7 +283,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     try { await refreshCsvRecords(); if (generation === csvGeneration.current) setCsvExportOpen(true) } catch (error) { onError(error) } finally { setCsvLoading(false) }
   }
   async function loadScoped(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
-    await workspaceLoader.load((url, options) => scope.request(url, { ...options, signal }), result => { scope.assertCurrent(signal); acceptWorkspace(result) }, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localOnly: true })
+    await workspaceLoader.load((url, options) => scope.request(url, options), result => { scope.assertCurrent(signal); acceptWorkspace(result) }, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localOnly: true, signal })
     scope.assertCurrent(signal)
   }
   function acceptReportCommentRecord(record: BusinessRecord, scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
@@ -276,11 +298,11 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   useEffect(() => {
     const controller = new AbortController(), scope = createWorkspaceScope()
     const initialQuery: VehicleListQuery | undefined = vehicleQueryJson ? JSON.parse(vehicleQueryJson) : undefined
-    void workspaceLoader.load((url, options) => scope.request(url, { ...options, signal: controller.signal }), result => acceptInitialWorkspace(result), { vehicleList: initialQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: true }).catch(error => { if (!controller.signal.aborted) { reportInitialError(error); setLoading(false) } })
-    return () => { cancelCsvRequest(); workspaceLoader.invalidate(); controller.abort() }
-  }, [view, workspaceLoader, vehicleQueryJson])
+    void workspaceLoader.load((url, options) => scope.request(url, options), result => acceptInitialWorkspace(result), { vehicleList: initialQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: true, signal: controller.signal }).catch(error => { if (!controller.signal.aborted) { reportInitialError(error); setLoading(false) } })
+    return () => { cancelCsvRequest(); recovery.cancel(); workspaceLoader.invalidate(); controller.abort() }
+  }, [view, workspaceLoader, recovery, vehicleQueryJson])
   const periodicLoad = useEffectEvent(async () => {
-    if (!workspaceLoader.busy && !editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load({ background: true })
+    if (!workspaceLoader.busy && !recovery.busy && !editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load({ background: true })
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   useEffect(() => {
@@ -553,9 +575,9 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const olderReport = Boolean(configuration?.part && doveRecordedTime(configuration.report.data.recordedAt) < doveRecordedTime(configuration.part.data.reportRecordedAt))
   const duplicateTarget = targetParts.length > 1
   const conflictingSources = configuration ? controllerSources(configuration.report).filter(item => keyControllerName(item.controller.name) && controllerSources(configuration.report).filter(other => keyControllerName(other.controller.name) === keyControllerName(item.controller.name)).length > 1) : []
-  if (!hasSnapshot) return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1></div>{loadError ? <Alert type="error" showIcon title={language === 'zh' ? '暂时无法加载数据' : 'Data could not be loaded'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} /> : <Spin />}</section>
+  if (!hasSnapshot) return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1></div>{loadError ? <Alert type="error" showIcon title={language === 'zh' ? '暂时无法加载数据' : 'Data could not be loaded'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading || recovering} onClick={() => void retryLoading()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} /> : <Spin />}</section>
   return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1><Space wrap>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
-    {loadError && <Alert className="connection-alert" type="warning" showIcon title={language === 'zh' ? '刷新未完成，当前显示上次加载的数据' : 'Refresh failed. Showing the last loaded data.'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} />}
+    {loadError && <Alert className="connection-alert" type="warning" showIcon title={language === 'zh' ? '刷新未完成，当前显示上次加载的数据' : 'Refresh failed. Showing the last loaded data.'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading || recovering} onClick={() => void retryLoading()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} />}
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{vehicleList?.counts.total ?? cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{vehicleList?.counts[status] ?? cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div>

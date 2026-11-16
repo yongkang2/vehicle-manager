@@ -4,7 +4,7 @@ import type { Request, Response } from 'express'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { LocalStore, auditAccountContext } from './store.js'
 import { AppError, bindingFor, TeamDirectory } from './team.js'
@@ -12,6 +12,7 @@ import type { Access, Identity, LocalUser, Role, Status, TeamDocument } from '..
 import { Workspaces } from './workspaces.js'
 import { Business } from './business.js'
 import { appVersion } from '../shared/version.js'
+import { presenceOriginAllowed, presenceTokenMatches } from './browser-presence.js'
 import type { BrowserPresence } from './browser-presence.js'
 
 type Config = { sharedPath: string; teamId: string }
@@ -94,8 +95,26 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     else next()
   })
   const instanceId = createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex')
-  app.get('/api/bootstrap', (req: AuthRequest, res) => res.json({ version: appVersion, user: req.localUser || null, instanceId, pid: process.pid }))
-  if (browserPresence && presenceToken) app.post('/api/local/browser-presence-token', (req, res) => res.json({ token: presenceToken }))
+  app.get('/api/bootstrap', (req: AuthRequest, res) => {
+    // Local session inspection must not open a team share or trigger sync.
+    if (req.localUser && req.sessionToken) res.set('X-Workspace-Token', workspaces.token(workspaces.session(req.sessionToken)))
+    res.json({ version: appVersion, user: req.localUser || null, instanceId, pid: process.pid })
+  })
+  if (browserPresence && presenceToken) {
+    app.post('/api/local/browser-presence-token', (req, res) => {
+      if (!presenceOriginAllowed(req)) throw new AppError('INVALID_REQUEST', 403)
+      if (req.body === undefined || req.body && !Array.isArray(req.body) && typeof req.body === 'object' && Object.keys(req.body).length === 0) {
+        browserPresence.markLegacy(); res.json({ token: presenceToken }); return
+      }
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some(key => !['pageId', 'pageToken', 'generation'].includes(key))) throw new AppError('INVALID_INPUT')
+      res.json({ token: presenceToken, ...browserPresence.registerDocument(req.body) })
+    })
+    app.post('/api/local/browser-presence/close', (req, res) => {
+      if (!presenceOriginAllowed(req) || !presenceTokenMatches(req.body?.token, presenceToken)) throw new AppError('INVALID_REQUEST', 403)
+      if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some(key => !['token', 'pageId', 'pageToken', 'generation'].includes(key))) throw new AppError('INVALID_INPUT')
+      res.json({ ok: true, closed: browserPresence.confirmClosed(req.body) })
+    })
+  }
   app.post('/api/local/shutdown', (req, res) => {
     const supplied = req.get('X-Control-Token') || ''
     if (!controlToken || !/^[a-f0-9]{64}$/.test(supplied) || !timingSafeEqual(Buffer.from(supplied), Buffer.from(controlToken))) throw new AppError('INVALID_REQUEST', 403)
@@ -333,8 +352,19 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
   })
   app.use('/api', (req, res, next) => next(new AppError('NOT_FOUND', 404)))
   if (staticDir && existsSync(path.join(staticDir, 'index.html'))) {
+    app.get(['/', '/index.html'], async (req, res) => {
+      // Observe the document before disk reads or JavaScript initialization.
+      // An abandoned HTML response stays uncertain rather than proving closure.
+      const page = req.method === 'GET' && browserPresence && presenceToken ? browserPresence.createDocument() : null
+      let html = await fs.readFile(path.join(staticDir, 'index.html'), 'utf8')
+      if (page) {
+        const meta = `<meta name="vehicle-manager-presence" content="${page.pageId}" data-token="${page.pageToken}">`
+        html = html.replace(/<head(?:\s[^>]*)?>/i, head => head + meta)
+        if (!html.includes(meta)) throw new AppError('SERVER_ERROR', 500)
+      }
+      res.set('Cache-Control', 'no-store').type('html').send(html)
+    })
     app.use(express.static(staticDir))
-    app.get('/', (req, res) => res.sendFile(path.join(staticDir, 'index.html')))
   }
   app.use((error: unknown, req: Request, res: Response, next: express.NextFunction) => {
     res.locals.diagnosticError = error
