@@ -98,6 +98,7 @@ export class Workspaces {
     this.closeJob = Promise.resolve().then(async () => {
       await this.settle()
       await Promise.all([...this.opened.values()].map(workspace => workspace.historyQueries.close()))
+      for (const workspace of this.opened.values()) workspace.vehicleListQueries.close()
       const stores = new Set([this.root, ...[...this.opened.values()].map(workspace => workspace.store)])
       for (const store of stores) store.db.close()
       this.closed = true

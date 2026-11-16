@@ -108,14 +108,24 @@ export class BusinessSync {
       }
       const requested = performance.now()
       let acquired: number | undefined
+      let deferred: { snapshot: SharedBusinessSnapshot; refresh: () => Promise<SyncStatus> } | undefined
       try {
-        return await this.teams.withAccess(directory, teamId, identity, false, team => {
-          acquired = performance.now(); lockWaitMs = Math.round(acquired - requested)
-          return this.cycle(directory, team, options.ifChanged)
-        })
+        let state: SyncStatus
+        try {
+          state = await this.teams.withAccess(directory, teamId, identity, false, team => {
+            acquired = performance.now(); lockWaitMs = Math.round(acquired - requested)
+            return this.cycle(directory, team, options.ifChanged, (snapshot, refresh) => { deferred = { snapshot, refresh } }, () => this.checkAccess(directory, teamId, identity))
+          })
+        } finally {
+          if (acquired === undefined) lockWaitMs = Math.round(performance.now() - requested)
+          else lockHeldMs = Math.round(performance.now() - acquired)
+        }
+        if (!deferred) return state
+        await this.checkAccess(directory, teamId, identity)
+        return await deferred.refresh()
       } finally {
-        if (acquired === undefined) lockWaitMs = Math.round(performance.now() - requested)
-        else lockHeldMs = Math.round(performance.now() - acquired)
+        // Own the private snapshot even when releasing the publication lease fails.
+        if (deferred) { this.advance(); await deferred.snapshot.close() }
       }
     }).catch(error => {
       failure = error
@@ -399,7 +409,7 @@ export class BusinessSync {
       if (modificationImports.length) store.set('pendingModificationImports', modificationImports.filter(entry => !master.prepare('SELECT key FROM metadata WHERE key=?').get(`modificationImport:${entry.id}`)))
     })
   }
-  private async cycle(shared: string, team: TeamDocument, ifChanged = false): Promise<SyncStatus> {
+  private async cycle(shared: string, team: TeamDocument, ifChanged = false, defer?: (snapshot: SharedBusinessSnapshot, refresh: () => Promise<SyncStatus>) => void, checkAccess?: () => Promise<void>): Promise<SyncStatus> {
     const previous = this.verified, state = this.status()
     if (ifChanged && previous?.directory === shared && Date.now() >= previous.at && Date.now() - previous.at < 300000 && !state.pending && !state.conflicts.length) {
       // Runs under the existing shared lock, after fresh membership/device
@@ -413,6 +423,7 @@ export class BusinessSync {
     }
     this.verified = null
     const snapshot = await SharedBusinessSnapshot.open(this.business, shared, team.id, atomicFile)
+    let retained = false
     try {
       const master = snapshot.db, directory = snapshot.directory, store = this.business.store
       const markers = snapshot.deletions()
@@ -596,13 +607,19 @@ export class BusinessSync {
       if (changed) {
         await snapshot.publish(team.id, protocol)
       }
-      this.advance('refreshing')
-      await this.ingest(snapshot.db, directory, snapshot.head!, conflicts)
-      this.error = null; this.phase = conflicts.length ? 'conflict' : 'ready'
-      this.verified = { directory: shared, head: JSON.stringify(snapshot.head), at: Date.now() }
-      this.advance()
-      return this.status()
-    } finally { this.advance(); await snapshot.close() }
+      const refresh = async () => {
+        this.advance('refreshing')
+        await this.ingest(snapshot.db, directory, snapshot.head!, conflicts)
+        // A member can be revoked while the private local refresh is running.
+        await checkAccess?.()
+        this.error = null; this.phase = conflicts.length ? 'conflict' : 'ready'
+        this.verified = { directory: shared, head: JSON.stringify(snapshot.head), at: Date.now() }
+        this.advance()
+        return this.status()
+      }
+      if (defer) { defer(snapshot, refresh); retained = true; return this.status() }
+      return await refresh()
+    } finally { if (!retained) { this.advance(); await snapshot.close() } }
   }
   async resolve(directory: string, teamId: string, identity: Identity, actor: Actor, recordId: string, token: string, choices: Record<string, string>, reason: string): Promise<SyncStatus> {
     return this.business.store.runWrite(() => this.resolveWithinWrite(directory, teamId, identity, actor, recordId, token, choices, reason))
