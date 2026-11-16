@@ -632,5 +632,5 @@ export function installBusinessRoutes(app: Pick<express.Router, 'use'>, store: L
     }
     if (pollError) { store.diagnostics.write('info', 'workspace.poll_recovered'); pollError = null }
   }
-  return { business, synchronization, configurationRevisions, historyQueries, tick }
+  return { business, synchronization, configurationRevisions, historyQueries, vehicleListQueries, tick }
 }
