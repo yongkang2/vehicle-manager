@@ -7,6 +7,7 @@ import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, Clock3, Chevron
 import { api, ApiError, createWorkspaceScope, download, probeLocalService } from './api'
 import { repairBrowserPresence } from './browser-presence'
 import { WorkspaceRecovery } from './workspace-recovery'
+import { vehicleStatusColors } from './theme'
 import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
@@ -323,7 +324,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const editorVehicle = editor?.kind === 'equipment' ? cars.find(car => car.id === editor.vehicleId) : null
   const reports = sortedVehicleReports(records)
   const date = (value: string) => value ? new Date(value).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-GB') : '—'
-  const statusTag = (value: string) => <Tag color={{ available: 'success', testing: 'processing', maintenance: 'warning', inactive: 'default' }[value]}>{text(value)}</Tag>
+  const statusTag = (value: string) => <Tag color={{ available: 'success', testing: 'processing', ...vehicleStatusColors }[value]}>{text(value)}</Tag>
   const linkedVehicleGroups = (id: string) => Object.fromEntries(records.filter(record => record.kind === 'modification' && record.vehicleId === id && typeof record.data.groupId === 'string').map(record => records.find(group => group.kind === 'modificationGroup' && group.id === record.data.groupId)).filter((group): group is BusinessRecord => Boolean(group)).map(group => [group.id, group.version]))
   const openAction = (record: BusinessRecord, type: Action['type']) => { setAction({ record, type, archived: !record.archived, requestId: crypto.randomUUID(), ...(record.kind === 'vehicle' ? { groupVersions: linkedVehicleGroups(record.id) } : {}) }); setActionReason('') }
   async function vehicleDeleted(receipt: VehicleDeleteReceipt) {

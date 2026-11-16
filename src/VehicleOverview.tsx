@@ -5,6 +5,7 @@ import { thermalSystemTypes } from '../shared/business'
 import { translateBusiness } from './business-i18n'
 import type { Language } from './i18n'
 import VehiclePhoto from './VehiclePhoto'
+import { vehicleStatusColors } from './theme'
 
 type Props = { vehicle: BusinessRecord; language: Language; busy: boolean; onEdit: () => void; onChanged: () => Promise<void>; onError: (cause: unknown) => void; onBusyChange: (busy: boolean) => void }
 
@@ -13,7 +14,7 @@ export default function VehicleOverview({ vehicle, language, busy, onEdit, ...ph
   const fieldNames = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'thermal', 'complianceLevel', ...(vehicle.data.coolingArchitecture ? ['coolingArchitecture'] : []), 'notes']
   function content(key: string) {
     const value = vehicle.data[key]
-    if (key === 'status') return <Tag color={{ available: 'green', testing: 'blue', maintenance: 'orange', inactive: 'default' }[String(value)]}>{text(String(value))}</Tag>
+    if (key === 'status') return <Tag color={{ available: 'green', testing: 'blue', ...vehicleStatusColors }[String(value)]}>{text(String(value))}</Tag>
     return <span className="preserve-text">{value === undefined || value === null || value === '' ? '—' : key === 'thermal' && thermalSystemTypes.some(type => type === value) ? text(String(value)) : String(value)}</span>
   }
   function fields(keys: string[]) {

@@ -9,6 +9,8 @@ export const palette = {
 
 export const fontFamily = '"Segoe UI", "Microsoft YaHei UI", sans-serif'
 
+export const vehicleStatusColors = { maintenance: 'default', inactive: 'red' } as const
+
 export const buttonTheme = { primaryShadow: 'none', defaultShadow: 'none', dangerShadow: 'none', contentFontSizeSM: 13 }
 
 /** Shared by existing screens and future Ant Design controls. */

@@ -69,6 +69,8 @@ Vehicle identity buttons indicate clickability through a quiet hover background,
 
 Canonical runtime values live in src/theme.ts; installThemeTokens maps the palette to root CSS variables before React renders, and App.tsx adapts the same palette to Ant Design. Refined.css owns the presentation layer. Existing specialized component styles remain in their owners.
 
+Vehicle status tags use gray for Maintenance and red for Inactive in both the vehicle list and detail overview. Their shared Ant Design color mappings live in src/theme.ts; retain the existing Available and Testing colors.
+
 ## Typography
 Local Windows fonts avoid font downloads and layout shifts. Semibold page titles, regular body text, tabular numerals, and monospace only for identifiers. Preserve Chinese font fallbacks.
 
