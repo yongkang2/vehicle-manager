@@ -20,8 +20,8 @@ const port = Number(process.env.PORT || 4410)
 const controlToken = randomBytes(32).toString('hex')
 const presenceToken = randomBytes(32).toString('hex')
 let closing = false
-const browserPresence = new BrowserPresence({ onEmpty: () => { console.log('All application pages are closed. Stopping the service.'); void shutdown() } })
-const { app, close, tick } = createApp({ dataDir, diagnostics, staticDir: path.join(project, 'dist'), controlToken, presenceToken, browserPresence, onShutdown: () => { void shutdown() } })
+const browserPresence = new BrowserPresence({ onStateChange: state => diagnostics.write('info', 'presence.changed', state), onEmpty: state => { diagnostics.write('info', 'presence.confirmed_closed', { ...state, shutdownReason: 'confirmed-pages-closed' }); console.log('All application documents explicitly closed. Stopping the service.'); void shutdown('confirmed-pages-closed') } })
+const { app, close, tick } = createApp({ dataDir, diagnostics, staticDir: path.join(project, 'dist'), controlToken, presenceToken, browserPresence, onShutdown: () => { void shutdown('manual') } })
 let interval: ReturnType<typeof setTimeout> | undefined
 const poll = () => {
   void tick().catch(error => diagnostics.write('error', 'service.poll_failed', {}, error)).finally(() => {
@@ -35,20 +35,20 @@ const server = app.listen(port, '127.0.0.1', (error?: Error) => {
 	if (error) return
 	const actualPort = (server.address() as { port: number }).port
 	const state = { pid: process.pid, port: actualPort, instanceId: createHash('sha256').update(path.resolve(dataDir).toLowerCase()).digest('hex'), controlToken, version: appVersion }
-	void atomicFile(stateFile, JSON.stringify(state)).then(() => { if (closing) return; browserPresence.start(); diagnostics.write('info', 'service.ready', { port: actualPort }); console.log(`Vehicle Data Management: http://127.0.0.1:${actualPort}`); process.send?.({ type: 'ready', port: actualPort, instanceId: state.instanceId, pid: process.pid }) }).catch(error => { diagnostics.write('error', 'service.state_failed', {}, error); void shutdown(); process.exitCode = 1 })
+	void atomicFile(stateFile, JSON.stringify(state)).then(() => { if (closing) return; browserPresence.start(); diagnostics.write('info', 'service.ready', { port: actualPort }); console.log(`Vehicle Data Management: http://127.0.0.1:${actualPort}`); process.send?.({ type: 'ready', port: actualPort, instanceId: state.instanceId, pid: process.pid }) }).catch(error => { diagnostics.write('error', 'service.state_failed', {}, error); void shutdown('startup-failure'); process.exitCode = 1 })
 })
 const disposePresence = installBrowserPresence(server, browserPresence, { token: presenceToken })
-async function shutdown() {
+async function shutdown(shutdownReason: 'confirmed-pages-closed' | 'manual' | 'signal' | 'startup-failure') {
 	if (closing) return
-	diagnostics.write('info', 'service.stopping')
+	diagnostics.write('info', 'service.stopping', { ...browserPresence.state, shutdownReason })
 	closing = true; clearTimeout(interval); browserPresence.stop(); disposePresence()
 	server.close(() => {
 		void close().then(async () => {
 			const state = await fs.readFile(stateFile, 'utf8').then(value => JSON.parse(value) as { pid: number }).catch(() => null)
 			if (state?.pid === process.pid) await fs.rm(stateFile, { force: true })
-			diagnostics.write('info', 'service.stopped')
-		}).catch(error => { diagnostics.write('error', 'service.shutdown_failed', {}, error); process.exitCode = 1 })
+			diagnostics.write('info', 'service.stopped', { shutdownReason })
+		}).catch(error => { diagnostics.write('error', 'service.shutdown_failed', { shutdownReason }, error); process.exitCode = 1 })
 	})
 }
-process.once('SIGINT', () => { void shutdown() }); process.once('SIGTERM', () => { void shutdown() })
+process.once('SIGINT', () => { void shutdown('signal') }); process.once('SIGTERM', () => { void shutdown('signal') })
 server.on('error', error => { closing = true; diagnostics.write('error', 'service.listen_failed', {}, error); clearTimeout(interval); browserPresence.stop(); disposePresence(); void close(); process.send?.({ type: 'error', code: (error as NodeJS.ErrnoException).code }); process.exitCode = 1 })

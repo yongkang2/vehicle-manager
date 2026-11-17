@@ -7,13 +7,15 @@ export class ApiError extends Error {
 }
 let workspaceToken: string | null = null
 let workspaceGeneration = 0
+let serviceInstance: string | null = null
 const headersFor = () => ({ 'X-App-Request': 'vehicle-manager', ...(workspaceToken ? { 'X-Workspace-Token': workspaceToken } : {}) })
-export async function api<T>(url: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T>(url: string, options: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
   let response: Response
   const form = options.body instanceof FormData
-  try { response = await fetch(url, { method: options.method || 'GET', headers: { ...headersFor(), ...(options.body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: options.body ? form ? options.body as FormData : JSON.stringify(options.body) : undefined }) }
-  catch { throw new ApiError('NETWORK_ERROR') }
+  try { response = await fetch(url, { method: options.method || 'GET', headers: { ...headersFor(), ...(options.body && !form ? { 'Content-Type': 'application/json' } : {}) }, body: options.body ? form ? options.body as FormData : JSON.stringify(options.body) : undefined, signal: options.signal }) }
+  catch { options.signal?.throwIfAborted(); throw new ApiError('NETWORK_ERROR') }
   const result = await response.json().catch(() => ({ error: 'SERVER_ERROR' }))
+  options.signal?.throwIfAborted()
   if (!response.ok) throw new ApiError(result.error || 'SERVER_ERROR', response.headers.get('x-request-id'))
   const token = response.headers.get('x-workspace-token')
   if (token) {
@@ -21,7 +23,22 @@ export async function api<T>(url: string, options: { method?: string; body?: unk
     else if (token !== workspaceToken) throw new ApiError('WORKSPACE_CHANGED')
   }
   if (url === '/api/logout') { workspaceToken = null; workspaceGeneration += 1 }
+  if (url === '/api/bootstrap' && typeof result.instanceId === 'string') serviceInstance = result.instanceId
   return result as T
+}
+
+/** Cheap local-only probe: never changes login, workspace or the mounted editor. */
+export async function probeLocalService(expectedUserId: string, signal: AbortSignal): Promise<void> {
+  const initiatingToken = workspaceToken, initiatingGeneration = workspaceGeneration
+  let response: Response, result: { instanceId?: string; user?: { id?: string } | null }
+  try {
+    response = await fetch('/api/bootstrap', { headers: headersFor(), cache: 'no-store', signal })
+    result = await response.json()
+  } catch { signal.throwIfAborted(); throw new ApiError('LOCAL_SERVICE_UNAVAILABLE') }
+  signal.throwIfAborted()
+  if (!response.ok || !result || typeof result.instanceId !== 'string') throw new ApiError('LOCAL_SERVICE_UNAVAILABLE')
+  if (!serviceInstance || result.instanceId !== serviceInstance || result.user?.id !== expectedUserId) throw new ApiError('RECOVERY_SESSION_CHANGED')
+  if (!initiatingToken || response.headers.get('x-workspace-token') !== initiatingToken || workspaceToken !== initiatingToken || workspaceGeneration !== initiatingGeneration) throw new ApiError('WORKSPACE_CHANGED')
 }
 type WorkspaceRequestOptions = { method?: string; body?: unknown; signal?: AbortSignal }
 export function createWorkspaceScope() {

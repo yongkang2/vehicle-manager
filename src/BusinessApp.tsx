@@ -4,7 +4,11 @@ import { lazy, Suspense, useEffect, useEffectEvent, useImperativeHandle, useMemo
 import type { Ref } from 'react'
 import { App, Alert, Button, Checkbox, Descriptions, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Upload } from 'antd'
 import { Archive, ArrowUpRight, CarFront, Check, ClipboardCheck, Clock3, ChevronRight, CloudOff, Download, Ellipsis, Eye, FileSpreadsheet, FolderSync, GitCompare, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2, Upload as UploadIcon, Wrench } from 'lucide-react'
-import { api, ApiError, createWorkspaceScope, download } from './api'
+import { api, ApiError, createWorkspaceScope, download, probeLocalService } from './api'
+import { repairBrowserPresence } from './browser-presence'
+import { WorkspaceRecovery } from './workspace-recovery'
+import { vehicleStatusColors } from './theme'
+import { plateExpiryClassName } from './plate-expiry'
 import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
@@ -13,6 +17,8 @@ import { activeHvBatteries, configurationFields, controllerSources as parsedCont
 import type { BusinessRecord, Fields, KeyControllerName, QuarantinedOperation, RecordKind, ReportData, RestorePreview, RestoreResult, RestoreReceipt, SyncConflict, SyncStatus, VehicleDeletePreview, VehicleDeleteReceipt, VehicleDeleteRequest } from '../shared/business'
 import RecordEditor from './RecordEditor'
 import EquipmentRecordEditor from './EquipmentRecordEditor'
+import ReportCommentEditor from './ReportCommentEditor'
+import { reportComment } from './report-comment-workflow'
 import { equipmentAttachments, parseEquipmentAttachmentId } from '../shared/equipment-attachments'
 import { matchesReportSearch } from './report-archive'
 import HistoryPanel from './HistoryPanel'
@@ -39,7 +45,7 @@ import './BusinessApp.css'
 
 const ReportViewer = lazy(() => import('./ReportViewer'))
 export type BusinessView = 'vehicles' | 'dove' | 'reports' | 'history' | 'sync' | 'audit'
-export type BusinessRefreshHandle = { refresh: () => Promise<void> }
+export type BusinessRefreshHandle = { refresh: () => Promise<boolean> }
 type Editor = { kind: RecordKind; record: BusinessRecord | null; vehicleId: string | null; initialName?: string; initialCategory?: 'battery' }
 type Action = { record: BusinessRecord; type: 'archive' | 'remove'; archived?: boolean; requestId: string; groupVersions?: Record<string, number> }
 type Difference = { key: string; status: string; before: unknown; after: unknown; fields: string[] }
@@ -159,7 +165,7 @@ function VehicleDeleteDialog({ vehicle, language, allowed, syncPaused, onCancel,
   </Modal>
 }
 
-export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef, personalScope }: { personalScope?: string; view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
+export default function BusinessApp({ view, language, admin, online, syncPaused, onError, refreshRef, personalScope, userId }: { userId: string; personalScope?: string; view: BusinessView; language: Language; admin: boolean; online: boolean; syncPaused: boolean; onError: (error: unknown) => void; refreshRef?: Ref<BusinessRefreshHandle> }) {
   const text = translateBusiness(language), { message, modal } = App.useApp()
   const tablePreferences = useVehicleTablePreferences(view === 'vehicles')
   const watchStorageKey = personalScope ? `vdm-vehicle-watch:${personalScope}` : null
@@ -190,6 +196,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [selectedId, setSelectedId] = useState<string | null>(null), [editor, setEditor] = useState<Editor | null>(null), [action, setAction] = useState<Action | null>(null), [actionReason, setActionReason] = useState('')
   const [detailTab, setDetailTab] = useState('overview')
   const [reportId, setReportId] = useState<string | null>(null)
+  const [commentEditor, setCommentEditor] = useState<BusinessRecord | null>(null)
   const [attachmentPreview, setAttachmentPreview] = useState<BusinessRecord | null>(null)
   const comparisonRequest = useRef<AbortController | null>(null)
   useEffect(() => () => { comparisonRequest.current?.abort() }, [])
@@ -207,8 +214,19 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [quarantined, setQuarantined] = useState<QuarantinedOperation[]>([]), [deleteVehicle, setDeleteVehicle] = useState<BusinessRecord | null>(null), [deleteReceipt, setDeleteReceipt] = useState<VehicleDeleteReceipt | null>(null)
   const deletedRecordIds = useRef(new Set<string>())
   const [workspaceLoader] = useState(() => new WorkspaceLoader())
+  const [recovery] = useState(() => new WorkspaceRecovery())
+  const [recovering, setRecovering] = useState(false)
   const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10))
-  useEffect(() => { const timer = setInterval(() => setToday(new Date().toISOString().slice(0, 10)), 60000); return () => clearInterval(timer) }, [])
+  const [plateExpiryDay, setPlateExpiryDay] = useState(() => localReminderDay())
+  useEffect(() => {
+    const updateDay = () => { const now = new Date(); setToday(now.toISOString().slice(0, 10)); setPlateExpiryDay(localReminderDay(now)) }
+    const onVisible = () => { if (document.visibilityState === 'visible') updateDay() }
+    const timer = setInterval(updateDay, 60000)
+    window.addEventListener('focus', updateDay)
+    window.addEventListener('pageshow', updateDay)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(timer); window.removeEventListener('focus', updateDay); window.removeEventListener('pageshow', updateDay); document.removeEventListener('visibilitychange', onVisible) }
+  }, [])
   const [vehicleList, setVehicleList] = useState<VehicleListMeta | null>(null)
   const [vehiclePage, setVehiclePage] = useState({ signature: '', current: 1, size: 10 })
   const vehicleSignature = JSON.stringify([query, filter, archived, visibleVehicleColumnFilters(vehicleColumnFilters, tablePreferences.layout.columns)])
@@ -243,7 +261,25 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
       await workspaceLoader.load((url, options) => scope.request(url, options), acceptWorkspace, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: !options.background, full: options.full })
     } catch (error) { reportWorkspaceError(error) } finally { setLoading(false) }
   }
-  useImperativeHandle(refreshRef, () => ({ refresh: () => load({ full: true }) }))
+  async function retryLoading(): Promise<boolean> {
+    setRecovering(true)
+    try {
+      await recovery.run({
+        cancelReads: () => workspaceLoader.invalidate(),
+        probe: signal => probeLocalService(userId, signal),
+        repair: signal => repairBrowserPresence({ signal }),
+        reload: signal => {
+          const scope = createWorkspaceScope()
+          return workspaceLoader.load((url, options) => scope.request(url, options), acceptWorkspace, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: true, full: true, signal })
+        },
+      })
+      return true
+    } catch (error) {
+      if (!(error instanceof Error && error.name === 'AbortError')) reportWorkspaceError(error instanceof ApiError && error.message === 'LOGIN_REQUIRED' ? new ApiError('RECOVERY_SESSION_CHANGED') : error)
+      return false
+    } finally { setRecovering(false); setLoading(false) }
+  }
+  useImperativeHandle(refreshRef, () => ({ refresh: retryLoading }))
   async function refreshCsvRecords() {
     const scope = createWorkspaceScope()
     const next = await scope.request<ConfigurationWorkingView>('/api/business/export/working-view')
@@ -258,8 +294,14 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     try { await refreshCsvRecords(); if (generation === csvGeneration.current) setCsvExportOpen(true) } catch (error) { onError(error) } finally { setCsvLoading(false) }
   }
   async function loadScoped(scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
-    await workspaceLoader.load((url, options) => scope.request(url, { ...options, signal }), result => { scope.assertCurrent(signal); acceptWorkspace(result) }, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localOnly: true })
+    await workspaceLoader.load((url, options) => scope.request(url, options), result => { scope.assertCurrent(signal); acceptWorkspace(result) }, { vehicleList: vehicleQuery, audit: view === 'audit', quarantined: view === 'sync', localOnly: true, signal })
     scope.assertCurrent(signal)
+  }
+  function acceptReportCommentRecord(record: BusinessRecord, scope: ReturnType<typeof createWorkspaceScope>, signal: AbortSignal) {
+    scope.assertCurrent(signal)
+    if (commentEditor?.id !== record.id) return false
+    setRecords(current => current.map(item => item.id === record.id ? record : item))
+    return true
   }
   const reportInitialError = useEffectEvent(reportWorkspaceError)
   const acceptInitialWorkspace = useEffectEvent(acceptWorkspace)
@@ -267,11 +309,11 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   useEffect(() => {
     const controller = new AbortController(), scope = createWorkspaceScope()
     const initialQuery: VehicleListQuery | undefined = vehicleQueryJson ? JSON.parse(vehicleQueryJson) : undefined
-    void workspaceLoader.load((url, options) => scope.request(url, { ...options, signal: controller.signal }), result => acceptInitialWorkspace(result), { vehicleList: initialQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: true }).catch(error => { if (!controller.signal.aborted) { reportInitialError(error); setLoading(false) } })
-    return () => { cancelCsvRequest(); workspaceLoader.invalidate(); controller.abort() }
-  }, [view, workspaceLoader, vehicleQueryJson])
+    void workspaceLoader.load((url, options) => scope.request(url, options), result => acceptInitialWorkspace(result), { vehicleList: initialQuery, audit: view === 'audit', quarantined: view === 'sync', localFirst: true, signal: controller.signal }).catch(error => { if (!controller.signal.aborted) { reportInitialError(error); setLoading(false) } })
+    return () => { cancelCsvRequest(); recovery.cancel(); workspaceLoader.invalidate(); controller.abort() }
+  }, [view, workspaceLoader, recovery, vehicleQueryJson])
   const periodicLoad = useEffectEvent(async () => {
-    if (!workspaceLoader.busy && !editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load({ background: true })
+    if (!workspaceLoader.busy && !recovery.busy && !editor && !action && !selectedId && !reportId && !configuration && !comparison && !restoreOpen && !deleteVehicle && !csvExportOpen && !busy && document.visibilityState === 'visible' && !document.activeElement?.matches('input,textarea,select')) await load({ background: true })
   })
   useEffect(() => { const timer = setInterval(() => { void periodicLoad() }, 30000); return () => clearInterval(timer) }, [])
   useEffect(() => {
@@ -286,11 +328,13 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     setSelectedId(id); setDetailTab(tab)
   }
   const activeReport = records.find(record => record.id === reportId && record.data.parsed) || null
+  const currentCommentReport = commentEditor ? records.find(record => record.id === commentEditor.id) : null
+  const commentReadOnly = !currentCommentReport || currentCommentReport.archived || !records.some(record => record.id === currentCommentReport.vehicleId && record.kind === 'vehicle' && !record.archived)
   const cars = records.filter(record => record.kind === 'vehicle')
   const editorVehicle = editor?.kind === 'equipment' ? cars.find(car => car.id === editor.vehicleId) : null
   const reports = sortedVehicleReports(records)
   const date = (value: string) => value ? new Date(value).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-GB') : '—'
-  const statusTag = (value: string) => <Tag color={{ available: 'success', testing: 'processing', maintenance: 'warning', inactive: 'default' }[value]}>{text(value)}</Tag>
+  const statusTag = (value: string) => <Tag color={{ available: 'success', testing: 'processing', ...vehicleStatusColors }[value]}>{text(value)}</Tag>
   const linkedVehicleGroups = (id: string) => Object.fromEntries(records.filter(record => record.kind === 'modification' && record.vehicleId === id && typeof record.data.groupId === 'string').map(record => records.find(group => group.kind === 'modificationGroup' && group.id === record.data.groupId)).filter((group): group is BusinessRecord => Boolean(group)).map(group => [group.id, group.version]))
   const openAction = (record: BusinessRecord, type: Action['type']) => { setAction({ record, type, archived: !record.archived, requestId: crypto.randomUUID(), ...(record.kind === 'vehicle' ? { groupVersions: linkedVehicleGroups(record.id) } : {}) }); setActionReason('') }
   async function vehicleDeleted(receipt: VehicleDeleteReceipt) {
@@ -301,6 +345,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     setRevisionSummaries(current => current.filter(summary => summary.vehicleId !== receipt.vehicleId))
     setSelectedId(current => current && affected.has(current) ? null : current)
     setReportId(current => current && affected.has(current) ? null : current)
+    setCommentEditor(current => current && belongs(current) ? null : current)
     setReportSelection(current => current.filter(id => !affected.has(id)))
     setEditor(current => current && (current.vehicleId === receipt.vehicleId || (current.record && belongs(current.record))) ? null : current)
     setAction(current => current && belongs(current.record) ? null : current)
@@ -483,9 +528,10 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     {admin && <Tooltip title={record.kind === 'vehicle' && syncPaused && Object.keys(linkedVehicleGroups(record.id)).length ? text('modificationOnlineNotice') : text(record.archived ? 'restore' : 'archive')}><Button type="text" disabled={!online || record.kind === 'vehicle' && syncPaused && Object.keys(linkedVehicleGroups(record.id)).length > 0} icon={record.archived ? <RotateCcw size={15} /> : <Archive size={15} />} aria-label={`${text(record.archived ? 'restore' : 'archive')} ${record.data.name}`} onClick={() => openAction(record, 'archive')} /></Tooltip>}
     {admin && record.kind === 'vehicle' && record.archived && <Tooltip title={syncPaused ? errorText('CONFIRM_RESUME', language) : text('deleteVehicle')}><Button type="text" danger disabled={!online || busy || syncPaused} icon={<Trash2 size={15} />} aria-label={`${text('deleteVehicle')} ${record.data.vin}`} onClick={() => setDeleteVehicle(record)}>{text('delete')}</Button></Tooltip>}
   </Space>
-  const reportTable = (items: BusinessRecord[], selectable = false) => <Table<BusinessRecord> rowKey="id" dataSource={items} size="small" loading={loading} scroll={{ x: selectable ? 700 : 800 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} rowSelection={selectable ? { preserveSelectedRowKeys: true, selectedRowKeys: reportSelection, onChange: keys => setReportSelection(keys.map(String)) } : undefined} columns={[
+  const reportTable = (items: BusinessRecord[], selectable = false) => <Table<BusinessRecord> rowKey="id" dataSource={items} size="small" loading={loading} scroll={{ x: selectable ? 940 : 1040 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} rowSelection={selectable ? { preserveSelectedRowKeys: true, selectedRowKeys: reportSelection, onChange: keys => setReportSelection(keys.map(String)) } : undefined} columns={[
     { title: text('file'), width: 280, render: (_, record) => <button className="record-link" onClick={() => setReportId(record.id)}><FileSpreadsheet size={17} /><span>{display(record.data.name)}{record.archived && <small>{text('archived')}</small>}</span></button> },
     { title: text('vehicle'), width: 220, render: (_, record) => { const car = cars.find(item => item.id === record.vehicleId); return <div className="report-vehicle"><strong>{display(car?.data.model || car?.data.name || text('vehicleUnavailable'))}</strong><small>{display(car?.data.vin || reportAssociationVin(record))}</small></div> } }, { title: text('recordedAt'), width: 160, render: (_, record) => display(record.data.recordedAt) },
+    { title: text('comment'), width: 240, render: (_, record) => <span className="report-comment-snippet" title={reportComment(record) || undefined}>{reportComment(record) || '—'}</span> },
     ...(!selectable ? [{ title: text('actions'), width: 110, render: (_: unknown, record: BusinessRecord) => <Space><Tooltip title={text('download')}><Button type="text" icon={<Download size={16} />} aria-label={text('download')} onClick={() => downloadFile(record)} /></Tooltip>{recordActions(record)}</Space> }] : []),
   ]} />
   const matchedReports = (vehicle: BusinessRecord) => reports.filter(report => !report.archived && reportMatchesVehicle(report, vehicle) && controllerSources(report).length > 0)
@@ -540,9 +586,9 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const olderReport = Boolean(configuration?.part && doveRecordedTime(configuration.report.data.recordedAt) < doveRecordedTime(configuration.part.data.reportRecordedAt))
   const duplicateTarget = targetParts.length > 1
   const conflictingSources = configuration ? controllerSources(configuration.report).filter(item => keyControllerName(item.controller.name) && controllerSources(configuration.report).filter(other => keyControllerName(other.controller.name) === keyControllerName(item.controller.name)).length > 1) : []
-  if (!hasSnapshot) return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1></div>{loadError ? <Alert type="error" showIcon title={language === 'zh' ? '暂时无法加载数据' : 'Data could not be loaded'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} /> : <Spin />}</section>
+  if (!hasSnapshot) return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1></div>{loadError ? <Alert type="error" showIcon title={language === 'zh' ? '暂时无法加载数据' : 'Data could not be loaded'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading || recovering} onClick={() => void retryLoading()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} /> : <Spin />}</section>
   return <section className="business-workspace"><div className="page-heading"><h1>{text(view)}</h1><Space wrap>{view === 'vehicles' && <Button type="primary" icon={<Plus size={16} />} onClick={() => setEditor({ kind: 'vehicle', vehicleId: null, record: null })}>{text('addVehicle')}</Button>}{view === 'sync' && <Button type="primary" loading={busy} icon={<FolderSync size={16} />} onClick={() => void synchronize()}>{text('syncNow')}</Button>}</Space></div>
-    {loadError && <Alert className="connection-alert" type="warning" showIcon title={language === 'zh' ? '刷新未完成，当前显示上次加载的数据' : 'Refresh failed. Showing the last loaded data.'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void load()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} />}
+    {loadError && <Alert className="connection-alert" type="warning" showIcon title={language === 'zh' ? '刷新未完成，当前显示上次加载的数据' : 'Refresh failed. Showing the last loaded data.'} description={errorText(loadError, language)} action={<Button icon={<RefreshCw size={16} />} loading={loading || recovering} onClick={() => void retryLoading()}>{language === 'zh' ? '重新加载' : 'Retry loading'}</Button>} />}
     {(sync.error || sync.pending > 0 || sync.conflicts.length > 0 || sync.quarantined > 0) && view !== 'sync' && <Alert className="business-notice" type="warning" showIcon title={sync.error ? errorText(sync.error, language) : `${text('pending')}: ${sync.pending} · ${text('conflicts')}: ${sync.conflicts.length} · ${text('quarantined')}: ${sync.quarantined}`} />}
     {deleteReceipt && !deleteReceipt.localSynced && <Alert className="business-notice" type="warning" showIcon title={text('deleteCommittedPending')} />}
     {view === 'vehicles' && <><div className="fleet-stats"><div><span>{text('vehicles')}</span><strong>{vehicleList?.counts.total ?? cars.filter(car => !car.archived).length}</strong></div>{statuses.slice(0, 3).map(status => <div key={status}><span>{text(status)}</span><strong>{vehicleList?.counts[status] ?? cars.filter(car => !car.archived && car.data.status === status).length}</strong></div>)}</div>
@@ -562,7 +608,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
             const watched = Object.hasOwn(watch.vehicles, record.id)
             return <div className="vehicle-identity"><Tooltip title={text(watched ? 'unwatchVehicle' : 'watchVehicle')}><button type="button" className={`car-symbol vehicle-watch-toggle${watched ? ' car-symbol-watched' : ''}`} aria-label={`${text('watchVehicle')} · ${display(record.data.name)}`} aria-pressed={watched} onClick={() => markVehicle(record.id, watched ? undefined : 'gold')}><CarFront size={21} aria-hidden="true" /></button></Tooltip><button className="record-link vehicle-details-link" title={text('openVehicleDetails')} onClick={() => openVehicle(record.id)}><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span><ChevronRight size={14} className="vehicle-details-chevron" aria-hidden="true" /></button></div>
           } },
-          { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
+          { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={plateExpiryClassName(record.data.plateExpiry, plateExpiryDay)}>{display(record.data.plateExpiry)}</small></div> },
           { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
           { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
           {
@@ -598,7 +644,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
           ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
             key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
               const value = display(record.data[field])
-              return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
+              return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : field === 'plateExpiry' ? plateExpiryClassName(record.data.plateExpiry, plateExpiryDay) : undefined}>{value}</span></Tooltip>
             },
           })),
           { key: 'configurationRevision', title: text('configurationRevision'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
@@ -630,7 +676,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     </section>}
 
     <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} closable={!revisionBusy} onClose={() => { if (revisionBusy) return; attachmentCancel.current?.(); equipmentCancel.current?.(); setEditor(current => current?.kind === 'equipment' ? null : current); setSelectedId(null) }} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && (view !== 'vehicles' || vehicleList?.detailId === selectedId) && recordActions(selected)}>{view === 'vehicles' && vehicleList?.detailId !== selectedId ? <Spin /> : <Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
-      { key: 'overview', label: text('overview'), children: <VehicleOverview vehicle={selected} language={language} busy={busy} onEdit={() => setEditor({ kind: 'vehicle', vehicleId: null, record: selected })} onChanged={load} onError={onError} onBusyChange={setBusy} /> },
+      { key: 'overview', label: text('overview'), children: <VehicleOverview vehicle={selected} plateExpiryDay={plateExpiryDay} language={language} busy={busy} onEdit={() => setEditor({ kind: 'vehicle', vehicleId: null, record: selected })} onChanged={load} onError={onError} onBusyChange={setBusy} /> },
       { key: 'configurationRevisions', label: text('configurationRevisions'), children: <ConfigurationRevisions key={selected.id} vehicle={selected} records={records} language={language} online={online} syncPaused={syncPaused} admin={admin} catalog={catalog} current={revisionSummaries.find(summary => summary.vehicleId === selected.id)} onChanged={loadScoped} onBusyChange={value => { setRevisionBusy(value); setBusy(value) }} onError={onError} /> },
       { key: 'parts', label: text('parts'), children: controllerTable(selected, true) },
       { key: 'hvBattery', label: text('hvBattery'), children: hvBatteryTable(selected) },
@@ -646,7 +692,8 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     {deleteVehicle && <VehicleDeleteDialog key={deleteVehicle.id} vehicle={deleteVehicle} language={language} allowed={admin && online} syncPaused={syncPaused} onCancel={() => setDeleteVehicle(null)} onBusyChange={setBusy} onDeleted={vehicleDeleted} onError={onError} />}
     {editor && (editor.kind === 'equipment' ? editorVehicle && <EquipmentRecordEditor key={`${editorVehicle.id}:${editor.record?.id || 'new'}`} vehicle={editorVehicle} record={editor.record} records={records} language={language} onCancel={() => setEditor(null)} onSaved={loadScoped} onBusyChange={setBusy} onCancelReady={cancel => { equipmentCancel.current = cancel }} onError={onError} /> : <RecordEditor record={editor.record} kind={editor.kind} initialName={editor.initialName} initialCategory={editor.initialCategory} language={language} busy={busy} onCancel={() => { if (!busy) setEditor(null) }} onSave={(data, reason) => void saveRecord(data, reason)} />)}
     <Modal open={Boolean(action)} title={action ? text(action.type === 'remove' ? 'recordRemoval' : action.archived ? 'archive' : 'restore') : ''} onCancel={() => { if (!busy) setAction(null) }} onOk={() => void applyAction()} confirmLoading={busy} okText={text('save')} cancelText={text('cancel')} okButtonProps={{ disabled: !actionReason.trim() || Boolean(action?.groupVersions && Object.keys(action.groupVersions).length && (!online || syncPaused)) }}><p className="operation-name">{display(action?.record.data.name)}</p>{action?.archived && action.groupVersions && Object.keys(action.groupVersions).length > 0 && <Alert type="info" showIcon title={text('modificationArchiveVehicleNotice')} />}<label className="standalone-label">{text('reason')}<Input.TextArea value={actionReason} maxLength={500} rows={3} onChange={event => setActionReason(event.target.value)} /></label></Modal>
-    <Modal open={Boolean(reportId)} onCancel={() => setReportId(null)} title={activeReport ? display(activeReport.data.name) : text('loading')} footer={null} width={1150} destroyOnHidden>{!activeReport && <Spin />}{activeReport && <><div className="report-actions"><Button icon={<Download size={16} />} onClick={() => downloadFile(activeReport)}>{text('download')}</Button><Button type="primary" icon={<ClipboardCheck size={16} />} disabled={activeReport.archived || !cars.some(car => !car.archived && reportMatchesVehicle(activeReport, car))} onClick={() => openConfiguration(activeReport)}>{text('updateConfiguration')}</Button>{recordActions(activeReport)}</div><Suspense fallback={<Spin />}><ReportViewer report={(activeReport.data as unknown as ReportData).parsed} record={activeReport} language={language} /></Suspense></>}</Modal>
+    <Modal open={Boolean(reportId)} onCancel={() => { if (!commentEditor && !busy) setReportId(null) }} closable={!commentEditor && !busy} keyboard={!commentEditor && !busy} title={activeReport ? display(activeReport.data.name) : text('loading')} footer={null} width={1150} destroyOnHidden>{!activeReport && <Spin />}{activeReport && <><div className="report-actions"><Button icon={<Download size={16} />} onClick={() => downloadFile(activeReport)}>{text('download')}</Button><Button type="primary" icon={<ClipboardCheck size={16} />} disabled={activeReport.archived || !cars.some(car => !car.archived && reportMatchesVehicle(activeReport, car))} onClick={() => openConfiguration(activeReport)}>{text('updateConfiguration')}</Button>{recordActions(activeReport)}</div><section className="report-comment-section" aria-label={text('reportComment')}><div className="section-toolbar"><h3>{text('reportComment')}</h3>{!activeReport.archived && cars.some(car => car.id === activeReport.vehicleId && !car.archived) ? <Button type="text" size="small" disabled={busy} icon={<Pencil size={15} />} onClick={() => setCommentEditor(activeReport)}>{text('editReportComment')}</Button> : <span className="muted">{text('reportCommentReadOnly')}</span>}</div><p className="preserve-text">{reportComment(activeReport) || text('reportCommentEmpty')}</p></section><Suspense fallback={<Spin />}><ReportViewer report={(activeReport.data as unknown as ReportData).parsed} record={activeReport} language={language} /></Suspense></>}</Modal>
+    {commentEditor && <ReportCommentEditor key={commentEditor.id} record={commentEditor} readonly={commentReadOnly} language={language} onCancel={() => setCommentEditor(null)} onBusyChange={setBusy} onError={onError} onInspected={acceptReportCommentRecord} onSaved={async (record, scope, signal) => { if (!acceptReportCommentRecord(record, scope, signal)) return; await loadScoped(scope, signal) }} />}
     <AttachmentPreview record={attachmentPreview} language={language} onClose={() => setAttachmentPreview(null)} />
     <Modal open={batchArchive} onCancel={() => !busy && setBatchArchive(false)} title={`${text('archive')} · ${selectedReports.filter(record => !record.archived).length}`} onOk={() => void archiveReports()} confirmLoading={busy} okButtonProps={{ disabled: !batchReason.trim() }}><label>{text('reason')}<Input.TextArea value={batchReason} onChange={event => setBatchReason(event.target.value)} maxLength={500} rows={3} /></label></Modal>
     <Modal open={compareOpen} onCancel={() => { comparisonRequest.current?.abort(); setCompareOpen(false); setComparison(null) }} title={text('compare')} footer={null} width={1200} destroyOnHidden>{busy ? <Spin /> : comparison ? <><div className="comparison-names">{[comparison.left, comparison.right].map((report, index) => <div className="comparison-report-identity" key={report.id}><span>{text(index === 0 ? 'baselineReport' : 'comparedReport')}</span><strong>{display(report.data.recordedAt).replace(/(\d{2})h(\d{2})/, '$1:$2')}</strong><div>{display(report.data.name)}</div></div>)}</div><Checkbox checked={onlyDifferences} onChange={event => setOnlyDifferences(event.target.checked)}>{text('onlyDifferences')}</Checkbox><Tabs items={['controllers', 'faults'].map(kind => { const rows = comparison[kind as 'controllers' | 'faults']; const changed = rows.filter(row => row.status !== 'unchanged'); return { key: kind, label: `${text(kind)} · ${changed.length} / ${rows.length}`, children: <Table<Difference> rowKey="key" dataSource={onlyDifferences ? changed : rows} locale={{ emptyText: text('noReportDifferences') }} size="small" pagination={{ pageSize: 10, hideOnSinglePage: true }} expandable={{ expandedRowRender: record => <ReportDifference record={record} text={text} leftLabel={`${text('baselineReport')} · ${display(comparison.left.data.recordedAt).replace(/(\d{2})h(\d{2})/, '$1:$2')}`} rightLabel={`${text('comparedReport')} · ${display(comparison.right.data.recordedAt).replace(/(\d{2})h(\d{2})/, '$1:$2')}`} /> }} columns={[{ title: text(kind === 'controllers' ? 'controller' : 'code'), dataIndex: 'key' }, { title: text('status'), render: (_, record) => <Tag color={record.status === 'changed' || record.status === 'ambiguous' ? 'warning' : record.status === 'added' ? 'processing' : 'default'}>{text(record.status)}</Tag> }, { title: text('changedFields'), render: (_, record) => record.fields.length ? record.fields.map(text).join(' · ') : '—' }]} /> } })} /></> : <Button onClick={() => void compare()}>{text('retry')}</Button>}</Modal>

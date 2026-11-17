@@ -65,7 +65,7 @@ test('delta refresh replaces changed records, removes deleted records and falls 
 test('vehicle pages use their own query and never reuse a whole-workspace delta baseline', async () => {
   const loader = new WorkspaceLoader(), calls: string[] = []
   const bodies: unknown[] = []
-  const read = async <T>(url: string, options?: { method?: string; body?: unknown }) => { calls.push(url); bodies.push(options); return snapshot('same-local-revision') as T }
+  const read = async <T>(url: string, options?: { method?: string; body?: unknown; signal?: AbortSignal }) => { calls.push(url); assert.ok(options?.signal instanceof AbortSignal); const { signal: _signal, ...request } = options; bodies.push(request); return snapshot('same-local-revision') as T }
   await loader.load(read, () => {}, { localOnly: true })
   const vehicleList = { search: 'VIN', archived: false, page: 2, pageSize: 10, filters: { notes: [JSON.stringify(['中'.repeat(4000)])] } }
   await loader.load(read, () => {}, { localOnly: true, vehicleList })
@@ -76,4 +76,28 @@ test('vehicle pages use their own query and never reuse a whole-workspace delta 
   assert.equal(url.searchParams.get('local'), '1')
   assert.equal(url.searchParams.has('known'), false)
   assert.equal(url.searchParams.has('delta'), false)
+})
+
+test('an obsolete stalled read releases busy and cannot replace a successful retry', async () => {
+  const loader = new WorkspaceLoader(), late = deferred<WorkspaceSnapshot>(), accepted: string[] = []
+  let oldSignal: AbortSignal | undefined
+  const old = loader.load(async <T>(_url: string, options?: { signal?: AbortSignal }) => { oldSignal = options?.signal; return await late.promise as T }, value => accepted.push(value.revision))
+  await new Promise(resolve => setImmediate(resolve))
+  loader.invalidate()
+  await loader.load(async <T>(url: string) => { assert.doesNotMatch(url, /known=/); return snapshot('fresh') as T }, value => accepted.push(value.revision), { localOnly: true })
+  await old
+  assert.equal(oldSignal?.aborted, true); assert.equal(loader.busy, false)
+  late.resolve(snapshot('obsolete')); await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(accepted, ['fresh'])
+})
+
+test('a thirty-second refresh timeout retains local rows and ignores late shared data', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const loader = new WorkspaceLoader(), late = deferred<WorkspaceSnapshot>(), accepted: string[] = []
+  const job = loader.load(async <T>(url: string) => (url.includes('local=1') ? snapshot('local') : await late.promise) as T, value => accepted.push(value.revision), { localFirst: true })
+  const rejected = assert.rejects(job, /REFRESH_TIMEOUT/)
+  await new Promise(resolve => setImmediate(resolve)); t.mock.timers.tick(30000); await rejected
+  assert.equal(loader.busy, false); assert.deepEqual(accepted, ['local'])
+  late.resolve(snapshot('late-shared')); await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(accepted, ['local'])
 })

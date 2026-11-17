@@ -5,9 +5,12 @@ export const palette = {
   surfaceTint: '#f8f9fc', hover: '#f0f4fa', selected: '#edf2fc', focus: '#b9c8ed',
   navHover: '#243657', navActive: '#30477b',
   watchInk: '#a86610', watchBg: '#fff0cc', watchHover: '#ffe3a3',
+  warningInk: '#946200',
 }
 
 export const fontFamily = '"Segoe UI", "Microsoft YaHei UI", sans-serif'
+
+export const vehicleStatusColors = { maintenance: 'default', inactive: 'red' } as const
 
 export const buttonTheme = { primaryShadow: 'none', defaultShadow: 'none', dangerShadow: 'none', contentFontSizeSM: 13 }
 

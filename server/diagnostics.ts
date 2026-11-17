@@ -21,7 +21,8 @@ export class Diagnostics {
   write(level: 'info' | 'warn' | 'error', event: string, fields: Record<string, unknown> = {}, error?: unknown): void {
     try {
       const data: Record<string, unknown> = {}
-      for (const key of ['status', 'durationMs', 'pending', 'conflicts', 'port', 'bytes', 'exitCode', 'lockWaitMs', 'lockHeldMs']) if (typeof fields[key] === 'number' && Number.isFinite(fields[key])) data[key] = fields[key]
+      for (const key of ['status', 'durationMs', 'pending', 'conflicts', 'port', 'bytes', 'exitCode', 'lockWaitMs', 'lockHeldMs', 'documents', 'pendingPages', 'openPages', 'uncertainPages', 'closedPages', 'sockets', 'legacyPages']) if (typeof fields[key] === 'number' && Number.isFinite(fields[key])) data[key] = fields[key]
+      if (typeof fields.shutdownReason === 'string' && ['confirmed-pages-closed', 'manual', 'signal', 'startup-failure'].includes(fields.shutdownReason)) data.shutdownReason = fields.shutdownReason
       if (fields.timings && typeof fields.timings === 'object') {
         const timings = fields.timings as Record<string, unknown>
         data.timings = Object.fromEntries(['opening', 'operations', 'records', 'publishing', 'refreshing'].filter(key => typeof timings[key] === 'number' && Number.isFinite(timings[key]) && Number(timings[key]) >= 0).map(key => [key, timings[key]]))

@@ -81,7 +81,11 @@ try {
     book.addWorksheet('Defauts').addRow(['EVCU', '', 'CAN UDS', 'P123456 (2Fh - Permanent) Synthetic diagnostic fault'])
     const workbookBytes = await book.xlsx.writeBuffer()
     const draft = await request('/business/dove/preview', 'POST', upload(workbookBytes, `demo-scan-${i + 1}.xlsx`))
-    await request('/business/dove/save', 'POST', { draftId: draft.id, confirmation: { confirmed: true, reportOnly: true } })
+    const report = await request('/business/dove/save', 'POST', { draftId: draft.id, confirmation: { confirmed: true, reportOnly: true } })
+    if (i % 2 === 0) await request(`/business/reports/${report.id}/comment`, 'PUT', {
+      comment: 'Synthetic review comment / 模拟报告备注\nConfirm the vehicle and collection date before reviewing the diagnostic results. 核对车辆与采集时间后再查看诊断结果。',
+      version: report.version, reason: 'Synthetic report comment for interface review',
+    })
     await request(`/business/vehicles/${car.id}/attachments`, 'POST', (() => {
       const form = upload(workbookBytes, 'validation-scan.xlsx')
       form.append('reason', 'Synthetic review attachment')

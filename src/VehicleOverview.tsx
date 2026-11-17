@@ -5,16 +5,18 @@ import { thermalSystemTypes } from '../shared/business'
 import { translateBusiness } from './business-i18n'
 import type { Language } from './i18n'
 import VehiclePhoto from './VehiclePhoto'
+import { vehicleStatusColors } from './theme'
+import { plateExpiryClassName } from './plate-expiry'
 
-type Props = { vehicle: BusinessRecord; language: Language; busy: boolean; onEdit: () => void; onChanged: () => Promise<void>; onError: (cause: unknown) => void; onBusyChange: (busy: boolean) => void }
+type Props = { vehicle: BusinessRecord; plateExpiryDay: string; language: Language; busy: boolean; onEdit: () => void; onChanged: () => Promise<void>; onError: (cause: unknown) => void; onBusyChange: (busy: boolean) => void }
 
-export default function VehicleOverview({ vehicle, language, busy, onEdit, ...photoProps }: Props) {
+export default function VehicleOverview({ vehicle, plateExpiryDay, language, busy, onEdit, ...photoProps }: Props) {
   const text = translateBusiness(language)
   const fieldNames = ['name', 'project', 'model', 'vin', 'color', 'plate', 'plateExpiry', 'status', 'physicalLocation', 'owner', 'thermal', 'complianceLevel', ...(vehicle.data.coolingArchitecture ? ['coolingArchitecture'] : []), 'notes']
   function content(key: string) {
     const value = vehicle.data[key]
-    if (key === 'status') return <Tag color={{ available: 'green', testing: 'blue', maintenance: 'orange', inactive: 'default' }[String(value)]}>{text(String(value))}</Tag>
-    return <span className="preserve-text">{value === undefined || value === null || value === '' ? '—' : key === 'thermal' && thermalSystemTypes.some(type => type === value) ? text(String(value)) : String(value)}</span>
+    if (key === 'status') return <Tag color={{ available: 'green', testing: 'blue', ...vehicleStatusColors }[String(value)]}>{text(String(value))}</Tag>
+    return <span className={`preserve-text ${key === 'plateExpiry' ? plateExpiryClassName(value, plateExpiryDay) : ''}`}>{value === undefined || value === null || value === '' ? '—' : key === 'thermal' && thermalSystemTypes.some(type => type === value) ? text(String(value)) : String(value)}</span>
   }
   function fields(keys: string[]) {
     return keys.map(key => <div className={key === 'notes' ? 'vehicle-info-field vehicle-info-field-wide' : 'vehicle-info-field'} key={key}><dt>{text(key === 'name' ? 'nickName' : key)}:</dt><dd>{content(key)}</dd></div>)
