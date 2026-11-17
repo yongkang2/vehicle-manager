@@ -129,6 +129,10 @@
     color: #b34d4f !important
 }
 
+.expiring-date {
+    color: var(--warningInk) !important
+}
+
 .business-notice {
     margin-bottom: 24px
 }

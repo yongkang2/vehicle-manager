@@ -8,6 +8,7 @@ import { api, ApiError, createWorkspaceScope, download, probeLocalService } from
 import { repairBrowserPresence } from './browser-presence'
 import { WorkspaceRecovery } from './workspace-recovery'
 import { vehicleStatusColors } from './theme'
+import { plateExpiryClassName } from './plate-expiry'
 import { localReminderDay } from '../shared/backup-reminder'
 import { errorText } from './i18n'
 import type { Language } from './i18n'
@@ -216,7 +217,16 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
   const [recovery] = useState(() => new WorkspaceRecovery())
   const [recovering, setRecovering] = useState(false)
   const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10))
-  useEffect(() => { const timer = setInterval(() => setToday(new Date().toISOString().slice(0, 10)), 60000); return () => clearInterval(timer) }, [])
+  const [plateExpiryDay, setPlateExpiryDay] = useState(() => localReminderDay())
+  useEffect(() => {
+    const updateDay = () => { const now = new Date(); setToday(now.toISOString().slice(0, 10)); setPlateExpiryDay(localReminderDay(now)) }
+    const onVisible = () => { if (document.visibilityState === 'visible') updateDay() }
+    const timer = setInterval(updateDay, 60000)
+    window.addEventListener('focus', updateDay)
+    window.addEventListener('pageshow', updateDay)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(timer); window.removeEventListener('focus', updateDay); window.removeEventListener('pageshow', updateDay); document.removeEventListener('visibilitychange', onVisible) }
+  }, [])
   const [vehicleList, setVehicleList] = useState<VehicleListMeta | null>(null)
   const [vehiclePage, setVehiclePage] = useState({ signature: '', current: 1, size: 10 })
   const vehicleSignature = JSON.stringify([query, filter, archived, visibleVehicleColumnFilters(vehicleColumnFilters, tablePreferences.layout.columns)])
@@ -598,7 +608,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
             const watched = Object.hasOwn(watch.vehicles, record.id)
             return <div className="vehicle-identity"><Tooltip title={text(watched ? 'unwatchVehicle' : 'watchVehicle')}><button type="button" className={`car-symbol vehicle-watch-toggle${watched ? ' car-symbol-watched' : ''}`} aria-label={`${text('watchVehicle')} · ${display(record.data.name)}`} aria-pressed={watched} onClick={() => markVehicle(record.id, watched ? undefined : 'gold')}><CarFront size={21} aria-hidden="true" /></button></Tooltip><button className="record-link vehicle-details-link" title={text('openVehicleDetails')} onClick={() => openVehicle(record.id)}><span><strong>{display(record.data.name)}</strong><small className="mono">{display(record.data.vin)}</small></span><ChevronRight size={14} className="vehicle-details-chevron" aria-hidden="true" /></button></div>
           } },
-          { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={record.data.plateExpiry && String(record.data.plateExpiry) < today ? 'expired-date' : ''}>{display(record.data.plateExpiry)}</small></div> },
+          { key: 'project', title: text('project'), width: 100, render: (_, record) => display(record.data.project) }, { key: 'plate', title: text('plate'), width: 140, render: (_, record) => <div className="record-title">{display(record.data.plate)}<small className={plateExpiryClassName(record.data.plateExpiry, plateExpiryDay)}>{display(record.data.plateExpiry)}</small></div> },
           { key: 'status', title: text('status'), width: 110, render: (_, record) => record.archived ? <Tag>{text('archived')}</Tag> : statusTag(String(record.data.status)) },
           { key: 'physicalLocation', title: text('physicalLocation'), width: 180, ellipsis: { showTitle: false }, render: (_, record) => <Tooltip title={display(record.data.physicalLocation)}><span>{display(record.data.physicalLocation)}</span></Tooltip> },
           {
@@ -634,7 +644,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
           ...([{ field: 'name', width: 180 }, { field: 'vin', width: 220 }, { field: 'plateExpiry', width: 180 }, { field: 'complianceLevel', width: 180 }, { field: 'coolingArchitecture', width: 200 }] as const).map(({ field, width }) => ({
             key: vehicleOverviewColumnIds[field], title: text(field === 'name' ? 'nickName' : field), width, ellipsis: { showTitle: false }, render: (_: unknown, record: BusinessRecord) => {
               const value = display(record.data[field])
-              return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : undefined}>{value}</span></Tooltip>
+              return <Tooltip title={value}><span className={field === 'vin' ? 'mono' : field === 'plateExpiry' ? plateExpiryClassName(record.data.plateExpiry, plateExpiryDay) : undefined}>{value}</span></Tooltip>
             },
           })),
           { key: 'configurationRevision', title: text('configurationRevision'), width: 220, ellipsis: { showTitle: false }, render: (_, record) => {
@@ -666,7 +676,7 @@ export default function BusinessApp({ view, language, admin, online, syncPaused,
     </section>}
 
     <Drawer className="vehicle-detail-drawer" open={Boolean(selected)} closable={!revisionBusy} onClose={() => { if (revisionBusy) return; attachmentCancel.current?.(); equipmentCancel.current?.(); setEditor(current => current?.kind === 'equipment' ? null : current); setSelectedId(null) }} title={selected ? display(selected.data.name) : ''} size={1000} destroyOnHidden extra={selected && (view !== 'vehicles' || vehicleList?.detailId === selectedId) && recordActions(selected)}>{view === 'vehicles' && vehicleList?.detailId !== selectedId ? <Spin /> : <Tabs className="vehicle-detail-tabs" activeKey={detailTab} onChange={setDetailTab} items={selected ? [
-      { key: 'overview', label: text('overview'), children: <VehicleOverview vehicle={selected} language={language} busy={busy} onEdit={() => setEditor({ kind: 'vehicle', vehicleId: null, record: selected })} onChanged={load} onError={onError} onBusyChange={setBusy} /> },
+      { key: 'overview', label: text('overview'), children: <VehicleOverview vehicle={selected} plateExpiryDay={plateExpiryDay} language={language} busy={busy} onEdit={() => setEditor({ kind: 'vehicle', vehicleId: null, record: selected })} onChanged={load} onError={onError} onBusyChange={setBusy} /> },
       { key: 'configurationRevisions', label: text('configurationRevisions'), children: <ConfigurationRevisions key={selected.id} vehicle={selected} records={records} language={language} online={online} syncPaused={syncPaused} admin={admin} catalog={catalog} current={revisionSummaries.find(summary => summary.vehicleId === selected.id)} onChanged={loadScoped} onBusyChange={value => { setRevisionBusy(value); setBusy(value) }} onError={onError} /> },
       { key: 'parts', label: text('parts'), children: controllerTable(selected, true) },
       { key: 'hvBattery', label: text('hvBattery'), children: hvBatteryTable(selected) },

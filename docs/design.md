@@ -71,6 +71,8 @@ Canonical runtime values live in src/theme.ts; installThemeTokens maps the palet
 
 Vehicle status tags use gray for Maintenance and red for Inactive in both the vehicle list and detail overview. Their shared Ant Design color mappings live in src/theme.ts; retain the existing Available and Testing colors.
 
+License plate expiry dates use red text before the local calendar day and yellow/amber text from today through six days ahead; exactly seven days ahead or later stays normal. Missing or invalid dates have no alert. Apply one rule to the date beneath the plate number, the separate expiry column and vehicle details, leaving the plate number unchanged. Refresh the local day every minute and when returning to the foreground; calendar-day comparisons must not depend on elapsed hours or UTC midnight. The shared palette owns the readable warning text color.
+
 ## Typography
 Local Windows fonts avoid font downloads and layout shifts. Semibold page titles, regular body text, tabular numerals, and monospace only for identifiers. Preserve Chinese font fallbacks.
 
