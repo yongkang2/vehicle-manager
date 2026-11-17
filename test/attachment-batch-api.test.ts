@@ -52,6 +52,24 @@ async function fixture() {
   } catch (error) { await close(); throw error }
 }
 
+test('attachment reads use authorized local files without awaiting shared synchronization', async () => {
+  const f = await fixture()
+  try {
+    const saved = await f.request(f.route, { method: 'POST', body: upload(png, 'local.png') })
+    assert.equal(saved.status, 201)
+    const original = f.workspace.synchronization.synchronize
+    f.workspace.synchronization.synchronize = async () => { throw new Error('File reads must not synchronize') }
+    try {
+      const result = await f.request(`/business/files/${saved.data.id}`)
+      assert.equal(result.status, 200)
+      assert.deepEqual(result.data, png)
+      assert.equal((await f.request(`/business/files/${saved.data.id}`, { token: 'stale-workspace' })).status, 409)
+    } finally { f.workspace.synchronization.synchronize = original }
+    await f.request('/logout', { method: 'POST', body: {} })
+    assert.equal((await f.request(`/business/files/${saved.data.id}`)).status, 401)
+  } finally { await f.close() }
+})
+
 test('sequential mixed attachments retain independent successes and exact original filenames and bytes', async () => {
   const f = await fixture()
   try {
