@@ -1,6 +1,8 @@
 # Vehicle Manager: Portable User Guide
 
-This guide covers application **1.10.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+This guide covers **1.10.2 Pre-release**, an experimental Microsoft identity build from the unmerged `feat/microsoft-identity` branch. It is not the latest stable release. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
+
+Microsoft sign-in is unavailable until a publisher supplies an application registration and configures this installation. See the included **Microsoft-Sign-In.md** for setup. Company consent, MFA and browser SSO have not been validated with a real company account. Existing local-password login and offline access remain available; this optional binding does not enforce company-only access or immediate company revocation.
 
 Unmerged pull-request packages are acceptance candidates, not official releases. For an upgrade from 1.9.1, stop the old service and independently preserve the complete shared folder and your own local data directory. Start the new application with the same data-directory configuration and existing team folder; do not initialize a replacement team or copy another person's data. This update retains schema 6, business protocols 1–5 and backup format 5. Review retained pending changes and explicitly resume synchronization if prompted.
 
