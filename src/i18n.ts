@@ -1,5 +1,6 @@
 export type Language = 'en' | 'zh'
 const en = {
+  microsoftLogin: 'Sign in with Microsoft', microsoftBind: 'Bind Microsoft work account', microsoftContinue: 'Continue to Microsoft', microsoftVerified: 'Last verified', microsoftNotConfigured: 'Microsoft sign-in is not configured for this installation.', microsoftStatusFailed: 'Could not check Microsoft sign-in. Reopen this panel or reload the page to retry.', microsoftBindingHelp: 'Confirm your local password, then choose your company Microsoft account. Your existing team membership and device approvals continue to apply.', microsoftStartFailed: 'Could not start Microsoft sign-in. Check your local password and application configuration, then retry.', microsoftSuccess: 'Microsoft account verified successfully.', microsoftUnbound: 'This Microsoft account is not bound on this computer. Sign in to your local account and bind it in Personal workspace first.', microsoftFailed: 'Microsoft sign-in was cancelled, expired or could not be verified. Company policy may require administrator approval. Retry or use your local account.',
   programUpdates: 'Version and downloads',
   product: 'Vehicle Data Management', workspace: 'Workspace', team: 'Team access', settings: 'Shared folder', signIn: 'Sign in', register: 'Create local account',
   username: 'Username', recentUsernameHint: 'Choose a previous account or enter a username', displayName: 'Full name', password: 'Password', account: 'Local account', developer: 'Developer', logout: 'Sign out', required: 'Required', passwordHint: '10–128 characters', foundation: 'Integrated build',
@@ -20,6 +21,7 @@ const en = {
   withdrawWarning: 'Withdraw this account’s pending request from the original team? This requires a reachable shared folder. If unavailable, you can disconnect this session, but the remote request remains.', reloadPage: 'Reload page',
 }
 const zh: Record<keyof typeof en, string> = {
+  microsoftLogin: '使用微软账号登录', microsoftBind: '绑定公司微软账号', microsoftContinue: '继续前往微软', microsoftVerified: '最近验证时间', microsoftNotConfigured: '此安装尚未配置微软账号登录。', microsoftStatusFailed: '无法检查微软登录状态，请重新打开此面板或刷新页面后重试。', microsoftBindingHelp: '请确认本地账号密码，再选择公司微软账号。仍沿用现有团队成员权限和设备审批。', microsoftStartFailed: '无法开始微软登录，请检查本地密码和应用配置后重试。', microsoftSuccess: '微软账号验证成功。', microsoftUnbound: '此微软账号尚未在本机绑定，请先登录本地账号，在个人工作区完成绑定。', microsoftFailed: '微软登录已取消、过期或未通过验证，公司策略也可能要求管理员批准。请重试或使用本地账号登录。',
   programUpdates: '版本与下载',
   product: '车辆数据管理', workspace: '工作空间', team: '团队权限', settings: '共享目录', signIn: '登录', register: '注册本地账号', username: '用户名', recentUsernameHint: '选择历史账号，或输入用户名', displayName: '姓名', password: '密码',
   account: '本地账号', developer: '开发者', logout: '退出登录', required: '必填', passwordHint: '10–128 位', foundation: '业务集成版', local: '本机设备', online: '已连接', offline: '离线', refresh: '刷新', setupTitle: '连接团队工作空间',

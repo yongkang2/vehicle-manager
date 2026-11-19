@@ -1,3 +1,4 @@
+import { registerMicrosoftAuth } from './microsoft-auth.js'
 import { Diagnostics, diagnosticContext } from './diagnostics.js'
 import express from 'express'
 import type { Request, Response } from 'express'
@@ -149,6 +150,8 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
       store.event(userOf(account), 'account.login', {}); session(res, account); res.json(userOf(account))
     } catch (error) { next(error) }
   })
+  app.use('/api/microsoft/start', limiter)
+  registerMicrosoftAuth(app, store, session)
   app.use('/api', (req: AuthRequest, res, next) => req.localUser ? next() : next(new AppError('LOGIN_REQUIRED', 401)))
   app.post('/api/logout', (req: AuthRequest, res) => {
     store.db.prepare('DELETE FROM sessions WHERE token=?').run(req.sessionToken || '')

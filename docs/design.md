@@ -87,6 +87,8 @@ Use hairline boundaries rather than decorative shadows or backdrop blur. Drawer 
 
 ## Components
 
+Microsoft identity (development): reuse the existing authentication column, Personal workspace drawer, Ant Design buttons/alerts/password confirmation and bilingual dictionaries. Show an explicit unavailable state when the publisher has not configured the integration. Binding requires the local password and online Microsoft authentication, preserves existing member IDs and device approvals, and is local to the installation. Login callback feedback must cover success, unbound identity and cancelled/expired/invalid authorization. See [Microsoft sign-in](microsoft-sign-in.md) for configuration and offline/security limits.
+
 ### Interface ownership and behavior
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |

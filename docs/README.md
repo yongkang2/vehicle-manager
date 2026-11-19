@@ -8,6 +8,7 @@
 ## Development and product conventions
 
 - [Development and implementation notes](developer-guide.md): setup, domain workflows, compatibility and technical details.
+- [Microsoft work account sign-in](microsoft-sign-in.md): optional development integration, publisher configuration and company validation limits.
 - [Product, design and interaction conventions](design.md): product scope, visual tokens, component ownership and interface behavior.
 - [HV battery notes](hv-battery.md)
 - [Loading performance notes](loading-performance.md)

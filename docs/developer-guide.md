@@ -16,6 +16,8 @@ Not claimed: arbitrary DOVE template compatibility, fault occurrence statistics,
 
 ## Build and Run
 
+Optional development integration: [Microsoft work account sign-in](microsoft-sign-in.md) describes publisher app registration, installation configuration, local account binding and validation limits.
+
 ```powershell
 npm ci
 npm run build

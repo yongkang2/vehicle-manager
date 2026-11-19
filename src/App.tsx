@@ -13,6 +13,7 @@ import { dictionaries, errorText } from './i18n'
 import type { Dictionary, Language } from './i18n'
 import TeamManagement from './TeamManagement'
 import PersonalWorkspaces from './PersonalWorkspaces'
+import MicrosoftAccount, { MicrosoftResult } from './MicrosoftAccount'
 import ProgramUpdates from './ProgramUpdates'
 import { translateBusiness } from './business-i18n'
 import type { BusinessRefreshHandle, BusinessView } from './BusinessApp'
@@ -61,7 +62,7 @@ function Authentication({ text, onError, onLogin, languageControl }: BaseProps &
       <Form.Item label={text.username} name="username" rules={[{ required: true, message: text.required }, { min: 2, max: 24 }]}>{accountInput}</Form.Item>
       <Form.Item label={text.password} name="password" rules={[{ required: true, message: text.required }, ...(mode === 'register' ? [{ min: 10, max: 128, message: text.passwordHint }] : [])]}><Input.Password autoComplete={mode === 'login' ? 'current-password' : 'new-password'} maxLength={128} placeholder={mode === 'register' ? text.passwordHint : undefined} /></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} block className="auth-submit" icon={glyph(ArrowRight)} iconPlacement="end">{mode === 'login' ? text.signIn : text.register}</Button>
-    </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main></>
+    </Form><MicrosoftAccount text={text} /><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main></>
 }
 
 function Setup({ text, language, onError, status, onDone, onLater }: BaseProps & { status: Status; onDone: () => Promise<void>; onLater: () => void }) {
@@ -139,7 +140,7 @@ function Application({ language, text, languageControl }: { language: Language; 
   const reportError = useEffectEvent(onError)
   useEffect(() => { void api<{ user: LocalUser | null }>('/api/bootstrap').then(result => setUser(result.user)).catch(error => reportError(error)).finally(() => setLoading(false)) }, [])
   if (loading) return <div className="boot"><Spin /></div>
-  return user ? <Workspace key={user.id} user={user} language={language} text={text} languageControl={languageControl} onError={onError} onLogout={() => setUser(null)} /> : <Authentication language={language} text={text} languageControl={languageControl} onError={onError} onLogin={setUser} />
+  return <><MicrosoftResult text={text} />{user ? <Workspace key={user.id} user={user} language={language} text={text} languageControl={languageControl} onError={onError} onLogout={() => setUser(null)} /> : <Authentication language={language} text={text} languageControl={languageControl} onError={onError} onLogin={setUser} />}</>
 }
 
 export default function App() {
