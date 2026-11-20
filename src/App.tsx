@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { App as AntApp, Alert, AutoComplete, Button, Checkbox, ConfigProvider, Form, Input, Segmented, Spin, Tabs, Tag, Tooltip } from 'antd'
+import { App as AntApp, Alert, AutoComplete, Button, Checkbox, ConfigProvider, Form, Input, Segmented, Space, Spin, Tabs, Tag, Tooltip } from 'antd'
 import enUS from 'antd/locale/en_US'
 import zhCN from 'antd/locale/zh_CN'
 import { ArrowRight, CarFront, Check, ChevronUp, Clock3, FileSpreadsheet, Files, FolderCog, FolderOpen, FolderSync, HardDrive, History, RefreshCw, ShieldCheck, UserRound, UsersRound, WifiOff } from 'lucide-react'
@@ -64,7 +64,7 @@ function Authentication({ text, onError, onLogin, languageControl }: BaseProps &
     </Form><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main></>
 }
 
-function Setup({ text, language, onError, status, onDone, onLater }: BaseProps & { status: Status; onDone: () => Promise<void>; onLater: () => void }) {
+function Setup({ text, language, onError, status, onDone, onLater }: BaseProps & { status: Status; onDone: (status: Status) => void; onLater: () => void }) {
   const [directory, setDirectory] = useState(status.sharedPath || ''), [checked, setChecked] = useState<ConnectionCheck | null>(null)
   const [busy, setBusy] = useState(false), [teamName, setTeamName] = useState(''), [confirmed, setConfirmed] = useState(false)
   const [retainPending, setRetainPending] = useState(false)
@@ -76,7 +76,7 @@ function Setup({ text, language, onError, status, onDone, onLater }: BaseProps &
   async function configure() {
     if (!checked) return
     setBusy(true)
-    try { await api<Status>('/api/setup/configure', { method: 'POST', body: { path: checked.path, mode: checked.kind === 'empty' ? 'create' : 'join', teamName, confirmed, teamId: checked.teamId, retainPending } }); await onDone() }
+    try { onDone(await api<Status>('/api/setup/configure', { method: 'POST', body: { path: checked.path, mode: checked.kind === 'empty' ? 'create' : 'join', teamName, confirmed, teamId: checked.teamId, retainPending } })) }
     catch (error) { onError(error) } finally { setBusy(false) }
   }
   return <section className="setup-section"><div className="section-heading"><span className="eyebrow">{text.settings.toUpperCase()}</span><h1>{text.setupTitle}</h1></div>
@@ -91,14 +91,34 @@ function Setup({ text, language, onError, status, onDone, onLater }: BaseProps &
 
 function Workspace({ text, language, onError, user, onLogout, languageControl }: BaseProps & { user: LocalUser; onLogout: () => void }) {
   const [status, setStatus] = useState<Status | null>(null), [view, setView] = useState<WorkspaceView>('vehicles')
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [connectionAttempt, setConnectionAttempt] = useState(0)
   const [deferred, setDeferred] = useState(false), [refreshing, setRefreshing] = useState(false)
   const [personalOpen, setPersonalOpen] = useState(false), [updatesOpen, setUpdatesOpen] = useState(false)
   const businessRef = useRef<BusinessRefreshHandle>(null)
   async function reload(signal?: AbortSignal) { const next = await api<Status>('/api/status', { signal }); setStatus(next); if (next.member?.role !== 'admin' || !next.online || next.access !== 'approved') setView(current => current === 'team' ? 'workspace' : current) }
   const reportError = useEffectEvent(onError)
-  useEffect(() => { void api<Status>('/api/status').then(setStatus).catch(error => reportError(error)) }, [])
+  useEffect(() => {
+    const controller = new AbortController()
+    void readWithDeadline(signal => api<Status>('/api/status', { signal }), {
+      signal: controller.signal, timeoutMs: 10000, timeoutError: new ApiError('TEAM_CONNECTION_TIMEOUT'),
+    }).then(next => {
+      if (!controller.signal.aborted) setStatus(next)
+    }).catch(error => {
+      if (controller.signal.aborted) return
+      const code = error instanceof ApiError ? error.message : 'SERVER_ERROR'
+      setConnectionError(code)
+      if (code === 'LOGIN_REQUIRED' || code === 'WORKSPACE_CHANGED') reportError(error)
+    })
+    return () => controller.abort()
+  }, [connectionAttempt])
   const periodicReload = useEffectEvent(async () => { try { await reload() } catch (error) { onError(error) } })
-  useEffect(() => { const timer = setInterval(() => { void periodicReload() }, 30000); return () => clearInterval(timer) }, [])
+  const hasStatus = status !== null
+  useEffect(() => {
+    if (!hasStatus) return
+    const timer = setInterval(() => { void periodicReload() }, 30000)
+    return () => clearInterval(timer)
+  }, [hasStatus])
   async function refresh() {
     if (refreshing) return
     setRefreshing(true)
@@ -110,7 +130,21 @@ function Workspace({ text, language, onError, user, onLogout, languageControl }:
   }
   async function logout() { try { await api('/api/logout', { method: 'POST' }); onLogout() } catch (error) { onError(error) } }
   function selected(next: Status) { setStatus(next); setView(next.access === 'approved' ? 'vehicles' : 'workspace'); setDeferred(true) }
-  if (!status) return <div className="boot"><Spin /></div>
+  function configured(next: Status) { setStatus(next); setView('vehicles'); setDeferred(true) }
+  if (!status) return <>
+    <div className="auth-language-control">{languageControl}</div>
+    <main className="boot workspace-connection">
+      <Space orientation="vertical" align="center" size="middle">
+        {connectionError ? <>
+          <Alert type="warning" showIcon title={text.teamConnectionFailed} description={connectionError === 'TEAM_CONNECTION_TIMEOUT' ? text.teamConnectionTimeout : errorText(connectionError === 'LOGIN_REQUIRED' ? 'RECOVERY_SESSION_CHANGED' : connectionError, language)} />
+          <Space wrap>
+            <Button type="primary" onClick={() => { setConnectionError(null); setConnectionAttempt(attempt => attempt + 1) }}>{text.retryTeamConnection}</Button>
+            <Button type="text" onClick={() => void logout()}>{text.logout}</Button>
+          </Space>
+        </> : <div className="workspace-connection-progress" role="status"><Spin aria-hidden="true" />{text.checkingTeamConnection}</div>}
+      </Space>
+    </main>
+  </>
   const admin = status.access === 'approved' && status.member?.role === 'admin'
   const labels = { unconfigured: text.notConfigured, pending: text.pendingTitle, approved: text.approved, disabled: text.disabled, unbound: text.unbound, rejected: text.rejected }
   const setup = view === 'settings' || (status.access === 'unconfigured' && !deferred)
@@ -123,7 +157,7 @@ function Workspace({ text, language, onError, user, onLogout, languageControl }:
     {personalOpen && <PersonalWorkspaces open text={text} status={status} onClose={() => setPersonalOpen(false)} onConnect={() => setView('settings')} onSelected={selected} onLogout={() => void logout()} onUpdates={() => { setPersonalOpen(false); setUpdatesOpen(true) }} onError={onError} />}
     <ProgramUpdates language={language} open={updatesOpen} onOpenChange={setUpdatesOpen} />
     <main className="workspace-main"><header className="workspace-topbar"><span className="current-team-label" title={status.sharedPath || undefined}>{status.teamName || text.workspace} <b>/</b> {setup ? text.settings : view === 'team' ? text.team : businessView ? businessText(view) : text.accessTitle}</span><div className="workspace-topbar-tools"><Tag variant="filled" color={status.online ? 'success' : 'default'} icon={status.online ? glyph(Check) : glyph(WifiOff)}>{status.online ? text.online : text.offline}</Tag><Tooltip title={text.refresh}><Button type="text" size="small" loading={refreshing} icon={glyph(RefreshCw)} aria-label={text.refresh} onClick={() => void refresh()} /></Tooltip><Tooltip title={text.personal}><Button className="mobile-logout" type="text" size="small" icon={glyph(UserRound)} aria-label={text.personal} onClick={() => setPersonalOpen(true)} /></Tooltip><div className="language-control">{languageControl}</div></div></header>
-      <VehicleTableFilterProvider key={status.workspaceToken}><div className="page-content">{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={async () => { await reload(); setView('vehicles'); setDeferred(true) }} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp userId={user.id} personalScope={JSON.stringify([user.id, status.teamId || 'local'])} view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} refreshRef={businessRef} /></Suspense> : <>
+      <VehicleTableFilterProvider key={status.workspaceToken}><div className="page-content">{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={configured} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp userId={user.id} personalScope={JSON.stringify([user.id, status.teamId || 'local'])} view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} refreshRef={businessRef} /></Suspense> : <>
         <div className="page-heading"><div><span className="eyebrow">WORKSPACE ACCESS</span><h1>{status.teamName || text.workspace}</h1></div><Button icon={glyph(FolderCog)} onClick={() => setPersonalOpen(true)}>{text.myTeams}</Button></div>
         <div className={`access-banner ${status.access}`}><span className="access-symbol">{status.access === 'approved' ? glyph(ShieldCheck) : status.access === 'pending' ? glyph(Clock3) : glyph(FolderOpen)}</span><strong>{labels[status.access]}</strong></div>
         {status.error && <Alert className="connection-alert" type="warning" showIcon title={errorText(status.error, language)} />}
