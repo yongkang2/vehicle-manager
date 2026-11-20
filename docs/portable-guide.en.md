@@ -1,6 +1,6 @@
 # Vehicle Manager: Portable User Guide
 
-This development branch uses local accounts and team approval, superseding the immutable v1.10.2 Microsoft identity preview.
+This guide covers application **1.10.0**. Use the release page and the installed application's version display to identify a published package. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
 
 Unmerged pull-request packages are acceptance candidates, not official releases. For an upgrade from 1.9.1, stop the old service and independently preserve the complete shared folder and your own local data directory. Start the new application with the same data-directory configuration and existing team folder; do not initialize a replacement team or copy another person's data. This update retains schema 6, business protocols 1–5 and backup format 5. Review retained pending changes and explicitly resume synchronization if prompted.
 
@@ -125,7 +125,3 @@ Startup text logs now prefix each new stdout/stderr line and each launcher error
 ## Attachment preview
 
 In a vehicle’s Attachments tab, choose Preview for XLSX, XLS, PDF, PNG, JPG, JPEG or JFIF files. Excel previews are read only, support worksheet selection, and display up to 500 rows and 50 columns per sheet. Download the original for complete formatting, charts and formulas, or if preview fails. PDF preview requires browser support.
-
-## Local passwords
-
-Personal workspace provides Change application password. Use your current password and a different 10–128 character password. Save unsubmitted forms first; success revokes all sessions for this account on this installation. Saved pending changes remain. Administrators cannot reset another computer's password. Forgotten-password guidance does not reset credentials or transfer local work.

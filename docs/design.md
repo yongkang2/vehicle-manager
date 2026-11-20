@@ -87,7 +87,6 @@ Use hairline boundaries rather than decorative shadows or backdrop blur. Drawer 
 
 ## Components
 
-
 ### Interface ownership and behavior
 
 | Capability | Canonical owner | Source of truth | Allowed variants | Verification |
@@ -104,6 +103,8 @@ Preserve navigation, filters, table preferences and paging. Search clear and IME
 Ant Design owns controls, dialogs, drawers and notifications; Lucide owns icons. ResizableVehicleTable owns table sizing, filters, pagination and preferences. A centered single-column login restores the original entry composition. Its top anchor and reserved 64px bilingual title prevent content-height recentering during locale and login/register changes.
 
 Error feedback uses plain-language English/Chinese descriptions with a concrete next step. Do not promise that an uncertain save was rejected or tell users to blindly resubmit after transport failures; ask them to inspect saved results. Preserve unsaved text before advising a reload. Shared Application error toasts remain deduplicated by error code and stay for eight seconds; the workspace-change warning uses a short title and separate recovery body, with a Keep page open choice for copying unsaved text without bypassing stale-request guards. Keep existing destructive confirmations and workflow-specific durable recovery states. Backup-reminder dismissal means no more reminders for the current local day and is labeled accordingly in both languages.
+
+After local sign-in, show the team connection check with a ten-second deadline. A failed check offers retry within the signed-in session. If the share is confirmed unavailable, use the existing offline access rules. Creating or joining a team uses the returned workspace status immediately.
 
 Workspace loading distinguishes loading, confirmed empty and failed states. Until a successful snapshot exists, failed loading shows a persistent bilingual error with Retry loading rather than zero fleet totals or creation controls. Refresh failure preserves displayed records and transient filters and labels them as last-loaded data; successful retry clears the warning. Synchronization shows its current stage and available completed/total counts while active, clearing them after completion or failure. Use the existing Alert/Button and shared spacing/theme; no new animation or color system.
 
@@ -225,7 +226,3 @@ Business field diffs retain user-facing values, report collection dates, install
 
 Attachment reads use the authorized local copy without awaiting team snapshot synchronization. The preview retains only the most recent image (up to 10 MiB) in component memory, validates its initiating workspace before reuse, and releases object URLs on close. Excel loads its parser alongside the file and converts only the selected worksheet. Original files and integrity checks remain unchanged.
 Vehicle attachment rows offer a read-only Preview action for XLSX, XLS, PDF, PNG, JPG, JPEG and JFIF. Images fit the dialog; PDFs use the browser viewer. Spreadsheets offer sheet selection and pagination, capped at 500 rows and 50 columns per sheet; formatting, charts and formulas remain authoritative in the original. Downloads remain available on errors. Preview uses the existing scoped file API and revokes temporary URLs on close. Synthetic examples live in the isolated UI preview server; no real business data is seeded.
-
-### Local account authentication
-
-Use local account / employee-ID suggestions with an independent application password. Team approval verifies people and devices within the project; it does not certify Microsoft identity. New join requests retain an optional local username snapshot; legacy requests show Not recorded. Personal workspace offers current-password-confirmed password changes. Success revokes this account's sessions on this installation and returns to sign-in after an explicit warning to save drafts. Saved queues and conflicts remain. Forgotten-password help never promises unverified reset or automatic data transfer. Reuse the existing Ant Design form, dialog and bilingual geometry.

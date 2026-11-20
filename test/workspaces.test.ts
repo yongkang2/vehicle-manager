@@ -75,7 +75,6 @@ test('in-flight requests block switching and a new login invalidates old-page to
     try {
       await started
       assert.equal((await request('/workspaces/select', { teamId: second.id })).data.error, 'WORKSPACE_BUSY')
-      assert.equal((await request('/account/password', { currentPassword: account.password, newPassword: 'different-local-password' })).data.error, 'WORKSPACE_BUSY')
     } finally { release(); await ongoing; workspace.teams.read = read }
     const staleToken = sessions.get('first')!.token
     await request('/login', account)

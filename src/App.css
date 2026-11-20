@@ -1,3 +1,13 @@
+.workspace-connection {
+    padding: 64px 24px;
+}
+
+.workspace-connection-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
 .auth-language-control {
     position: absolute;
     right: 28px;

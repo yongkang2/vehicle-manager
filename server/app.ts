@@ -154,23 +154,6 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     store.db.prepare('DELETE FROM sessions WHERE token=?').run(req.sessionToken || '')
     res.clearCookie('vdm_session', { path: '/' }); res.json({ ok: true })
   })
-  app.post('/api/account/password', limiter, (req: AuthRequest, res, next) => {
-    try {
-      const account = store.db.prepare('SELECT * FROM accounts WHERE id=?').get(req.localUser!.id) as Account
-      const old = req.body?.currentPassword, password = req.body?.newPassword
-      if (typeof old !== 'string' || old.length > 128 || !timingSafeEqual(scryptSync(old, account.salt, 64), Buffer.from(account.hash, 'hex'))) throw new AppError('INVALID_CREDENTIALS', 401)
-      if (typeof password !== 'string' || password.length < 10 || password.length > 128 || password === old) throw new AppError('INVALID_PASSWORD')
-      const sessions = store.db.prepare('SELECT token FROM sessions WHERE user_id=?').all(account.id)
-      if (sessions.some(row => active.get(String(row.token)) || switching.has(String(row.token)))) throw new AppError('WORKSPACE_BUSY', 409)
-      const salt = randomBytes(16).toString('hex'), hash = scryptSync(password, salt, 64).toString('hex')
-      store.transaction(() => {
-        store.db.prepare('UPDATE accounts SET salt=?,hash=? WHERE id=?').run(salt, hash, account.id)
-        store.db.prepare('DELETE FROM sessions WHERE user_id=?').run(account.id)
-        store.event(userOf(account), 'account.password.changed', { sessionsRevoked: true })
-      })
-      res.clearCookie('vdm_session', { path: '/' }); res.json({ ok: true, reauthenticationRequired: true })
-    } catch (error) { next(error) }
-  })
   app.use('/api', (req: AuthRequest, res, next) => {
     const token = req.sessionToken!, session = workspaces.session(token)
     res.set('X-Workspace-Token', workspaces.token(session))
@@ -186,7 +169,7 @@ export function createApp({ dataDir, staticDir, controlToken, onShutdown, browse
     res.once('finish', release); res.once('close', release)
     next()
   })
-  const identity = (req: AuthRequest): Identity => ({ deviceId: store.deviceId, deviceName: store.deviceName, localUserId: req.localUser!.id, displayName: req.localUser!.displayName, username: req.localUser!.username })
+  const identity = (req: AuthRequest): Identity => ({ deviceId: store.deviceId, deviceName: store.deviceName, localUserId: req.localUser!.id, displayName: req.localUser!.displayName })
   const current = (req: AuthRequest) => {
     const id = workspaces.session(req.sessionToken!).workspace_id
     if (!id) throw new AppError('NOT_CONFIGURED', 409)

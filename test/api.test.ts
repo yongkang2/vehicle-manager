@@ -39,7 +39,6 @@ test('separate local accounts join one team, require approval and never expose c
     assert.equal(joined.data.access, 'pending')
     assert.equal((await request(beta, '/api/team')).status, 403)
     const team = (await request(alpha, '/api/team')).data as TeamDocument
-    assert.equal(team.requests[0].identity.username, 'same-name')
     assert.equal((await request(alpha, `/api/team/requests/${team.requests[0].id}/approve`, 'POST', { role: 'member', memberId: null, reason: 'Verified device and person' })).status, 200)
     const approved = (await request(beta, '/api/status')).data as Status
     assert.equal(approved.access, 'approved'); assert.equal(approved.member!.role, 'member')
