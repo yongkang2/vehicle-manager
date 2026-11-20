@@ -4,9 +4,9 @@ import { ArrowRightLeft, Check, Download, FolderPlus, FolderSync, LogOut, Refres
 import type { Status, WorkspaceSummary } from '../shared/types'
 import type { Dictionary } from './i18n'
 import { api } from './api'
-import MicrosoftAccount from './MicrosoftAccount'
+import ChangePassword from './ChangePassword'
 
-export default function PersonalWorkspaces({ open, text, status, onClose, onConnect, onSelected, onLogout, onUpdates, onError }: { open: boolean; text: Dictionary; status: Status; onClose: () => void; onConnect: () => void; onSelected: (status: Status) => void; onLogout: () => void; onUpdates: () => void; onError: (error: unknown) => void }) {
+export default function PersonalWorkspaces({ open, text, status, onClose, onConnect, onSelected, onLogout, onUpdates, onPasswordChanged, onError }: { open: boolean; text: Dictionary; status: Status; onClose: () => void; onConnect: () => void; onSelected: (status: Status) => void; onLogout: () => void; onUpdates: () => void; onPasswordChanged: () => void; onError: (error: unknown) => void }) {
   const { modal } = App.useApp()
   const [teams, setTeams] = useState<WorkspaceSummary[]>([]), [busy, setBusy] = useState(true)
   const [target, setTarget] = useState<WorkspaceSummary | 'disconnect' | null>(null), [retain, setRetain] = useState(false)
@@ -36,7 +36,7 @@ export default function PersonalWorkspaces({ open, text, status, onClose, onConn
     })
   }
   return <><Drawer title={text.personal} open={open} onClose={onClose} size={480} className="personal-drawer">
-    {open && <MicrosoftAccount text={text} bind />}
+    {open && <ChangePassword text={text} onChanged={() => { onPasswordChanged(); modal.success({ title: text.passwordChanged }) }} />}
     <div className="personal-heading"><h2>{text.myTeams}</h2><Button type="text" size="small" aria-label={text.refresh} title={text.refresh} icon={<RefreshCw size={17} />} loading={busy} onClick={() => void load()} /></div>
     {busy && <Spin />}{!busy && !teams.length && <Empty description={text.noTeams} />}
     <div className="personal-team-list">{teams.map(team => <div className="personal-team" key={team.id}><div className="personal-team-heading"><strong>{team.name}</strong>{team.selected && <Tag icon={<Check size={13} />}>{text.currentTeam}</Tag>}</div><small className="personal-path">{team.sharedPath}</small><small className="personal-team-id">{team.id}</small><div className="personal-team-state"><Tag>{labels[team.access]}</Tag><span>{text.pendingChanges}: {team.pending}</span><span>{text.conflictCount}: {team.conflicts}</span></div>{!team.selected && <Button icon={<ArrowRightLeft size={16} />} disabled={busy} onClick={() => { setRetain(false); setTarget(team) }}>{text.selectTeam}</Button>}</div>)}</div>

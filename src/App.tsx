@@ -13,7 +13,6 @@ import { dictionaries, errorText } from './i18n'
 import type { Dictionary, Language } from './i18n'
 import TeamManagement from './TeamManagement'
 import PersonalWorkspaces from './PersonalWorkspaces'
-import MicrosoftAccount, { MicrosoftResult } from './MicrosoftAccount'
 import ProgramUpdates from './ProgramUpdates'
 import { translateBusiness } from './business-i18n'
 import type { BusinessRefreshHandle, BusinessView } from './BusinessApp'
@@ -39,6 +38,7 @@ function rememberRecentUsername(username: string) {
 }
 
 function Authentication({ text, onError, onLogin, languageControl }: BaseProps & { onLogin: (user: LocalUser) => void }) {
+  const { modal } = AntApp.useApp()
   const [mode, setMode] = useState('login'), [busy, setBusy] = useState(false)
   const [recentUsernames] = useState(readRecentUsernames)
   const [form] = Form.useForm()
@@ -51,7 +51,7 @@ function Authentication({ text, onError, onLogin, languageControl }: BaseProps &
     }
     catch (error) { onError(error) } finally { setBusy(false) }
   }
-  const usernameInput = <Input autoComplete="username" prefix={glyph(UserRound)} maxLength={24} placeholder={mode === 'login' && recentUsernames.length > 0 ? text.recentUsernameHint : undefined} />
+  const usernameInput = <Input autoComplete="username" spellCheck={false} autoCapitalize="none" autoCorrect="off" prefix={glyph(UserRound)} maxLength={24} placeholder={mode === 'login' && recentUsernames.length > 0 ? text.recentUsernameHint : undefined} />
   const accountInput = mode === 'login' && recentUsernames.length > 0
     ? <AutoComplete options={recentUsernames.map(value => ({ value }))} style={{ width: '100%' }}>{usernameInput}</AutoComplete>
     : usernameInput
@@ -62,7 +62,7 @@ function Authentication({ text, onError, onLogin, languageControl }: BaseProps &
       <Form.Item label={text.username} name="username" rules={[{ required: true, message: text.required }, { min: 2, max: 24 }]}>{accountInput}</Form.Item>
       <Form.Item label={text.password} name="password" rules={[{ required: true, message: text.required }, ...(mode === 'register' ? [{ min: 10, max: 128, message: text.passwordHint }] : [])]}><Input.Password autoComplete={mode === 'login' ? 'current-password' : 'new-password'} maxLength={128} placeholder={mode === 'register' ? text.passwordHint : undefined} /></Form.Item>
       <Button type="primary" htmlType="submit" loading={busy} block className="auth-submit" icon={glyph(ArrowRight)} iconPlacement="end">{mode === 'login' ? text.signIn : text.register}</Button>
-    </Form><MicrosoftAccount text={text} /><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main></>
+    </Form><p>{text.localAccountHelp}</p><Button type="link" onClick={() => modal.info({ title: text.forgotPassword, content: text.passwordRecoveryHelp, okText: text.save })}>{text.forgotPassword}</Button><div className="auth-bottom">{text.account} <span>•</span> {text.local}</div><div className="auth-developer-credit">{text.developer}: TA98755</div></div></main></>
 }
 
 function Setup({ text, language, onError, status, onDone, onLater }: BaseProps & { status: Status; onDone: () => Promise<void>; onLater: () => void }) {
@@ -121,7 +121,7 @@ function Workspace({ text, language, onError, user, onLogout, languageControl }:
     {status.access === 'approved' && businessNavigation.filter(item => item.view !== 'audit' || admin).map(item => <button key={item.view} className={view === item.view && !setup ? 'active' : ''} onClick={() => setView(item.view)}>{glyph(item.icon)}{businessText(item.view)}</button>)}
     {admin && <button className={view === 'team' ? 'active' : ''} disabled={!status.online} onClick={() => setView('team')}>{glyph(UsersRound)}{text.team}</button>}
   </nav><div className="sidebar-bottom"><span className="build-label">{text.foundation} · {appVersion}</span><button className="account-row personal-trigger" aria-label={text.personal} onClick={() => setPersonalOpen(true)}><span className="avatar">{user.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{user.displayName}</strong><small>{admin ? text.firstAdmin : status.access === 'approved' ? text.member : text.account}</small></div>{glyph(ChevronUp)}</button></div></aside>
-    {personalOpen && <PersonalWorkspaces open text={text} status={status} onClose={() => setPersonalOpen(false)} onConnect={() => setView('settings')} onSelected={selected} onLogout={() => void logout()} onUpdates={() => { setPersonalOpen(false); setUpdatesOpen(true) }} onError={onError} />}
+    {personalOpen && <PersonalWorkspaces open text={text} status={status} onClose={() => setPersonalOpen(false)} onConnect={() => setView('settings')} onSelected={selected} onLogout={() => void logout()} onPasswordChanged={onLogout} onUpdates={() => { setPersonalOpen(false); setUpdatesOpen(true) }} onError={onError} />}
     <ProgramUpdates language={language} open={updatesOpen} onOpenChange={setUpdatesOpen} />
     <main className="workspace-main"><header className="workspace-topbar"><span className="current-team-label" title={status.sharedPath || undefined}>{status.teamName || text.workspace} <b>/</b> {setup ? text.settings : view === 'team' ? text.team : businessView ? businessText(view) : text.accessTitle}</span><div className="workspace-topbar-tools"><Tag variant="filled" color={status.online ? 'success' : 'default'} icon={status.online ? glyph(Check) : glyph(WifiOff)}>{status.online ? text.online : text.offline}</Tag><Tooltip title={text.refresh}><Button type="text" size="small" loading={refreshing} icon={glyph(RefreshCw)} aria-label={text.refresh} onClick={() => void refresh()} /></Tooltip><Tooltip title={text.personal}><Button className="mobile-logout" type="text" size="small" icon={glyph(UserRound)} aria-label={text.personal} onClick={() => setPersonalOpen(true)} /></Tooltip><div className="language-control">{languageControl}</div></div></header>
       <VehicleTableFilterProvider key={status.workspaceToken}><div className="page-content">{status.teamId && status.syncPaused && status.access === 'approved' && <Alert className="connection-alert" type="warning" showIcon title={text.syncPaused} action={<Button size="small" icon={glyph(FolderSync)} onClick={() => setPersonalOpen(true)}>{text.resumeSync}</Button>} />}{setup ? <Setup text={text} language={language} onError={onError} status={status} onDone={async () => { await reload(); setView('vehicles'); setDeferred(true) }} onLater={() => { setDeferred(true); setView('workspace') }} /> : view === 'team' && admin && status.online ? <TeamManagement text={text} language={language} onError={onError} onUpdated={reload} /> : businessView ? <Suspense fallback={<Spin />}><BusinessApp userId={user.id} personalScope={JSON.stringify([user.id, status.teamId || 'local'])} view={view as BusinessView} language={language} admin={admin} online={status.online} syncPaused={status.syncPaused} onError={onError} refreshRef={businessRef} /></Suspense> : <>
@@ -140,7 +140,7 @@ function Application({ language, text, languageControl }: { language: Language; 
   const reportError = useEffectEvent(onError)
   useEffect(() => { void api<{ user: LocalUser | null }>('/api/bootstrap').then(result => setUser(result.user)).catch(error => reportError(error)).finally(() => setLoading(false)) }, [])
   if (loading) return <div className="boot"><Spin /></div>
-  return <><MicrosoftResult text={text} />{user ? <Workspace key={user.id} user={user} language={language} text={text} languageControl={languageControl} onError={onError} onLogout={() => setUser(null)} /> : <Authentication language={language} text={text} languageControl={languageControl} onError={onError} onLogin={setUser} />}</>
+  return <>{user ? <Workspace key={user.id} user={user} language={language} text={text} languageControl={languageControl} onError={onError} onLogout={() => setUser(null)} /> : <Authentication language={language} text={text} languageControl={languageControl} onError={onError} onLogin={setUser} />}</>
 }
 
 export default function App() {

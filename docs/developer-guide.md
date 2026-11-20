@@ -16,7 +16,6 @@ Not claimed: arbitrary DOVE template compatibility, fault occurrence statistics,
 
 ## Build and Run
 
-Optional development integration: [Microsoft work account sign-in](microsoft-sign-in.md) describes publisher app registration, installation configuration, local account binding and validation limits.
 
 ```powershell
 npm ci
@@ -77,7 +76,7 @@ Pending or disabled accounts cannot access the administrator API. Offline status
 
 ## Personal Workspaces (First Version)
 
-**Personal workspace** contains the team list, connect-another-team, withdraw-request, disconnect-session, resume-sync and sign-out actions. On mobile, use the person icon in the top bar. Business navigation and administrator team management remain separate. Account profile/password editing and permanent workspace deletion are not part of this version.
+**Personal workspace** contains the team list, connect-another-team, withdraw-request, disconnect-session, resume-sync and sign-out actions. On mobile, use the person icon in the top bar. Business navigation and administrator team management remain separate. Account profile editing and permanent workspace deletion are not part of this version. Local password changes are supported via POST /api/account/password with currentPassword and newPassword. Success atomically updates credentials, revokes all sessions for that local account and records safe audit metadata; requests in progress cause a busy response. Team approval and shared data are unchanged.
 
 Team databases, originals, sync cursors, pending operations, conflicts and temporary DOVE previews are isolated. The original team keeps its local database and blob location; subsequent teams use `workspaces/<hashed-team-id>/` under the stable data directory. Moving the data directory to another computer also moves device identity and is not supported. Never copy an existing device identity to another computer. Each account sees only its connected teams; entering business data still requires approved team access.
 

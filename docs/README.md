@@ -8,8 +8,7 @@
 ## Development and product conventions
 
 - [Development and implementation notes](developer-guide.md): setup, domain workflows, compatibility and technical details.
-- [Local authentication development plan](plans/2026-11-20-local-authentication.md): agreed local account workflow and staged implementation; awaiting the user's instruction to start development.
-- [Microsoft work account sign-in](microsoft-sign-in.md): optional development integration, publisher configuration and company validation limits.
+- [Local authentication development plan](plans/2026-11-20-local-authentication.md): local account workflow, implementation stages and recorded validation results.
 - [Product, design and interaction conventions](design.md): product scope, visual tokens, component ownership and interface behavior.
 - [HV battery notes](hv-battery.md)
 - [Loading performance notes](loading-performance.md)

@@ -22,7 +22,7 @@ export async function api<T>(url: string, options: { method?: string; body?: unk
     if (!workspaceToken || ['/api/login', '/api/register', '/api/setup/configure', '/api/workspaces/select', '/api/workspaces/disconnect'].includes(url)) { workspaceToken = token; workspaceGeneration += 1 }
     else if (token !== workspaceToken) throw new ApiError('WORKSPACE_CHANGED')
   }
-  if (url === '/api/logout') { workspaceToken = null; workspaceGeneration += 1 }
+  if (['/api/logout', '/api/account/password'].includes(url)) { workspaceToken = null; workspaceGeneration += 1 }
   if (url === '/api/bootstrap' && typeof result.instanceId === 'string') serviceInstance = result.instanceId
   return result as T
 }

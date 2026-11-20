@@ -1,8 +1,6 @@
 # Vehicle Manager: Portable User Guide
 
-This guide covers **1.10.2 Pre-release**, an experimental Microsoft identity build from the unmerged `feat/microsoft-identity` branch. It is not the latest stable release. Real multi-computer Windows SMB acceptance remains specific to the destination environment; it has not been completed for this release.
-
-Microsoft sign-in is unavailable until a publisher supplies an application registration and configures this installation. See the included **Microsoft-Sign-In.md** for setup. Company consent, MFA and browser SSO have not been validated with a real company account. Existing local-password login and offline access remain available; this optional binding does not enforce company-only access or immediate company revocation.
+This development branch uses local accounts and team approval, superseding the immutable v1.10.2 Microsoft identity preview.
 
 Unmerged pull-request packages are acceptance candidates, not official releases. For an upgrade from 1.9.1, stop the old service and independently preserve the complete shared folder and your own local data directory. Start the new application with the same data-directory configuration and existing team folder; do not initialize a replacement team or copy another person's data. This update retains schema 6, business protocols 1–5 and backup format 5. Review retained pending changes and explicitly resume synchronization if prompted.
 
@@ -127,3 +125,7 @@ Startup text logs now prefix each new stdout/stderr line and each launcher error
 ## Attachment preview
 
 In a vehicle’s Attachments tab, choose Preview for XLSX, XLS, PDF, PNG, JPG, JPEG or JFIF files. Excel previews are read only, support worksheet selection, and display up to 500 rows and 50 columns per sheet. Download the original for complete formatting, charts and formulas, or if preview fails. PDF preview requires browser support.
+
+## Local passwords
+
+Personal workspace provides Change application password. Use your current password and a different 10–128 character password. Save unsubmitted forms first; success revokes all sessions for this account on this installation. Saved pending changes remain. Administrators cannot reset another computer's password. Forgotten-password guidance does not reset credentials or transfer local work.

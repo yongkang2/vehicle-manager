@@ -87,7 +87,6 @@ Use hairline boundaries rather than decorative shadows or backdrop blur. Drawer 
 
 ## Components
 
-Microsoft identity (development): reuse the existing authentication column, Personal workspace drawer, Ant Design buttons/alerts/password confirmation and bilingual dictionaries. Show an explicit unavailable state when the publisher has not configured the integration. Binding requires the local password and online Microsoft authentication, preserves existing member IDs and device approvals, and is local to the installation. Login callback feedback must cover success, unbound identity and cancelled/expired/invalid authorization. See [Microsoft sign-in](microsoft-sign-in.md) for configuration and offline/security limits.
 
 ### Interface ownership and behavior
 
@@ -226,3 +225,7 @@ Business field diffs retain user-facing values, report collection dates, install
 
 Attachment reads use the authorized local copy without awaiting team snapshot synchronization. The preview retains only the most recent image (up to 10 MiB) in component memory, validates its initiating workspace before reuse, and releases object URLs on close. Excel loads its parser alongside the file and converts only the selected worksheet. Original files and integrity checks remain unchanged.
 Vehicle attachment rows offer a read-only Preview action for XLSX, XLS, PDF, PNG, JPG, JPEG and JFIF. Images fit the dialog; PDFs use the browser viewer. Spreadsheets offer sheet selection and pagination, capped at 500 rows and 50 columns per sheet; formatting, charts and formulas remain authoritative in the original. Downloads remain available on errors. Preview uses the existing scoped file API and revokes temporary URLs on close. Synthetic examples live in the isolated UI preview server; no real business data is seeded.
+
+### Local account authentication
+
+Use local account / employee-ID suggestions with an independent application password. Team approval verifies people and devices within the project; it does not certify Microsoft identity. New join requests retain an optional local username snapshot; legacy requests show Not recorded. Personal workspace offers current-password-confirmed password changes. Success revokes this account's sessions on this installation and returns to sign-in after an explicit warning to save drafts. Saved queues and conflicts remain. Forgotten-password help never promises unverified reset or automatic data transfer. Reuse the existing Ant Design form, dialog and bilingual geometry.
