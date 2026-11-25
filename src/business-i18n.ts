@@ -73,7 +73,7 @@ const labels: Record<string, [string, string]> = {
   attachmentInspectionDone: ['The attachment list has been refreshed. Check it before clearing an unknown row and selecting the file again. Saved files remain saved.', '附件列表已刷新，请核对后再清除结果未知的条目并重新选择文件。已保存的文件仍然保留。'],
   attachmentRefreshFailed: ['The attachment list could not be refreshed. Upload results are retained; try refreshing again.', '无法刷新附件列表。上传结果已保留，请重试刷新。'],
   resizeColumn: ['Resize column', '调整列宽'],
-  vehicleColumnFilter: ['Filter column', '筛选列'], vehicleColumnFilterApply: ['Apply', '应用'], vehicleColumnFilterReset: ['Reset', '重置'],
+  vehicleColumnFilter: ['Filter column', '筛选列'], vehicleColumnFilterApply: ['Apply', '应用'], vehicleColumnFilterReset: ['Reset', '重置'], vehicleColumnFilterSelectAll: ['Select all', '全选'],
   vehicleColumnFilterSearch: ['Search column values', '搜索列内容'], vehicleColumnFiltersActive: ['Filtered columns', '已筛选列数'], vehicleColumnFiltersClear: ['Clear column filters', '清除列筛选'],
   vehicleColumnResizeHint: ['Drag header edges to resize. Double-click an edge to reset.', '拖动表头边缘调整列宽，双击边缘可恢复默认宽度。'],
   vehicleTableColumns: ['Columns', '列设置'], vehicleTableColumnsTitle: ['Customize vehicle columns', '自定义车辆列'], vehicleTableColumnsClose: ['Done', '完成'],

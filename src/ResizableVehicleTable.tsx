@@ -9,6 +9,7 @@ import type { VehicleColumnId, VehicleTablePreferences } from '../shared/vehicle
 import type { Language } from './i18n'
 import type { VehicleTableSaveStatus } from './vehicle-table-preference-session'
 import { translateBusiness } from './business-i18n'
+import VehicleColumnFilter from './VehicleColumnFilter'
 import { clampColumnWidth, keyboardColumnWidth, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, resizedColumnWidth } from './table-column-width'
 import { matchesVehicleColumnFilters, retainedVehicleFilterValue, vehicleColumnFilterOptions, visibleVehicleColumnFilters } from './vehicle-table-filters'
 import type { VehicleColumnFilters, VehicleFilterColumnId, VehicleFilterValues } from './vehicle-table-filters'
@@ -74,7 +75,7 @@ function ResizableHeaderCell({ columnKey, columnWidth, resizeLabel, hintId, resi
 
 const components = { header: { cell: ResizableHeaderCell } }
 
-export default function ResizableVehicleTable({ columns, language, preferences, onPreferencesChange, saveStatus, retry, filters, onFiltersChange, filterVehicles, filterValues, filterScopeKey, toolbarFilters, toolbarActions, toolbarMenu, dataSource, pagination, onChange, locale, remote, ...props }: Props) {
+export default function ResizableVehicleTable({ columns, language, preferences, onPreferencesChange, saveStatus, retry, filters, onFiltersChange, filterVehicles, filterValues, filterScopeKey, toolbarFilters, toolbarActions, toolbarMenu, dataSource, pagination, onChange, remote, ...props }: Props) {
   const [widths, setWidths] = useState<Record<string, number>>({}), [columnsOpen, setColumnsOpen] = useState(false)
   const [openFilter, setOpenFilter] = useState<VehicleFilterColumnId | null>(null)
   const [page, setPage] = useState({ signature: '', current: 1 })
@@ -104,15 +105,10 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
     const width = widths[id] ?? preferences.widths[id] ?? clampColumnWidth(column.width)
     const filterId = id === 'actions' ? null : id
     const options = filterId ? remote ? [...new Set([...(remote.options[filterId] || []), ...(activeFilters[filterId] || [])])].map(key => retainedVehicleFilterValue(filterId, key, language)).sort((a, b) => a.label.localeCompare(b.label, language === 'zh' ? 'zh-CN' : 'en-GB') || a.key.localeCompare(b.key)) : vehicleColumnFilterOptions(filterId, filterVehicles, filterValues, activeFilters[filterId] || [], language) : []
-    const optionLabels = new Map(options.map(option => [option.key, option.label.toLocaleLowerCase()]))
     const columnFilters: ColumnType<BusinessRecord> = filterId ? {
-      filters: options.map(option => ({ value: option.key, text: <span title={option.label}>{option.label}</span> })),
       filteredValue: activeFilters[filterId] || null,
-      // Keep the native menu without cloning our already-string controlled keys.
-      // A fresh key-array reference makes AntD reset unapplied choices on refresh.
-      filterDropdown: null,
-      filterMultiple: true, filterOnClose: false,
-      filterSearch: (input, option) => optionLabels.get(String(option.value))?.includes(input.toLocaleLowerCase()) || false,
+      filterDropdown: dropdown => <VehicleColumnFilter {...dropdown} options={options} columnTitle={column.title} language={language} />,
+      filterOnClose: false,
       filterDropdownProps: {
         open: openFilter === filterId, onOpenChange: open => setOpenFilter(open ? filterId : null),
         destroyOnHidden: true, autoFocus: true, rootClassName: 'vehicle-column-filter-popup',
@@ -180,7 +176,7 @@ export default function ResizableVehicleTable({ columns, language, preferences, 
       <div className="vehicle-table-heading"><h3>{text('vehicleList')}</h3><span className="vehicle-table-count">{remote?.total ?? rows.length}</span></div>
     </div>
     {activeCount > 0 && <Space wrap className="vehicle-column-filter-summary"><span role="status" aria-live="polite">{text('vehicleColumnFiltersActive')}: {activeCount}</span><Button size="small" onClick={() => { setOpenFilter(null); onFiltersChange({}) }}>{text('vehicleColumnFiltersClear')}</Button></Space>}
-    <Table<BusinessRecord> {...props} dataSource={rows} pagination={pagination === false ? false : { ...pagination, current: currentPage, ...(remote ? { total: remote.total } : {}) }} onChange={tableChanged} locale={{ ...locale, filterConfirm: text('vehicleColumnFilterApply'), filterReset: text('vehicleColumnFilterReset'), filterSearchPlaceholder: text('vehicleColumnFilterSearch') }} className="vehicles-table" columns={resizedColumns} components={components} tableLayout="fixed" scroll={{ x: totalWidth }} />
+    <Table<BusinessRecord> {...props} dataSource={rows} pagination={pagination === false ? false : { ...pagination, current: currentPage, ...(remote ? { total: remote.total } : {}) }} onChange={tableChanged} className="vehicles-table" columns={resizedColumns} components={components} tableLayout="fixed" scroll={{ x: totalWidth }} />
     <Modal open={columnsOpen} className="vehicle-column-settings-modal" title={text('vehicleTableColumnsTitle')} onCancel={() => setColumnsOpen(false)} footer={<Button onClick={() => setColumnsOpen(false)}>{text('vehicleTableColumnsClose')}</Button>} width={620} destroyOnHidden>
       <p className="vehicle-column-settings-notice">{text('vehicleTableColumnsNotice')}</p>{status}
       <div className="vehicle-column-settings-toolbar"><h3>{text('vehicleTableShownColumns')}</h3><Button size="small" icon={<RotateCcw size={14} />} disabled={disabled} onClick={() => { setWidths({}); changeLayout(defaultVehicleTablePreferences()) }}>{text('vehicleTableResetColumns')}</Button></div>

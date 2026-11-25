@@ -124,12 +124,32 @@
     max-width: min(360px, calc(100vw - 24px))
 }
 
-.vehicle-column-filter-popup .ant-dropdown-menu {
-    max-height: 280px;
+.vehicle-filter-options {
+    display: grid;
+    padding: 4px;
+    max-height: min(280px, 45vh);
     overflow-y: auto
 }
 
-.vehicle-column-filter-popup .ant-dropdown-menu-title-content {
+.vehicle-filter-options .ant-checkbox-wrapper {
+    min-width: 0;
+    min-height: 40px;
+    align-items: center;
+    padding-inline: 12px;
+    border-radius: 6px
+}
+
+.vehicle-filter-options .ant-checkbox-wrapper-checked {
+    background: var(--selected)
+}
+
+.vehicle-filter-options .ant-checkbox-wrapper:hover,
+.vehicle-filter-options .ant-checkbox-wrapper:focus-within {
+    background: var(--hover)
+}
+
+.vehicle-filter-options .ant-checkbox-label {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap

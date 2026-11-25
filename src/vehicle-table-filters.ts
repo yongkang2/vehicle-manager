@@ -62,6 +62,22 @@ export function vehicleColumnFilterOptions(column: VehicleFilterColumnId, vehicl
   return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, language === 'zh' ? 'zh-CN' : 'en-GB') || left.key.localeCompare(right.key))
 }
 
+export function matchingVehicleFilterOptions(options: readonly VehicleFilterValue[], search: string): readonly VehicleFilterValue[] {
+  const query = search.trim().toLocaleLowerCase()
+  return query ? options.filter(option => option.label.toLocaleLowerCase().includes(query)) : options
+}
+
+export function selectMatchingVehicleFilterValues(selected: readonly string[], matching: readonly VehicleFilterValue[]): string[] {
+  const keys = new Set(selected)
+  for (const option of matching) keys.add(option.key)
+  return [...keys]
+}
+
+export function appliedVehicleFilterKeys(selected: readonly string[], options: readonly VehicleFilterValue[]): string[] {
+  const keys = new Set(selected)
+  return keys.size === options.length && options.every(option => keys.has(option.key)) ? [] : [...keys]
+}
+
 export function matchesVehicleColumnFilters(values: Record<VehicleFilterColumnId, VehicleFilterValue>, filters: VehicleColumnFilters): boolean {
   return Object.entries(filters).every(([column, keys]) => !keys?.length || keys.includes(values[column as VehicleFilterColumnId]?.key))
 }

@@ -37,6 +37,8 @@ The shared folder is not an installation directory. Windows permissions, network
 
 Use the vehicle list and detail views to manage vehicles, components, attachments and history. Enter a change reason where required. DOVE imports retain original workbook bytes; review the preview, vehicle association and optional controller updates before confirming. A report without a VIN requires an explicit association with an existing vehicle. Review conflicts before resolving them.
 
+In a Vehicles column filter, **Select all** beside **Reset** adds every search match to your selection. Leave the search empty to check every value across pages, including **(blank)** when present. Uncheck any exceptions and choose **Apply**. Applying all values or an empty checklist removes that column's restriction. Closing the filter without applying discards your edits.
+
 Pending offline changes remain local until synchronization succeeds. Pausing synchronization keeps pending changes queued; resume explicitly when ready. Team permissions and archived-record restrictions continue to apply.
 
 Report archive shows active and archived reports together. Filter by vehicle model/VIN, or combine space-separated keywords across vehicle identity, project, report name and dates. Select one or more reports to download originals (a ZIP for multiple reports); administrators can archive selected active reports with a reason. Selection persists across pages and clears when filters change. Failed archive items remain selected for retry. Open a report to view its contents or restore an archived report.

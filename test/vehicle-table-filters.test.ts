@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { complianceLevels } from '../shared/business.js'
 import type { BusinessRecord, Fields } from '../shared/business.js'
 import { vehicleColumnIds } from '../shared/vehicle-table.js'
-import { createVehicleFilterValues, findVehicleTableController, matchesVehicleColumnFilters, sortedVehicleReports, vehicleColumnFilterOptions, visibleVehicleColumnFilters } from '../src/vehicle-table-filters.js'
+import { appliedVehicleFilterKeys, createVehicleFilterValues, findVehicleTableController, matchesVehicleColumnFilters, matchingVehicleFilterOptions, selectMatchingVehicleFilterValues, sortedVehicleReports, vehicleColumnFilterOptions, visibleVehicleColumnFilters } from '../src/vehicle-table-filters.js'
 import type { VehicleColumnFilters } from '../src/vehicle-table-filters.js'
 
 const updated = '2026-04-01T12:34:56.000Z'
@@ -201,6 +201,36 @@ test('options use the complete supplied archive-eligible list across pages and d
   assert.equal(filtered.length, 22)
   assert(vehicleColumnFilterOptions('project', cars, values, [], 'en').some(value => value.label === 'Across pages'), 'Options still use the base list, not currently filtered rows')
   assert.deepEqual(vehicleColumnFilterOptions('project', [], values, [], 'en'), [])
+})
+
+test('select all adds search matches once, preserving choices outside the search', () => {
+  const options = [
+    { key: key(), label: '（空白）' }, { key: key('Close ECU'), label: 'Close ECU' },
+    { key: key('Open ECU'), label: 'Open ECU' }, { key: key('testing'), label: '测试中' },
+  ]
+  const draft = [key(), key('Open ECU')]
+  const matching = matchingVehicleFilterOptions(options, ' eCu ')
+  const selected = selectMatchingVehicleFilterValues(draft, matching)
+  assert.deepEqual(selected, [key(), key('Open ECU'), key('Close ECU')])
+  assert.deepEqual(selectMatchingVehicleFilterValues(selected, matching), selected)
+  assert.deepEqual(selectMatchingVehicleFilterValues(selected, matchingVehicleFilterOptions(options, 'no matches')), selected)
+  assert.deepEqual(matchingVehicleFilterOptions(options, '空白'), [options[0]])
+  assert.deepEqual(matchingVehicleFilterOptions(options, 'testing'), [], 'Search uses the displayed label')
+  assert.deepEqual(draft, [key(), key('Open ECU')])
+})
+
+test('selecting all fleet values clears the applied filter; unchecking an exception applies the subset', () => {
+  const cars = Array.from({ length: 23 }, (_, index) => vehicle(String(index), { owner: index === 22 ? 'Bob' : index === 0 ? '' : 'Alice' }))
+  const values = createVehicleFilterValues(cars, 'en')
+  const options = vehicleColumnFilterOptions('owner', cars, values, [], 'en')
+  const all = selectMatchingVehicleFilterValues([], matchingVehicleFilterOptions(options, '  '))
+  assert.deepEqual(new Set(all), new Set([key(), key('Alice'), key('Bob')]))
+  assert.deepEqual(appliedVehicleFilterKeys(all, options), [])
+  const partial = appliedVehicleFilterKeys(all.filter(value => value !== key('Alice')), options)
+  assert.deepEqual(cars.filter(car => matchesVehicleColumnFilters(values.get(car.id)!, { owner: partial })).map(car => car.id), ['0', '22'])
+  const stale = [key(), key('Alice'), key('removed')]
+  assert.deepEqual(appliedVehicleFilterKeys(stale, options), stale, 'A same-sized draft may contain an unavailable choice')
+  assert.deepEqual(appliedVehicleFilterKeys([], options), [])
 })
 
 test('unmatched selections remain available, deduplicate and relabel after language changes or data refreshes', () => {
